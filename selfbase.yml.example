@@ -1,0 +1,151 @@
+# selfbase.yml.example
+# Copy to selfbase.yml and edit before running.
+# All values shown are defaults — override only what you need.
+# Hot-reload supported: most changes apply without restart.
+
+# ── Server ────────────────────────────────────────────────────────────────────
+server:
+  domain: localhost             # Set to your domain for SSL (e.g. selfbase.example.com)
+  gateway_port: 3000
+  studio_port: 4000
+  env: production               # production | development
+
+# ── Admin ─────────────────────────────────────────────────────────────────────
+admin:
+  email: admin@selfbase.local   # Override via ADMIN_EMAIL env var
+  # password is set during install via ADMIN_PASS env var
+  # change via Studio UI after first login
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+auth:
+  jwt_expiry: 7d                # Access token lifetime
+  refresh_expiry: 30d           # Refresh token lifetime
+  oauth:
+    google:
+      enabled: false
+      client_id: ""
+      client_secret: ""
+    github:
+      enabled: false
+      client_id: ""
+      client_secret: ""
+  magic_link:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+    smtp_user: ""
+    smtp_pass: ""
+    from_address: "noreply@selfbase.local"
+
+# ── Local-First Sync ──────────────────────────────────────────────────────────
+sync:
+  version_check_interval_ms: 30000   # How often SDK polls for version changes (ms)
+  etag_algorithm: sha256             # Hash algorithm for version tags
+
+# ── Load Shedding & Priority Queue ────────────────────────────────────────────
+load_shedding:
+  enabled: true
+  shedding_threshold: 0.75     # Activate queue when load_score > 75%
+  idle_threshold: 0.40         # Drain queue when load_score < 40%
+  queue_ttl_seconds: 300       # Drop undelivered requests after 5 min
+  drain_batch_size: 10         # Process N queued requests per drain cycle
+  drain_interval_ms: 10000     # Check for drain opportunity every 10s
+  load_score_window_ms: 5000   # Rolling window for load_score calculation
+
+# ── Table priority defaults ───────────────────────────────────────────────────
+# Override per-table below. 1=critical, 2=high, 3=normal, 4=low
+table_defaults:
+  priority: 3
+
+# Example per-table overrides:
+# tables:
+#   users:           { priority: 1 }
+#   sessions:        { priority: 1 }
+#   notifications:   { priority: 3 }
+#   analytics_logs:  { priority: 4 }
+
+# ── Heartbeat & Monitoring ────────────────────────────────────────────────────
+heartbeat:
+  interval_seconds: 60          # Write one heartbeat row every N seconds
+  degraded_cpu_threshold: 80    # Mark heartbeat as degraded above this CPU %
+  retention_days: 90            # Delete heartbeats older than N days
+  alert_webhook: ""             # POST to this URL on downtime detection
+  alert_email: ""               # Send email on downtime (requires smtp config)
+  alert_cooldown_minutes: 15    # Min time between repeated alerts
+
+# Per-table metrics
+metrics:
+  enabled: true
+  window_minutes: 1             # Aggregate table call counts per N minutes
+  retention_days: 30
+
+# ── AI Layer ──────────────────────────────────────────────────────────────────
+ai:
+  enabled: true
+
+  # LLM providers — add API keys for each provider you want to use
+  providers:
+    anthropic:
+      enabled: false
+      api_key: ""
+      default_model: claude-sonnet-4-6
+    openai:
+      enabled: false
+      api_key: ""
+      default_model: gpt-4o
+    ollama:
+      enabled: false
+      base_url: http://localhost:11434
+      default_model: llama3
+
+  # Semantic cache — reuse LLM responses for similar queries
+  semantic_cache:
+    enabled: true
+    similarity_threshold: 0.95
+    ttl_seconds: 3600
+
+  # Auto-embedding — configure per collection in Studio UI or here
+  embeddings:
+    provider: openai            # openai | anthropic | ollama
+    model: text-embedding-3-small
+    dimensions: 1536
+    batch_size: 100
+
+# ── Ingestion (Pipeline Studio) ───────────────────────────────────────────────
+ingestion:
+  enabled: true
+  max_concurrent_jobs: 5       # Max simultaneous fetch workers
+  default_timeout_ms: 10000    # HTTP request timeout per fetch
+  default_retry_attempts: 3    # Retry failed fetches N times
+  default_retry_delay_ms: 2000 # Wait between retries
+  user_agent: "SelfBase-Ingestion/0.1"
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+storage:
+  provider: minio               # minio | s3 | r2
+  bucket: selfbase
+  max_file_size_mb: 100
+  presign_expiry_seconds: 3600
+  # minio config is set via .env (MINIO_ROOT_USER, MINIO_ROOT_PASSWORD)
+  # for s3/r2 set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in .env
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────────
+rate_limiting:
+  enabled: true
+  window_ms: 60000              # 1 minute window
+  max_requests: 300             # Per IP per window
+  skip_authenticated: false     # Apply limits to authenticated users too
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+cors:
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:4000"
+  # Add your app domains:
+  # - "https://yourapp.com"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: info                   # debug | info | warn | error
+  format: json                  # json | pretty
+  retention_days: 14

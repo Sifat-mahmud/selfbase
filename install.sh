@@ -1,0 +1,255 @@
+#!/bin/bash
+# ─────────────────────────────────────────────────────────────────────────────
+# SelfBase installer — Ubuntu 22.04 / 24.04
+# https://github.com/Sifat-mahmud/selfbase
+#
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/Sifat-mahmud/selfbase/main/install.sh | bash
+#
+# With custom credentials:
+#   curl -fsSL .../install.sh | ADMIN_EMAIL=you@email.com ADMIN_PASS=mypass bash
+#
+# With domain (for SSL):
+#   curl -fsSL .../install.sh | DOMAIN=selfbase.example.com ADMIN_EMAIL=you@email.com bash
+#
+# Re-run safe: pulling latest and restarting services.
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+# ── configuration (override via env vars) ─────────────────────────────────────
+SELFBASE_REPO="${SELFBASE_REPO:-https://github.com/Sifat-mahmud/selfbase}"
+SELFBASE_BRANCH="${SELFBASE_BRANCH:-main}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/selfbase}"
+DATA_DIR="${DATA_DIR:-/var/selfbase}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@selfbase.local}"
+ADMIN_PASS="${ADMIN_PASS:-changeme123}"
+DOMAIN="${DOMAIN:-localhost}"
+
+# ── colors ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'
+YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
+
+info()    { echo -e "${BLUE}[selfbase]${NC} $1"; }
+success() { echo -e "${GREEN}[✓]${NC} $1"; }
+warn()    { echo -e "${YELLOW}[!]${NC} $1"; }
+error()   { echo -e "${RED}[✗]${NC} $1"; exit 1; }
+step()    { echo -e "\n${BOLD}── $1 ──${NC}"; }
+
+# ── preflight ─────────────────────────────────────────────────────────────────
+step "Preflight checks"
+
+[ "$(id -u)" -eq 0 ] || error "Run as root (sudo bash or curl | sudo bash)"
+
+OS=$(lsb_release -si 2>/dev/null || echo "Unknown")
+VER=$(lsb_release -sr 2>/dev/null || echo "0")
+[[ "$OS" == "Ubuntu" ]] || warn "Tested on Ubuntu. Proceeding on $OS $VER — may need manual adjustments."
+
+RAM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+[ "$RAM_MB" -ge 1800 ] || warn "Less than 2GB RAM detected (${RAM_MB}MB). SelfBase recommends 2GB+."
+
+success "Preflight passed"
+
+# ── system dependencies ───────────────────────────────────────────────────────
+step "System dependencies"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq \
+  curl git openssl ufw nginx \
+  ca-certificates gnupg lsb-release
+success "System dependencies installed"
+
+# ── docker ────────────────────────────────────────────────────────────────────
+step "Docker"
+if ! command -v docker &>/dev/null; then
+  info "Installing Docker..."
+  curl -fsSL https://get.docker.com | sh
+  systemctl enable --now docker
+  success "Docker installed"
+else
+  success "Docker already installed ($(docker --version))"
+fi
+
+if ! docker compose version &>/dev/null; then
+  info "Installing Docker Compose plugin..."
+  apt-get install -y -qq docker-compose-plugin
+fi
+success "Docker Compose ready"
+
+# ── clone / update repo ───────────────────────────────────────────────────────
+step "SelfBase repository"
+mkdir -p "$INSTALL_DIR" "$DATA_DIR"/{postgres,redis,minio,uploads}
+
+if [ -d "$INSTALL_DIR/.git" ]; then
+  info "Updating existing installation..."
+  git -C "$INSTALL_DIR" fetch --quiet origin
+  git -C "$INSTALL_DIR" reset --hard "origin/$SELFBASE_BRANCH" --quiet
+  success "Repository updated to latest"
+else
+  info "Cloning SelfBase..."
+  git clone --depth 1 --branch "$SELFBASE_BRANCH" "$SELFBASE_REPO" "$INSTALL_DIR"
+  success "Repository cloned to $INSTALL_DIR"
+fi
+
+cd "$INSTALL_DIR"
+
+# ── generate secrets ──────────────────────────────────────────────────────────
+step "Secrets"
+JWT_SECRET=$(openssl rand -hex 32)
+POSTGRES_PASS=$(openssl rand -hex 16)
+MINIO_SECRET=$(openssl rand -hex 16)
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+success "Secrets generated"
+
+# ── write .env ────────────────────────────────────────────────────────────────
+step "Environment config"
+cat > "$INSTALL_DIR/.env" <<EOF
+# SelfBase .env — generated by install.sh on $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+# Do not commit this file to git.
+
+NODE_ENV=production
+DOMAIN=${DOMAIN}
+
+# Admin
+ADMIN_EMAIL=${ADMIN_EMAIL}
+ADMIN_PASS=${ADMIN_PASS}
+
+# Auth
+JWT_SECRET=${JWT_SECRET}
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
+
+# Postgres
+POSTGRES_USER=selfbase
+POSTGRES_PASS=${POSTGRES_PASS}
+POSTGRES_DB=selfbase
+DATABASE_URL=postgresql://selfbase:${POSTGRES_PASS}@postgres:5432/selfbase
+
+# Redis
+REDIS_URL=redis://redis:6379
+
+# MinIO
+MINIO_ROOT_USER=selfbase
+MINIO_ROOT_PASSWORD=${MINIO_SECRET}
+STORAGE_URL=http://minio:9000
+STORAGE_BUCKET=selfbase
+
+# Ports
+GATEWAY_PORT=3000
+STUDIO_PORT=4000
+REALTIME_PORT=3001
+AUTH_PORT=3002
+STORAGE_PORT=3003
+FUNCTIONS_PORT=3004
+AI_PORT=3005
+MONITOR_PORT=3006
+EOF
+
+# copy example config if not present
+[ -f "$INSTALL_DIR/selfbase.yml" ] || cp "$INSTALL_DIR/selfbase.yml.example" "$INSTALL_DIR/selfbase.yml"
+success ".env and selfbase.yml written"
+
+# ── start database, run migrations ────────────────────────────────────────────
+step "Database"
+docker compose up -d postgres redis
+info "Waiting for Postgres to be ready..."
+until docker compose exec -T postgres pg_isready -U selfbase -d selfbase &>/dev/null; do
+  sleep 2
+done
+success "Postgres ready"
+
+info "Running migrations..."
+docker compose run --rm gateway npm run migrate 2>/dev/null || \
+  info "Migration runner not yet built — skipping (will run on first start)"
+
+# ── seed admin user ───────────────────────────────────────────────────────────
+step "Admin user"
+docker compose run --rm gateway npm run seed -- \
+  --email "$ADMIN_EMAIL" --pass "$ADMIN_PASS" 2>/dev/null || \
+  info "Seed runner not yet built — admin will be created on first start"
+
+# ── start all services ────────────────────────────────────────────────────────
+step "Starting SelfBase"
+docker compose up -d
+success "All services started"
+
+# ── nginx ─────────────────────────────────────────────────────────────────────
+step "Nginx"
+NGINX_CONF="/etc/nginx/sites-available/selfbase"
+cp "$INSTALL_DIR/infra/nginx/selfbase.conf" "$NGINX_CONF" 2>/dev/null || cat > "$NGINX_CONF" <<'NGINXEOF'
+server {
+    listen 80;
+    server_name SELFBASE_DOMAIN;
+
+    # API gateway
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # WebSocket realtime
+    location /realtime/ {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    # Admin Studio
+    location / {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+NGINXEOF
+
+sed -i "s/SELFBASE_DOMAIN/${DOMAIN}/g" "$NGINX_CONF"
+ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/selfbase
+rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+nginx -t && systemctl reload nginx
+success "Nginx configured"
+
+# ── firewall ──────────────────────────────────────────────────────────────────
+step "Firewall"
+ufw allow 22/tcp   comment "SSH"
+ufw allow 80/tcp   comment "HTTP"
+ufw allow 443/tcp  comment "HTTPS"
+ufw --force enable
+success "UFW enabled (22, 80, 443)"
+
+# ── optional: SSL via certbot ─────────────────────────────────────────────────
+if [ "$DOMAIN" != "localhost" ]; then
+  info "Domain detected: $DOMAIN"
+  info "To enable SSL, run:"
+  echo ""
+  echo "  apt-get install -y certbot python3-certbot-nginx"
+  echo "  certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $ADMIN_EMAIL"
+  echo ""
+fi
+
+# ── done ──────────────────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}${BOLD}  SelfBase installed successfully!${NC}"
+echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "  ${BOLD}Admin Studio:${NC}   http://${DOMAIN}:4000"
+echo -e "  ${BOLD}API Gateway:${NC}    http://${DOMAIN}:3000"
+echo -e "  ${BOLD}Admin email:${NC}    ${ADMIN_EMAIL}"
+echo -e "  ${BOLD}Admin pass:${NC}     ${ADMIN_PASS}"
+echo ""
+echo -e "  ${BOLD}Install dir:${NC}    ${INSTALL_DIR}"
+echo -e "  ${BOLD}Data dir:${NC}       ${DATA_DIR}"
+echo ""
+warn  "Change your admin password immediately after first login."
+echo ""
+echo -e "  ${BOLD}Manage services:${NC}"
+echo "    docker compose -f ${INSTALL_DIR}/docker-compose.yml ps"
+echo "    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f"
+echo "    docker compose -f ${INSTALL_DIR}/docker-compose.yml restart"
+echo ""

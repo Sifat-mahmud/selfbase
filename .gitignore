@@ -1,0 +1,32 @@
+# SelfBase .gitignore
+
+# Secrets — never commit
+.env
+selfbase.yml
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docker volumes
+/data/
+
+# Test coverage
+coverage/
+.nyc_output/
