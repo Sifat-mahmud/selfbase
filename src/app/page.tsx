@@ -62,6 +62,7 @@ import { LogsView } from '@/components/admin/logs'
 import { SettingsView } from '@/components/admin/settings'
 import { RealtimeIndicator } from '@/components/admin/realtime-indicator'
 import { NotificationsBell } from '@/components/admin/notifications-bell'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 const navItems: { section: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { section: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -195,6 +196,7 @@ export default function AdminStudio() {
             </div>
             <div className="ml-auto flex items-center gap-2">
               <RealtimeIndicator />
+              <ThemeToggle />
               <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setCommandOpen(true)}>
                 <Command className="h-3 w-3" />
                 <span className="hidden sm:inline">Command</span>

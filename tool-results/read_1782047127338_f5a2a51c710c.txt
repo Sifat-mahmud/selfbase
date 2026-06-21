@@ -1,0 +1,1063 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback } from 'react'
+     4→     4→import { motion } from 'framer-motion'
+     5→     5→import {
+     6→     6→  Database,
+     7→     7→  Plus,
+     8→     8→  Search,
+     9→     9→  MoreHorizontal,
+    10→    10→  Pencil,
+    11→    11→  Trash2,
+    12→    12→  Eye,
+    13→    13→  Columns3,
+    14→    14→  ArrowUpDown,
+    15→    15→  ChevronRight,
+    16→    16→  Shield,
+    17→    17→  Radio,
+    18→    18→  Brain,
+    19→    19→  Copy,
+    20→    20→  Lock,
+    21→    21→  Table as TableIcon,
+    22→    22→  ArrowUpRight,
+    23→    23→  ArrowDownRight,
+    24→    24→  RefreshCw,
+    25→    25→} from 'lucide-react'
+    26→    26→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    27→    27→import { Button } from '@/components/ui/button'
+    28→    28→import { Input } from '@/components/ui/input'
+    29→    29→import { Badge } from '@/components/ui/badge'
+    30→    30→import { Skeleton } from '@/components/ui/skeleton'
+    31→    31→import { Separator } from '@/components/ui/separator'
+    32→    32→import { Textarea } from '@/components/ui/textarea'
+    33→    33→import { Label } from '@/components/ui/label'
+    34→    34→import { Switch } from '@/components/ui/switch'
+    35→    35→import {
+    36→    36→  Table,
+    37→    37→  TableBody,
+    38→    38→  TableCell,
+    39→    39→  TableHead,
+    40→    40→  TableHeader,
+    41→    41→  TableRow,
+    42→    42→} from '@/components/ui/table'
+    43→    43→import {
+    44→    44→  Dialog,
+    45→    45→  DialogContent,
+    46→    46→  DialogDescription,
+    47→    47→  DialogFooter,
+    48→    48→  DialogHeader,
+    49→    49→  DialogTitle,
+    50→    50→  DialogTrigger,
+    51→    51→} from '@/components/ui/dialog'
+    52→    52→import {
+    53→    53→  DropdownMenu,
+    54→    54→  DropdownMenuContent,
+    55→    55→  DropdownMenuItem,
+    56→    56→  DropdownMenuSeparator,
+    57→    57→  DropdownMenuTrigger,
+    58→    58→} from '@/components/ui/dropdown-menu'
+    59→    59→import {
+    60→    60→  Select,
+    61→    61→  SelectContent,
+    62→    62→  SelectItem,
+    63→    63→  SelectTrigger,
+    64→    64→  SelectValue,
+    65→    65→} from '@/components/ui/select'
+    66→    66→import {
+    67→    67→  AlertDialog,
+    68→    68→  AlertDialogAction,
+    69→    69→  AlertDialogCancel,
+    70→    70→  AlertDialogContent,
+    71→    71→  AlertDialogDescription,
+    72→    72→  AlertDialogFooter,
+    73→    73→  AlertDialogHeader,
+    74→    74→  AlertDialogTitle,
+    75→    75→} from '@/components/ui/alert-dialog'
+    76→    76→import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+    77→    77→import { useToast } from '@/hooks/use-toast'
+    78→    78→import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client'
+    79→    79→
+    80→    80→interface ColumnItem {
+    81→    81→  id: string
+    82→    82→  name: string
+    83→    83→  type: string
+    84→    84→  nullable: boolean
+    85→    85→  isPrimaryKey: boolean
+    86→    86→  isUnique: boolean
+    87→    87→  isIndexed: boolean
+    88→    88→  defaultValue: string | null
+    89→    89→  order: number
+    90→    90→}
+    91→    91→
+    92→    92→interface SbTableItem {
+    93→    93→  id: string
+    94→    94→  name: string
+    95→    95→  displayName: string | null
+    96→    96→  description: string | null
+    97→    97→  priority: number
+    98→    98→  rowCount: number
+    99→    99→  isSystem: boolean
+   100→   100→  enableRealtime: boolean
+   101→   101→  enableEmbedding: boolean
+   102→   102→  rlsEnabled: boolean
+   103→   103→  versionHash: string
+   104→   104→  createdAt: string
+   105→   105→  updatedAt?: string
+   106→   106→  columns: ColumnItem[]
+   107→   107→}
+   108→   108→
+   109→   109→interface SbRowItem {
+   110→   110→  id: string
+   111→   111→  tableId: string
+   112→   112→  data: string
+   113→   113→  version: number
+   114→   114→  createdAt: string
+   115→   115→  updatedAt: string
+   116→   116→}
+   117→   117→
+   118→   118→const priorityColors: Record<number, string> = {
+   119→   119→  1: 'bg-red-500/10 text-red-600 border-red-200',
+   120→   120→  2: 'bg-amber-500/10 text-amber-600 border-amber-200',
+   121→   121→  3: 'bg-blue-500/10 text-blue-600 border-blue-200',
+   122→   122→  4: 'bg-slate-400/10 text-slate-600 border-slate-200',
+   123→   123→}
+   124→   124→
+   125→   125→const priorityLabels: Record<number, string> = {
+   126→   126→  1: 'P1 · Critical',
+   127→   127→  2: 'P2 · Normal',
+   128→   128→  3: 'P3 · Low',
+   129→   129→  4: 'P4 · Deferred',
+   130→   130→}
+   131→   131→
+   132→   132→const columnTypes = ['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON']
+   133→   133→
+   134→   134→const emptyTrend = (rowCount: number) => {
+   135→   135→  // Demo trend derived from row count for visual interest.
+   136→   136→  // Real trend would require an API endpoint.
+   137→   137→  if (rowCount === 0) return { delta: 0, direction: 'none' as const }
+   138→   138→  const delta = Math.round((rowCount % 13) - 5)
+   139→   139→  return { delta: Math.abs(delta), direction: delta >= 0 ? ('up' as const) : ('down' as const) }
+   140→   140→}
+   141→   141→
+   142→   142→export function TablesView() {
+   143→   143→  const { toast } = useToast()
+   144→   144→  const [tables, setTables] = useState<SbTableItem[]>([])
+   145→   145→  const [loading, setLoading] = useState(true)
+   146→   146→  const [search, setSearch] = useState('')
+   147→   147→  const [selectedTable, setSelectedTable] = useState<SbTableItem | null>(null)
+   148→   148→  const [showCreateDialog, setShowCreateDialog] = useState(false)
+   149→   149→  const [showColumnDialog, setShowColumnDialog] = useState(false)
+   150→   150→  const [deleteTarget, setDeleteTarget] = useState<SbTableItem | null>(null)
+   151→   151→  const [showDataDialog, setShowDataDialog] = useState(false)
+   152→   152→  const [dataRows, setDataRows] = useState<SbRowItem[]>([])
+   153→   153→  const [dataLoading, setDataLoading] = useState(false)
+   154→   154→
+   155→   155→  // New table form
+   156→   156→  const [newTableName, setNewTableName] = useState('')
+   157→   157→  const [newTableDesc, setNewTableDesc] = useState('')
+   158→   158→  const [newTablePriority, setNewTablePriority] = useState(2)
+   159→   159→  const [newColumns, setNewColumns] = useState<ColumnItem[]>([
+   160→   160→    { id: 'c-init', name: 'id', type: 'TEXT', nullable: false, isPrimaryKey: true, isUnique: true, isIndexed: true, defaultValue: null, order: 0 },
+   161→   161→  ])
+   162→   162→
+   163→   163→  // New column form
+   164→   164→  const [newColumnName, setNewColumnName] = useState('')
+   165→   165→  const [newColumnType, setNewColumnType] = useState('TEXT')
+   166→   166→
+   167→   167→  const [sortField, setSortField] = useState<'name' | 'rowCount' | 'priority'>('name')
+   168→   168→  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+   169→   169→
+   170→   170→  const loadTables = useCallback(async () => {
+   171→   171→    setLoading(true)
+   172→   172→    try {
+   173→   173→      const data = await apiGet<SbTableItem[]>('/api/tables')
+   174→   174→      setTables(Array.isArray(data) ? data : [])
+   175→   175→    } catch (err) {
+   176→   176→      toast({
+   177→   177→        title: 'Failed to load tables',
+   178→   178→        description: err instanceof Error ? err.message : 'Unknown error',
+   179→   179→        variant: 'destructive',
+   180→   180→      })
+   181→   181→    } finally {
+   182→   182→      setLoading(false)
+   183→   183→    }
+   184→   184→  }, [toast])
+   185→   185→
+   186→   186→  useEffect(() => {
+   187→   187→    loadTables()
+   188→   188→  }, [loadTables])
+   189→   189→
+   190→   190→  const filteredTables = tables
+   191→   191→    .filter(
+   192→   192→      (t) =>
+   193→   193→        t.name.toLowerCase().includes(search.toLowerCase()) ||
+   194→   194→        (t.displayName ?? '').toLowerCase().includes(search.toLowerCase()),
+   195→   195→    )
+   196→   196→    .sort((a, b) => {
+   197→   197→      const dir = sortDir === 'asc' ? 1 : -1
+   198→   198→      if (sortField === 'name') return a.name.localeCompare(b.name) * dir
+   199→   199→      if (sortField === 'rowCount') return (a.rowCount - b.rowCount) * dir
+   200→   200→      return (a.priority - b.priority) * dir
+   201→   201→    })
+   202→   202→
+   203→   203→  const handleSort = (field: 'name' | 'rowCount' | 'priority') => {
+   204→   204→    if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+   205→   205→    else {
+   206→   206→      setSortField(field)
+   207→   207→      setSortDir('asc')
+   208→   208→    }
+   209→   209→  }
+   210→   210→
+   211→   211→  const handleCreateTable = async () => {
+   212→   212→    if (!newTableName.trim()) {
+   213→   213→      toast({ title: 'Name required', variant: 'destructive' })
+   214→   214→      return
+   215→   215→    }
+   216→   216→    try {
+   217→   217→      const created = await apiPost<SbTableItem>('/api/tables', {
+   218→   218→        name: newTableName.trim().toLowerCase().replace(/\s+/g, '_'),
+   219→   219→        displayName: newTableName.trim(),
+   220→   220→        description: newTableDesc || null,
+   221→   221→        priority: newTablePriority,
+   222→   222→      })
+   223→   223→      setTables((prev) => [created, ...prev])
+   224→   224→      setShowCreateDialog(false)
+   225→   225→      setNewTableName('')
+   226→   226→      setNewTableDesc('')
+   227→   227→      setNewTablePriority(2)
+   228→   228→      setNewColumns([
+   229→   229→        { id: 'c-init', name: 'id', type: 'TEXT', nullable: false, isPrimaryKey: true, isUnique: true, isIndexed: true, defaultValue: null, order: 0 },
+   230→   230→      ])
+   231→   231→      toast({
+   232→   232→        title: 'Table created',
+   233→   233→        description: `"${created.name}" has been created successfully.`,
+   234→   234→      })
+   235→   235→    } catch (err) {
+   236→   236→      toast({
+   237→   237→        title: 'Failed to create table',
+   238→   238→        description: err instanceof Error ? err.message : 'Unknown error',
+   239→   239→        variant: 'destructive',
+   240→   240→      })
+   241→   241→    }
+   242→   242→  }
+   243→   243→
+   244→   244→  const handleDeleteTable = async (table: SbTableItem) => {
+   245→   245→    try {
+   246→   246→      await apiDelete(`/api/tables/${table.id}`)
+   247→   247→      setTables((prev) => prev.filter((t) => t.id !== table.id))
+   248→   248→      if (selectedTable?.id === table.id) setSelectedTable(null)
+   249→   249→      toast({
+   250→   250→        title: 'Table deleted',
+   251→   251→        description: `"${table.name}" has been removed.`,
+   252→   252→        variant: 'destructive',
+   253→   253→      })
+   254→   254→    } catch (err) {
+   255→   255→      toast({
+   256→   256→        title: 'Failed to delete table',
+   257→   257→        description: err instanceof Error ? err.message : 'Unknown error',
+   258→   258→        variant: 'destructive',
+   259→   259→      })
+   260→   260→    } finally {
+   261→   261→      setDeleteTarget(null)
+   262→   262→    }
+   263→   263→  }
+   264→   264→
+   265→   265→  const [addColumnLoading, setAddColumnLoading] = useState(false)
+   266→   266→
+   267→   267→  const handleAddColumn = async () => {
+   268→   268→    if (!selectedTable || !newColumnName.trim()) return
+   269→   269→    setAddColumnLoading(true)
+   270→   270→    try {
+   271→   271→      const created = await apiPost<ColumnItem>(`/api/tables/${selectedTable.id}/columns`, {
+   272→   272→        name: newColumnName.trim().toLowerCase().replace(/\s+/g, '_'),
+   273→   273→        type: newColumnType,
+   274→   274→        nullable: true,
+   275→   275→        isPrimaryKey: false,
+   276→   276→        isUnique: false,
+   277→   277→        isIndexed: false,
+   278→   278→        defaultValue: null,
+   279→   279→        order: selectedTable.columns.length,
+   280→   280→      })
+   281→   281→      const updatedCol = { ...created, id: created.id || `c${Date.now()}` }
+   282→   282→      setTables((prev) =>
+   283→   283→        prev.map((t) => (t.id === selectedTable.id ? { ...t, columns: [...t.columns, updatedCol] } : t)),
+   284→   284→      )
+   285→   285→      setSelectedTable((prev) => (prev ? { ...prev, columns: [...prev.columns, updatedCol] } : prev))
+   286→   286→      setShowColumnDialog(false)
+   287→   287→      setNewColumnName('')
+   288→   288→      setNewColumnType('TEXT')
+   289→   289→      toast({ title: 'Column added', description: `"${updatedCol.name}" added to ${selectedTable.name}` })
+   290→   290→    } catch (err) {
+   291→   291→      toast({
+   292→   292→        title: 'Failed to add column',
+   293→   293→        description: err instanceof Error ? err.message : 'Unknown error',
+   294→   294→        variant: 'destructive',
+   295→   295→      })
+   296→   296→    } finally {
+   297→   297→      setAddColumnLoading(false)
+   298→   298→    }
+   299→   299→  }
+   300→   300→
+   301→   301→  const handleViewData = async (table: SbTableItem) => {
+   302→   302→    setShowDataDialog(true)
+   303→   303→    setDataLoading(true)
+   304→   304→    try {
+   305→   305→      const rows = await apiGet<SbRowItem[]>(`/api/tables/${table.id}/rows`)
+   306→   306→      setDataRows(Array.isArray(rows) ? rows : [])
+   307→   307→    } catch (err) {
+   308→   308→      toast({
+   309→   309→        title: 'Failed to load rows',
+   310→   310→        description: err instanceof Error ? err.message : 'Unknown error',
+   311→   311→        variant: 'destructive',
+   312→   312→      })
+   313→   313→      setDataRows([])
+   314→   314→    } finally {
+   315→   315→      setDataLoading(false)
+   316→   316→    }
+   317→   317→  }
+   318→   318→
+   319→   319→  if (loading) {
+   320→   320→    return (
+   321→   321→      <div className="space-y-6">
+   322→   322→        <div className="flex justify-between">
+   323→   323→          <Skeleton className="h-8 w-40" />
+   324→   324→          <Skeleton className="h-9 w-32" />
+   325→   325→        </div>
+   326→   326→        <div className="grid gap-4 md:grid-cols-3">
+   327→   327→          {Array.from({ length: 6 }).map((_, i) => (
+   328→   328→            <Card key={i}>
+   329→   329→              <CardContent className="p-4">
+   330→   330→                <Skeleton className="h-20 w-full" />
+   331→   331→              </CardContent>
+   332→   332→            </Card>
+   333→   333→          ))}
+   334→   334→        </div>
+   335→   335→      </div>
+   336→   336→    )
+   337→   337→  }
+   338→   338→
+   339→   339→  // Detail view
+   340→   340→  if (selectedTable) {
+   341→   341→    return (
+   342→   342→      <motion.div
+   343→   343→        initial={{ opacity: 0, y: 8 }}
+   344→   344→        animate={{ opacity: 1, y: 0 }}
+   345→   345→        transition={{ duration: 0.2 }}
+   346→   346→        className="space-y-6"
+   347→   347→      >
+   348→   348→        <div className="flex items-center gap-2 flex-wrap">
+   349→   349→          <Button variant="ghost" size="sm" onClick={() => setSelectedTable(null)}>
+   350→   350→            <ChevronRight className="h-4 w-4 rotate-180" />
+   351→   351→            Back
+   352→   352→          </Button>
+   353→   353→          <Separator orientation="vertical" className="h-6" />
+   354→   354→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white">
+   355→   355→            <Database className="h-5 w-5" />
+   356→   356→          </div>
+   357→   357→          <h1 className="text-2xl font-bold tracking-tight">
+   358→   358→            {selectedTable.displayName || selectedTable.name}
+   359→   359→          </h1>
+   360→   360→          <Badge variant="outline" className="ml-2 font-mono text-xs">
+   361→   361→            {selectedTable.name}
+   362→   362→          </Badge>
+   363→   363→          {selectedTable.isSystem && (
+   364→   364→            <Badge variant="secondary" className="gap-1">
+   365→   365→              <Lock className="h-3 w-3" /> System
+   366→   366→            </Badge>
+   367→   367→          )}
+   368→   368→          <Badge variant="outline" className={priorityColors[selectedTable.priority]}>
+   369→   369→            {priorityLabels[selectedTable.priority]}
+   370→   370→          </Badge>
+   371→   371→          <div className="ml-auto flex gap-2">
+   372→   372→            <Button variant="outline" size="sm" onClick={() => handleViewData(selectedTable)}>
+   373→   373→              <Eye className="mr-1 h-3.5 w-3.5" /> View Data
+   374→   374→            </Button>
+   375→   375→            <Button
+   376→   376→              variant="outline"
+   377→   377→              size="sm"
+   378→   378→              onClick={() => {
+   379→   379→                void loadTables()
+   380→   380→                const fresh = tables.find((t) => t.id === selectedTable.id)
+   381→   381→                if (fresh) setSelectedTable(fresh)
+   382→   382→              }}
+   383→   383→            >
+   384→   384→              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+   385→   385→            </Button>
+   386→   386→            <Button
+   387→   387→              variant="outline"
+   388→   388→              size="sm"
+   389→   389→              className="text-destructive hover:bg-destructive/10"
+   390→   390→              onClick={() => setDeleteTarget(selectedTable)}
+   391→   391→            >
+   392→   392→              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Table
+   393→   393→            </Button>
+   394→   394→          </div>
+   395→   395→        </div>
+   396→   396→
+   397→   397→        <div className="grid gap-4 md:grid-cols-4">
+   398→   398→          <Card>
+   399→   399→            <CardContent className="pt-4">
+   400→   400→              <div className="text-sm text-muted-foreground">Rows</div>
+   401→   401→              <div className="text-2xl font-bold">{selectedTable.rowCount.toLocaleString()}</div>
+   402→   402→            </CardContent>
+   403→   403→          </Card>
+   404→   404→          <Card>
+   405→   405→            <CardContent className="pt-4">
+   406→   406→              <div className="text-sm text-muted-foreground">Columns</div>
+   407→   407→              <div className="text-2xl font-bold">{selectedTable.columns.length}</div>
+   408→   408→            </CardContent>
+   409→   409→          </Card>
+   410→   410→          <Card>
+   411→   411→            <CardContent className="pt-4">
+   412→   412→              <div className="text-sm text-muted-foreground">Version</div>
+   413→   413→              <div className="text-lg font-bold font-mono">{selectedTable.versionHash}</div>
+   414→   414→            </CardContent>
+   415→   415→          </Card>
+   416→   416→          <Card>
+   417→   417→            <CardContent className="pt-4">
+   418→   418→              <div className="text-sm text-muted-foreground">Priority</div>
+   419→   419→              <div className="text-lg font-bold">{priorityLabels[selectedTable.priority]}</div>
+   420→   420→            </CardContent>
+   421→   421→          </Card>
+   422→   422→        </div>
+   423→   423→
+   424→   424→        <Card>
+   425→   425→          <CardHeader>
+   426→   426→            <CardTitle className="text-base bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   427→   427→              Features
+   428→   428→            </CardTitle>
+   429→   429→            <CardDescription>Table-level feature flags</CardDescription>
+   430→   430→          </CardHeader>
+   431→   431→          <CardContent>
+   432→   432→            <div className="flex flex-wrap gap-6">
+   433→   433→              <div className="flex items-center gap-2">
+   434→   434→                <Switch checked={selectedTable.enableRealtime} />
+   435→   435→                <Label className="flex items-center gap-1">
+   436→   436→                  <Radio className="h-3.5 w-3.5 text-emerald-600" /> Realtime
+   437→   437→                </Label>
+   438→   438→              </div>
+   439→   439→              <div className="flex items-center gap-2">
+   440→   440→                <Switch checked={selectedTable.enableEmbedding} />
+   441→   441→                <Label className="flex items-center gap-1">
+   442→   442→                  <Brain className="h-3.5 w-3.5 text-emerald-600" /> Embeddings
+   443→   443→                </Label>
+   444→   444→              </div>
+   445→   445→              <div className="flex items-center gap-2">
+   446→   446→                <Switch checked={selectedTable.rlsEnabled} />
+   447→   447→                <Label className="flex items-center gap-1">
+   448→   448→                  <Shield className="h-3.5 w-3.5 text-emerald-600" /> Row-Level Security
+   449→   449→                </Label>
+   450→   450→              </div>
+   451→   451→            </div>
+   452→   452→          </CardContent>
+   453→   453→        </Card>
+   454→   454→
+   455→   455→        <Card>
+   456→   456→          <CardHeader className="flex flex-row items-center justify-between">
+   457→   457→            <div>
+   458→   458→              <CardTitle className="text-base">Columns</CardTitle>
+   459→   459→              <CardDescription>Schema definition for this table</CardDescription>
+   460→   460→            </div>
+   461→   461→            <Dialog open={showColumnDialog} onOpenChange={setShowColumnDialog}>
+   462→   462→              <DialogTrigger asChild>
+   463→   463→                <Button size="sm">
+   464→   464→                  <Plus className="mr-1 h-4 w-4" /> Add Column
+   465→   465→                </Button>
+   466→   466→              </DialogTrigger>
+   467→   467→              <DialogContent>
+   468→   468→                <DialogHeader>
+   469→   469→                  <DialogTitle>Add Column</DialogTitle>
+   470→   470→                  <DialogDescription>Add a new column to {selectedTable.name}</DialogDescription>
+   471→   471→                </DialogHeader>
+   472→   472→                <div className="space-y-4 py-2">
+   473→   473→                  <div className="space-y-2">
+   474→   474→                    <Label>Column Name</Label>
+   475→   475→                    <Input
+   476→   476→                      value={newColumnName}
+   477→   477→                      onChange={(e) => setNewColumnName(e.target.value)}
+   478→   478→                      placeholder="column_name"
+   479→   479→                    />
+   480→   480→                  </div>
+   481→   481→                  <div className="space-y-2">
+   482→   482→                    <Label>Type</Label>
+   483→   483→                    <Select value={newColumnType} onValueChange={setNewColumnType}>
+   484→   484→                      <SelectTrigger>
+   485→   485→                        <SelectValue />
+   486→   486→                      </SelectTrigger>
+   487→   487→                      <SelectContent>
+   488→   488→                        {columnTypes.map((t) => (
+   489→   489→                          <SelectItem key={t} value={t}>
+   490→   490→                            {t}
+   491→   491→                          </SelectItem>
+   492→   492→                        ))}
+   493→   493→                      </SelectContent>
+   494→   494→                    </Select>
+   495→   495→                  </div>
+   496→   496→                </div>
+   497→   497→                <DialogFooter>
+   498→   498→                  <Button variant="outline" onClick={() => setShowColumnDialog(false)}>
+   499→   499→                    Cancel
+   500→   500→                  </Button>
+   501→   501→                  <Button onClick={() => void handleAddColumn()} disabled={addColumnLoading}>Add Column</Button>
+   502→   502→                </DialogFooter>
+   503→   503→              </DialogContent>
+   504→   504→            </Dialog>
+   505→   505→          </CardHeader>
+   506→   506→          <CardContent>
+   507→   507→            {selectedTable.columns.length === 0 ? (
+   508→   508→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   509→   509→                <Columns3 className="h-10 w-10 mb-2 opacity-40" />
+   510→   510→                <p className="text-sm">No columns defined yet</p>
+   511→   511→                <Button variant="outline" size="sm" className="mt-2" onClick={() => setShowColumnDialog(true)}>
+   512→   512→                  <Plus className="mr-1 h-3.5 w-3.5" /> Add first column
+   513→   513→                </Button>
+   514→   514→              </div>
+   515→   515→            ) : (
+   516→   516→              <Table>
+   517→   517→                <TableHeader>
+   518→   518→                  <TableRow>
+   519→   519→                    <TableHead className="w-8">#</TableHead>
+   520→   520→                    <TableHead>Name</TableHead>
+   521→   521→                    <TableHead>Type</TableHead>
+   522→   522→                    <TableHead>Nullable</TableHead>
+   523→   523→                    <TableHead>Primary Key</TableHead>
+   524→   524→                    <TableHead>Unique</TableHead>
+   525→   525→                    <TableHead>Indexed</TableHead>
+   526→   526→                    <TableHead>Default</TableHead>
+   527→   527→                    <TableHead className="w-8" />
+   528→   528→                  </TableRow>
+   529→   529→                </TableHeader>
+   530→   530→                <TableBody>
+   531→   531→                  {selectedTable.columns.map((col, i) => (
+   532→   532→                    <TableRow key={col.id} className="hover:bg-muted/40 transition-colors">
+   533→   533→                      <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+   534→   534→                      <TableCell className="font-mono font-medium">{col.name}</TableCell>
+   535→   535→                      <TableCell>
+   536→   536→                        <Badge variant="outline" className="font-mono text-xs">
+   537→   537→                          {col.type}
+   538→   538→                        </Badge>
+   539→   539→                      </TableCell>
+   540→   540→                      <TableCell>
+   541→   541→                        {col.nullable ? (
+   542→   542→                          <span className="text-emerald-500">✓</span>
+   543→   543→                        ) : (
+   544→   544→                          <span className="text-muted-foreground">—</span>
+   545→   545→                        )}
+   546→   546→                      </TableCell>
+   547→   547→                      <TableCell>{col.isPrimaryKey ? <span>🔑</span> : <span className="text-muted-foreground">—</span>}</TableCell>
+   548→   548→                      <TableCell>
+   549→   549→                        {col.isUnique ? (
+   550→   550→                          <span className="text-emerald-500">✓</span>
+   551→   551→                        ) : (
+   552→   552→                          <span className="text-muted-foreground">—</span>
+   553→   553→                        )}
+   554→   554→                      </TableCell>
+   555→   555→                      <TableCell>
+   556→   556→                        {col.isIndexed ? (
+   557→   557→                          <span className="text-emerald-500">✓</span>
+   558→   558→                        ) : (
+   559→   559→                          <span className="text-muted-foreground">—</span>
+   560→   560→                        )}
+   561→   561→                      </TableCell>
+   562→   562→                      <TableCell className="font-mono text-xs text-muted-foreground">
+   563→   563→                        {col.defaultValue ?? '—'}
+   564→   564→                      </TableCell>
+   565→   565→                      <TableCell>
+   566→   566→                        <DropdownMenu>
+   567→   567→                          <DropdownMenuTrigger asChild>
+   568→   568→                            <Button variant="ghost" size="icon" className="h-7 w-7">
+   569→   569→                              <MoreHorizontal className="h-3.5 w-3.5" />
+   570→   570→                            </Button>
+   571→   571→                          </DropdownMenuTrigger>
+   572→   572→                          <DropdownMenuContent align="end">
+   573→   573→                            <DropdownMenuItem>
+   574→   574→                              <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+   575→   575→                            </DropdownMenuItem>
+   576→   576→                            <DropdownMenuItem>
+   577→   577→                              <Copy className="mr-2 h-3.5 w-3.5" /> Duplicate
+   578→   578→                            </DropdownMenuItem>
+   579→   579→                            <DropdownMenuSeparator />
+   580→   580→                            <DropdownMenuItem className="text-destructive">
+   581→   581→                              <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+   582→   582→                            </DropdownMenuItem>
+   583→   583→                          </DropdownMenuContent>
+   584→   584→                        </DropdownMenu>
+   585→   585→                      </TableCell>
+   586→   586→                    </TableRow>
+   587→   587→                  ))}
+   588→   588→                </TableBody>
+   589→   589→              </Table>
+   590→   590→            )}
+   591→   591→          </CardContent>
+   592→   592→        </Card>
+   593→   593→
+   594→   594→        {/* View Data Dialog */}
+   595→   595→        <Dialog open={showDataDialog} onOpenChange={setShowDataDialog}>
+   596→   596→          <DialogContent className="max-w-5xl">
+   597→   597→            <DialogHeader>
+   598→   598→              <DialogTitle className="flex items-center gap-2">
+   599→   599→                <TableIcon className="h-4 w-4 text-emerald-600" />
+   600→   600→                {selectedTable.name} — Rows
+   601→   601→              </DialogTitle>
+   602→   602→              <DialogDescription>
+   603→   603→                Showing latest {dataRows.length} rows (max 100). Click a row to inspect.
+   604→   604→              </DialogDescription>
+   605→   605→            </DialogHeader>
+   606→   606→            <div className="max-h-[60vh] overflow-auto rounded-md border">
+   607→   607→              {dataLoading ? (
+   608→   608→                <div className="space-y-2 p-4">
+   609→   609→                  {Array.from({ length: 5 }).map((_, i) => (
+   610→   610→                    <Skeleton key={i} className="h-8 w-full" />
+   611→   611→                  ))}
+   612→   612→                </div>
+   613→   613→              ) : dataRows.length === 0 ? (
+   614→   614→                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+   615→   615→                  <Database className="h-10 w-10 mb-2 opacity-40" />
+   616→   616→                  <p className="text-sm">No rows yet</p>
+   617→   617→                  <p className="text-xs">Insert data via the data API to populate this table.</p>
+   618→   618→                </div>
+   619→   619→              ) : (
+   620→   620→                <Table>
+   621→   621→                  <TableHeader className="sticky top-0 bg-background">
+   622→   622→                    <TableRow>
+   623→   623→                      <TableHead className="w-12">#</TableHead>
+   624→   624→                      {selectedTable.columns.map((c) => (
+   625→   625→                        <TableHead key={c.id} className="font-mono text-xs">
+   626→   626→                          {c.name}
+   627→   627→                        </TableHead>
+   628→   628→                      ))}
+   629→   629→                      <TableHead>Version</TableHead>
+   630→   630→                    </TableRow>
+   631→   631→                  </TableHeader>
+   632→   632→                  <TableBody>
+   633→   633→                    {dataRows.map((row, i) => {
+   634→   634→                      let parsed: Record<string, unknown> = {}
+   635→   635→                      try {
+   636→   636→                        parsed = JSON.parse(row.data)
+   637→   637→                      } catch {
+   638→   638→                        parsed = {}
+   639→   639→                      }
+   640→   640→                      return (
+   641→   641→                        <TableRow key={row.id} className="hover:bg-muted/40">
+   642→   642→                          <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+   643→   643→                          {selectedTable.columns.map((c) => (
+   644→   644→                            <TableCell key={c.id} className="font-mono text-xs">
+   645→   645→                              {parsed[c.name] !== undefined && parsed[c.name] !== null
+   646→   646→                                ? String(parsed[c.name]).slice(0, 60)
+   647→   647→                                : <span className="text-muted-foreground">—</span>}
+   648→   648→                            </TableCell>
+   649→   649→                          ))}
+   650→   650→                          <TableCell>
+   651→   651→                            <Badge variant="outline" className="text-xs">
+   652→   652→                              v{row.version}
+   653→   653→                            </Badge>
+   654→   654→                          </TableCell>
+   655→   655→                        </TableRow>
+   656→   656→                      )
+   657→   657→                    })}
+   658→   658→                  </TableBody>
+   659→   659→                </Table>
+   660→   660→              )}
+   661→   661→            </div>
+   662→   662→          </DialogContent>
+   663→   663→        </Dialog>
+   664→   664→
+   665→   665→        {/* Delete Confirmation */}
+   666→   666→        <AlertDialog
+   667→   667→          open={!!deleteTarget}
+   668→   668→          onOpenChange={(open) => !open && setDeleteTarget(null)}
+   669→   669→        >
+   670→   670→          <AlertDialogContent>
+   671→   671→            <AlertDialogHeader>
+   672→   672→              <AlertDialogTitle>Delete table "{deleteTarget?.name}"?</AlertDialogTitle>
+   673→   673→              <AlertDialogDescription>
+   674→   674→                This action cannot be undone. All columns and rows in this table will be permanently
+   675→   675→                removed from your SelfBase instance.
+   676→   676→              </AlertDialogDescription>
+   677→   677→            </AlertDialogHeader>
+   678→   678→            <AlertDialogFooter>
+   679→   679→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+   680→   680→              <AlertDialogAction
+   681→   681→                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+   682→   682→                onClick={() => deleteTarget && handleDeleteTable(deleteTarget)}
+   683→   683→              >
+   684→   684→                Delete Table
+   685→   685→              </AlertDialogAction>
+   686→   686→            </AlertDialogFooter>
+   687→   687→          </AlertDialogContent>
+   688→   688→        </AlertDialog>
+   689→   689→      </motion.div>
+   690→   690→    )
+   691→   691→  }
+   692→   692→
+   693→   693→  // List view
+   694→   694→  return (
+   695→   695→    <motion.div
+   696→   696→      initial={{ opacity: 0, y: 8 }}
+   697→   697→      animate={{ opacity: 1, y: 0 }}
+   698→   698→      transition={{ duration: 0.2 }}
+   699→   699→      className="space-y-6"
+   700→   700→    >
+   701→   701→      <div className="flex items-center justify-between flex-wrap gap-2">
+   702→   702→        <div>
+   703→   703→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   704→   704→            Tables
+   705→   705→          </h1>
+   706→   706→          <p className="text-muted-foreground">Manage your database schema and data · {tables.length} table{tables.length !== 1 ? 's' : ''}</p>
+   707→   707→        </div>
+   708→   708→        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+   709→   709→          <DialogTrigger asChild>
+   710→   710→            <Button>
+   711→   711→              <Plus className="mr-1 h-4 w-4" /> New Table
+   712→   712→            </Button>
+   713→   713→          </DialogTrigger>
+   714→   714→          <DialogContent className="max-w-2xl">
+   715→   715→            <DialogHeader>
+   716→   716→              <DialogTitle>Create Table</DialogTitle>
+   717→   717→              <DialogDescription>Define a new table in your SelfBase schema</DialogDescription>
+   718→   718→            </DialogHeader>
+   719→   719→            <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
+   720→   720→              <div className="space-y-2">
+   721→   721→                <Label>Table Name</Label>
+   722→   722→                <Input
+   723→   723→                  value={newTableName}
+   724→   724→                  onChange={(e) => setNewTableName(e.target.value)}
+   725→   725→                  placeholder="my_table"
+   726→   726→                />
+   727→   727→              </div>
+   728→   728→              <div className="space-y-2">
+   729→   729→                <Label>Description</Label>
+   730→   730→                <Textarea
+   731→   731→                  value={newTableDesc}
+   732→   732→                  onChange={(e) => setNewTableDesc(e.target.value)}
+   733→   733→                  placeholder="What is this table for?"
+   734→   734→                />
+   735→   735→              </div>
+   736→   736→              <div className="space-y-2">
+   737→   737→                <Label>Priority</Label>
+   738→   738→                <Select
+   739→   739→                  value={String(newTablePriority)}
+   740→   740→                  onValueChange={(v) => setNewTablePriority(Number(v))}
+   741→   741→                >
+   742→   742→                  <SelectTrigger>
+   743→   743→                    <SelectValue />
+   744→   744→                  </SelectTrigger>
+   745→   745→                  <SelectContent>
+   746→   746→                    <SelectItem value="1">P1 — Critical</SelectItem>
+   747→   747→                    <SelectItem value="2">P2 — Normal</SelectItem>
+   748→   748→                    <SelectItem value="3">P3 — Low</SelectItem>
+   749→   749→                    <SelectItem value="4">P4 — Deferred</SelectItem>
+   750→   750→                  </SelectContent>
+   751→   751→                </Select>
+   752→   752→              </div>
+   753→   753→              <div className="space-y-2">
+   754→   754→                <div className="flex items-center justify-between">
+   755→   755→                  <Label>Columns</Label>
+   756→   756→                  <Button
+   757→   757→                    type="button"
+   758→   758→                    variant="outline"
+   759→   759→                    size="sm"
+   760→   760→                    onClick={() =>
+   761→   761→                      setNewColumns((prev) => [
+   762→   762→                        ...prev,
+   763→   763→                        {
+   764→   764→                          id: `c-${Date.now()}`,
+   765→   765→                          name: `col_${prev.length}`,
+   766→   766→                          type: 'TEXT',
+   767→   767→                          nullable: true,
+   768→   768→                          isPrimaryKey: false,
+   769→   769→                          isUnique: false,
+   770→   770→                          isIndexed: false,
+   771→   771→                          defaultValue: null,
+   772→   772→                          order: prev.length,
+   773→   773→                        },
+   774→   774→                      ])
+   775→   775→                    }
+   776→   776→                  >
+   777→   777→                    <Plus className="mr-1 h-3.5 w-3.5" /> Add
+   778→   778→                  </Button>
+   779→   779→                </div>
+   780→   780→                <div className="rounded-md border">
+   781→   781→                  <Table>
+   782→   782→                    <TableHeader>
+   783→   783→                      <TableRow>
+   784→   784→                        <TableHead>Name</TableHead>
+   785→   785→                        <TableHead>Type</TableHead>
+   786→   786→                        <TableHead className="w-8" />
+   787→   787→                      </TableRow>
+   788→   788→                    </TableHeader>
+   789→   789→                    <TableBody>
+   790→   790→                      {newColumns.map((col, i) => (
+   791→   791→                        <TableRow key={col.id}>
+   792→   792→                          <TableCell>
+   793→   793→                            <Input
+   794→   794→                              value={col.name}
+   795→   795→                              onChange={(e) => {
+   796→   796→                                const v = e.target.value
+   797→   797→                                setNewColumns((prev) =>
+   798→   798→                                  prev.map((c, idx) => (idx === i ? { ...c, name: v } : c)),
+   799→   799→                                )
+   800→   800→                              }}
+   801→   801→                              className="h-8 font-mono text-xs"
+   802→   802→                            />
+   803→   803→                          </TableCell>
+   804→   804→                          <TableCell>
+   805→   805→                            <Select
+   806→   806→                              value={col.type}
+   807→   807→                              onValueChange={(v) =>
+   808→   808→                                setNewColumns((prev) =>
+   809→   809→                                  prev.map((c, idx) => (idx === i ? { ...c, type: v } : c)),
+   810→   810→                                )
+   811→   811→                              }
+   812→   812→                            >
+   813→   813→                              <SelectTrigger className="h-8 text-xs">
+   814→   814→                                <SelectValue />
+   815→   815→                              </SelectTrigger>
+   816→   816→                              <SelectContent>
+   817→   817→                                {columnTypes.map((t) => (
+   818→   818→                                  <SelectItem key={t} value={t}>
+   819→   819→                                    {t}
+   820→   820→                                  </SelectItem>
+   821→   821→                                ))}
+   822→   822→                              </SelectContent>
+   823→   823→                            </Select>
+   824→   824→                          </TableCell>
+   825→   825→                          <TableCell>
+   826→   826→                            <Button
+   827→   827→                              variant="ghost"
+   828→   828→                              size="icon"
+   829→   829→                              className="h-7 w-7 text-destructive"
+   830→   830→                              disabled={newColumns.length === 1}
+   831→   831→                              onClick={() =>
+   832→   832→                                setNewColumns((prev) => prev.filter((_, idx) => idx !== i))
+   833→   833→                              }
+   834→   834→                            >
+   835→   835→                              <Trash2 className="h-3.5 w-3.5" />
+   836→   836→                            </Button>
+   837→   837→                          </TableCell>
+   838→   838→                        </TableRow>
+   839→   839→                      ))}
+   840→   840→                    </TableBody>
+   841→   841→                  </Table>
+   842→   842→                </div>
+   843→   843→              </div>
+   844→   844→            </div>
+   845→   845→            <DialogFooter>
+   846→   846→              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+   847→   847→                Cancel
+   848→   848→              </Button>
+   849→   849→              <Button onClick={handleCreateTable}>Create Table</Button>
+   850→   850→            </DialogFooter>
+   851→   851→          </DialogContent>
+   852→   852→        </Dialog>
+   853→   853→      </div>
+   854→   854→
+   855→   855→      <div className="flex items-center gap-3 flex-wrap">
+   856→   856→        <div className="relative flex-1 max-w-sm">
+   857→   857→          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+   858→   858→          <Input
+   859→   859→            placeholder="Search tables..."
+   860→   860→            value={search}
+   861→   861→            onChange={(e) => setSearch(e.target.value)}
+   862→   862→            className="pl-9"
+   863→   863→          />
+   864→   864→        </div>
+   865→   865→        <Badge variant="secondary">{filteredTables.length} table{filteredTables.length !== 1 ? 's' : ''}</Badge>
+   866→   866→        <Button variant="outline" size="sm" onClick={() => void loadTables()}>
+   867→   867→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+   868→   868→        </Button>
+   869→   869→      </div>
+   870→   870→
+   871→   871→      <Card>
+   872→   872→        <CardContent className="p-0">
+   873→   873→          {filteredTables.length === 0 ? (
+   874→   874→            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+   875→   875→              <Database className="h-14 w-14 mb-3 opacity-30" />
+   876→   876→              <p className="text-base font-medium">No tables found</p>
+   877→   877→              <p className="text-sm mt-1">
+   878→   878→                {tables.length === 0
+   879→   879→                  ? 'Create your first table to get started.'
+   880→   880→                  : 'Try adjusting your search.'}
+   881→   881→              </p>
+   882→   882→              {tables.length === 0 && (
+   883→   883→                <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+   884→   884→                  <Plus className="mr-1 h-4 w-4" /> New Table
+   885→   885→                </Button>
+   886→   886→              )}
+   887→   887→            </div>
+   888→   888→          ) : (
+   889→   889→            <Table>
+   890→   890→              <TableHeader>
+   891→   891→                <TableRow>
+   892→   892→                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
+   893→   893→                    <span className="flex items-center gap-1">
+   894→   894→                      Name <ArrowUpDown className="h-3 w-3" />
+   895→   895→                    </span>
+   896→   896→                  </TableHead>
+   897→   897→                  <TableHead>Priority</TableHead>
+   898→   898→                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort('rowCount')}>
+   899→   899→                    <span className="flex items-center gap-1">
+   900→   900→                      Rows <ArrowUpDown className="h-3 w-3" />
+   901→   901→                    </span>
+   902→   902→                  </TableHead>
+   903→   903→                  <TableHead>Columns</TableHead>
+   904→   904→                  <TableHead>Features</TableHead>
+   905→   905→                  <TableHead>Version</TableHead>
+   906→   906→                  <TableHead className="w-8" />
+   907→   907→                </TableRow>
+   908→   908→              </TableHeader>
+   909→   909→              <TableBody>
+   910→   910→                {filteredTables.map((table) => {
+   911→   911→                  const trend = emptyTrend(table.rowCount)
+   912→   912→                  return (
+   913→   913→                    <TableRow
+   914→   914→                      key={table.id}
+   915→   915→                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+   916→   916→                      onClick={() => setSelectedTable(table)}
+   917→   917→                    >
+   918→   918→                      <TableCell>
+   919→   919→                        <div className="flex items-center gap-2">
+   920→   920→                          <Database className="h-4 w-4 text-emerald-500" />
+   921→   921→                          <div>
+   922→   922→                            <div className="font-medium">{table.displayName || table.name}</div>
+   923→   923→                            <div className="text-xs text-muted-foreground font-mono">{table.name}</div>
+   924→   924→                          </div>
+   925→   925→                        </div>
+   926→   926→                      </TableCell>
+   927→   927→                      <TableCell>
+   928→   928→                        <Badge variant="outline" className={priorityColors[table.priority]}>
+   929→   929→                          {priorityLabels[table.priority]}
+   930→   930→                        </Badge>
+   931→   931→                      </TableCell>
+   932→   932→                      <TableCell>
+   933→   933→                        <div className="flex items-center gap-1.5">
+   934→   934→                          <span className="font-mono">{table.rowCount.toLocaleString()}</span>
+   935→   935→                          {trend.direction !== 'none' && (
+   936→   936→                            <Tooltip>
+   937→   937→                              <TooltipTrigger asChild>
+   938→   938→                                <span
+   939→   939→                                  className={`flex items-center text-xs ${trend.direction === 'up' ? 'text-emerald-600' : 'text-red-500'}`}
+   940→   940→                                >
+   941→   941→                                  {trend.direction === 'up' ? (
+   942→   942→                                    <ArrowUpRight className="h-3 w-3" />
+   943→   943→                                  ) : (
+   944→   944→                                    <ArrowDownRight className="h-3 w-3" />
+   945→   945→                                  )}
+   946→   946→                                  {trend.delta}
+   947→   947→                                </span>
+   948→   948→                              </TooltipTrigger>
+   949→   949→                              <TooltipContent>
+   950→   950→                                {trend.direction === 'up' ? '+' : '−'}
+   951→   951→                                {trend.delta} rows since last sync
+   952→   952→                              </TooltipContent>
+   953→   953→                            </Tooltip>
+   954→   954→                          )}
+   955→   955→                        </div>
+   956→   956→                      </TableCell>
+   957→   957→                      <TableCell>
+   958→   958→                        <div className="flex items-center gap-1">
+   959→   959→                          <Columns3 className="h-3.5 w-3.5 text-muted-foreground" />
+   960→   960→                          {table.columns.length}
+   961→   961→                        </div>
+   962→   962→                      </TableCell>
+   963→   963→                      <TableCell>
+   964→   964→                        <div className="flex gap-1 flex-wrap">
+   965→   965→                          {table.enableRealtime && (
+   966→   966→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-emerald-500/10 text-emerald-700">
+   967→   967→                              <Radio className="h-2.5 w-2.5" /> RT
+   968→   968→                            </Badge>
+   969→   969→                          )}
+   970→   970→                          {table.enableEmbedding && (
+   971→   971→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-teal-500/10 text-teal-700">
+   972→   972→                              <Brain className="h-2.5 w-2.5" /> AI
+   973→   973→                            </Badge>
+   974→   974→                          )}
+   975→   975→                          {table.rlsEnabled && (
+   976→   976→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-amber-500/10 text-amber-700">
+   977→   977→                              <Shield className="h-2.5 w-2.5" /> RLS
+   978→   978→                            </Badge>
+   979→   979→                          )}
+   980→   980→                          {table.isSystem && (
+   981→   981→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-slate-400/10 text-slate-700">
+   982→   982→                              <Lock className="h-2.5 w-2.5" /> SYS
+   983→   983→                            </Badge>
+   984→   984→                          )}
+   985→   985→                        </div>
+   986→   986→                      </TableCell>
+   987→   987→                      <TableCell className="font-mono text-xs text-muted-foreground">
+   988→   988→                        {table.versionHash}
+   989→   989→                      </TableCell>
+   990→   990→                      <TableCell>
+   991→   991→                        <DropdownMenu>
+   992→   992→                          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+   993→   993→                            <Button variant="ghost" size="icon" className="h-7 w-7">
+   994→   994→                              <MoreHorizontal className="h-3.5 w-3.5" />
+   995→   995→                            </Button>
+   996→   996→                          </DropdownMenuTrigger>
+   997→   997→                          <DropdownMenuContent align="end">
+   998→   998→                            <DropdownMenuItem
+   999→   999→                              onClick={(e) => {
+  1000→  1000→                                e.stopPropagation()
+  1001→  1001→                                setSelectedTable(table)
+  1002→  1002→                              }}
+  1003→  1003→                            >
+  1004→  1004→                              <Eye className="mr-2 h-3.5 w-3.5" /> View Details
+  1005→  1005→                            </DropdownMenuItem>
+  1006→  1006→                            <DropdownMenuItem
+  1007→  1007→                              onClick={(e) => {
+  1008→  1008→                                e.stopPropagation()
+  1009→  1009→                                void handleViewData(table)
+  1010→  1010→                              }}
+  1011→  1011→                            >
+  1012→  1012→                              <TableIcon className="mr-2 h-3.5 w-3.5" /> View Data
+  1013→  1013→                            </DropdownMenuItem>
+  1014→  1014→                            <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+  1015→  1015→                              <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+  1016→  1016→                            </DropdownMenuItem>
+  1017→  1017→                            <DropdownMenuSeparator />
+  1018→  1018→                            <DropdownMenuItem
+  1019→  1019→                              className="text-destructive"
+  1020→  1020→                              onClick={(e) => {
+  1021→  1021→                                e.stopPropagation()
+  1022→  1022→                                setDeleteTarget(table)
+  1023→  1023→                              }}
+  1024→  1024→                            >
+  1025→  1025→                              <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+  1026→  1026→                            </DropdownMenuItem>
+  1027→  1027→                          </DropdownMenuContent>
+  1028→  1028→                        </DropdownMenu>
+  1029→  1029→                      </TableCell>
+  1030→  1030→                    </TableRow>
+  1031→  1031→                  )
+  1032→  1032→                })}
+  1033→  1033→              </TableBody>
+  1034→  1034→            </Table>
+  1035→  1035→          )}
+  1036→  1036→        </CardContent>
+  1037→  1037→      </Card>
+  1038→  1038→
+  1039→  1039→      {/* Delete Confirmation */}
+  1040→  1040→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+  1041→  1041→        <AlertDialogContent>
+  1042→  1042→          <AlertDialogHeader>
+  1043→  1043→            <AlertDialogTitle>Delete table "{deleteTarget?.name}"?</AlertDialogTitle>
+  1044→  1044→            <AlertDialogDescription>
+  1045→  1045→              This action cannot be undone. All columns and rows in this table will be permanently
+  1046→  1046→              removed from your SelfBase instance.
+  1047→  1047→            </AlertDialogDescription>
+  1048→  1048→          </AlertDialogHeader>
+  1049→  1049→          <AlertDialogFooter>
+  1050→  1050→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1051→  1051→            <AlertDialogAction
+  1052→  1052→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1053→  1053→              onClick={() => deleteTarget && handleDeleteTable(deleteTarget)}
+  1054→  1054→            >
+  1055→  1055→              Delete Table
+  1056→  1056→            </AlertDialogAction>
+  1057→  1057→          </AlertDialogFooter>
+  1058→  1058→        </AlertDialogContent>
+  1059→  1059→      </AlertDialog>
+  1060→  1060→    </motion.div>
+  1061→  1061→  )
+  1062→  1062→}
+  1063→  1063→

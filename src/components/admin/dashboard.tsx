@@ -33,7 +33,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useAdminStore, type AdminSection } from '@/stores/admin-store'
 import {
   AreaChart,
@@ -274,8 +273,27 @@ function AnimatedNumber({
 }
 
 // =====================================================================
-// SPARKLINE — tiny area chart used inside KPI cards
+// SPARKLINE — tiny inline SVG chart used inside KPI / Resource cards.
+// Lightweight (no chart lib) with gradient fill + animated path draw.
 // =====================================================================
+
+/** Build a smooth Catmull-Rom (cardinal) spline through the given points. */
+function buildSplinePath(points: Array<{ x: number; y: number }>, tension = 0.18): string {
+  if (points.length < 2) return ''
+  let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i === 0 ? 0 : i - 1]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[i + 2 < points.length ? i + 2 : points.length - 1]
+    const cp1x = p1.x + (p2.x - p0.x) * tension
+    const cp1y = p1.y + (p2.y - p0.y) * tension
+    const cp2x = p2.x - (p3.x - p1.x) * tension
+    const cp2y = p2.y - (p3.y - p1.y) * tension
+    d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+  }
+  return d
+}
 
 function Sparkline({
   data,
@@ -286,33 +304,82 @@ function Sparkline({
   color: string
   height?: number
 }) {
-  if (data.length === 0) {
-    return <div style={{ height }} className="w-full" />
+  const reduce = useReducedMotion()
+  if (!data || data.length < 2) {
+    return <div style={{ height }} className="w-full" aria-hidden />
   }
-  const chartData = data.map((v, i) => ({ i, v }))
-  const id = `spark-${color.replace('#', '')}`
+
+  const width = 120 // viewBox width (scales to container via preserveAspectRatio)
+  const pad = 3
+  const innerW = width - pad * 2
+  const innerH = height - pad * 2
+  const min = Math.min(...data)
+  const max = Math.max(...data)
+  const range = max - min || 1
+  const stepX = innerW / (data.length - 1)
+
+  const points = data.map((v, i) => ({
+    x: pad + i * stepX,
+    y: pad + innerH * (1 - (v - min) / range),
+  }))
+
+  const linePath = buildSplinePath(points)
+  const fillPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${height} L ${points[0].x.toFixed(2)} ${height} Z`
+  const last = points[points.length - 1]
+  const gradId = `spark-fill-${color.replace('#', '')}`
+  const clipId = `spark-clip-${color.replace('#', '')}`
+
   return (
-    <div style={{ height }} className="w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.45} />
-              <stop offset="100%" stopColor={color} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area
-            type="monotone"
-            dataKey="v"
-            stroke={color}
-            strokeWidth={1.5}
-            fill={`url(#${id})`}
-            isAnimationActive={false}
-            dot={false}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width="100%"
+      height={height}
+      preserveAspectRatio="none"
+      className="block overflow-visible"
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.45} />
+          <stop offset="100%" stopColor={color} stopOpacity={0} />
+        </linearGradient>
+        <clipPath id={clipId}>
+          <rect x="0" y="0" width={width} height={height} />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${clipId})`}>
+        <motion.path
+          d={fillPath}
+          fill={`url(#${gradId})`}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, ease: 'easeOut' }}
+        />
+        <motion.path
+          d={linePath}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          initial={reduce ? false : { pathLength: 0 }}
+          animate={{ pathLength: 1 }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+        />
+        {/* Last-point pulse dot */}
+        <motion.circle
+          cx={last.x}
+          cy={last.y}
+          r={2}
+          fill={color}
+          initial={reduce ? false : { scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.3, delay: reduce ? 0 : 0.55 }}
+          style={{ transformOrigin: `${last.x}px ${last.y}px` }}
+        />
+      </g>
+    </svg>
   )
 }
 
@@ -331,15 +398,17 @@ function ChangePill({
 }) {
   // invertColor = true means "up is bad" (e.g. error rate)
   const good = direction === 'up' ? !invertColor : direction === 'down' ? invertColor : null
-  const colorClass =
-    direction === 'neutral'
-      ? 'text-muted-foreground'
-      : good
-        ? 'text-emerald-600'
-        : 'text-red-600'
+  const isNeutral = direction === 'neutral'
+  const colorClass = isNeutral
+    ? 'text-muted-foreground bg-muted/60'
+    : good
+      ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+      : 'text-red-700 dark:text-red-400 bg-red-500/10'
   const Icon = direction === 'up' ? ArrowUpRight : direction === 'down' ? ArrowDownRight : Minus
   return (
-    <span className={`flex items-center gap-0.5 font-medium ${colorClass}`}>
+    <span
+      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium transition-colors ${colorClass}`}
+    >
       <Icon className="h-3 w-3" />
       {label}
     </span>
@@ -749,30 +818,34 @@ function DashboardContent({
                     <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/40" vertical={false} />
+                <CartesianGrid strokeDasharray="4 4" className="stroke-muted/25" vertical={false} />
                 <XAxis
                   dataKey="time"
-                  tick={{ fontSize: 10 }}
+                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   tickLine={false}
                   axisLine={false}
                   minTickGap={32}
                 />
                 <YAxis
-                  tick={{ fontSize: 10 }}
+                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   tickLine={false}
                   axisLine={false}
                   domain={[0, 100]}
                   width={36}
                 />
                 <Tooltip
+                  cursor={{ stroke: 'var(--border)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   contentStyle={{
-                    backgroundColor: 'hsl(var(--popover))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '10px',
+                    backgroundColor: 'var(--popover)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '12px',
                     fontSize: '12px',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                    padding: '8px 10px',
+                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                    color: 'var(--popover-foreground)',
                   }}
-                  labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
+                  labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600, marginBottom: 4 }}
+                  itemStyle={{ color: 'var(--popover-foreground)' }}
                 />
                 <Area
                   type="monotone"
@@ -781,6 +854,7 @@ function DashboardContent({
                   strokeWidth={2}
                   fill="url(#cpuArea)"
                   name="CPU %"
+                  activeDot={{ r: 4, fill: '#10b981', stroke: 'var(--popover)', strokeWidth: 1.5 }}
                 />
                 <Area
                   type="monotone"
@@ -789,6 +863,7 @@ function DashboardContent({
                   strokeWidth={2}
                   fill="url(#ramArea)"
                   name="RAM %"
+                  activeDot={{ r: 4, fill: '#14b8a6', stroke: 'var(--popover)', strokeWidth: 1.5 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -803,32 +878,37 @@ function DashboardContent({
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/40" vertical={false} />
+                <CartesianGrid strokeDasharray="4 4" className="stroke-muted/25" vertical={false} />
                 <XAxis
                   dataKey="time"
-                  tick={{ fontSize: 10 }}
+                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   tickLine={false}
                   axisLine={false}
                   minTickGap={32}
                 />
-                <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} width={36} />
                 <Tooltip
+                  cursor={{ stroke: 'var(--border)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   contentStyle={{
-                    backgroundColor: 'hsl(var(--popover))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '10px',
+                    backgroundColor: 'var(--popover)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '12px',
                     fontSize: '12px',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                    padding: '8px 10px',
+                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                    color: 'var(--popover-foreground)',
                   }}
-                  labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
+                  labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600, marginBottom: 4 }}
+                  itemStyle={{ color: 'var(--popover-foreground)' }}
                 />
                 <Line
                   type="monotone"
                   dataKey="reqPerSec"
                   stroke="#0d9488"
                   strokeWidth={2.5}
+                  strokeLinecap="round"
                   dot={false}
-                  activeDot={{ r: 4, fill: '#0d9488' }}
+                  activeDot={{ r: 5, fill: '#0d9488', stroke: 'var(--popover)', strokeWidth: 1.5 }}
                   name="Req/sec"
                 />
               </LineChart>
@@ -853,30 +933,34 @@ function DashboardContent({
                     <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/40" vertical={false} />
+                <CartesianGrid strokeDasharray="4 4" className="stroke-muted/25" vertical={false} />
                 <XAxis
                   dataKey="time"
-                  tick={{ fontSize: 10 }}
+                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   tickLine={false}
                   axisLine={false}
                   minTickGap={32}
                 />
                 <YAxis
-                  tick={{ fontSize: 10 }}
+                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
                   tickLine={false}
                   axisLine={false}
                   domain={[0, 100]}
                   width={36}
                 />
                 <Tooltip
+                  cursor={{ stroke: 'var(--border)', strokeWidth: 1, strokeDasharray: '4 4' }}
                   contentStyle={{
-                    backgroundColor: 'hsl(var(--popover))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '10px',
+                    backgroundColor: 'var(--popover)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '12px',
                     fontSize: '12px',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                    padding: '8px 10px',
+                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                    color: 'var(--popover-foreground)',
                   }}
-                  labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
+                  labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600, marginBottom: 4 }}
+                  itemStyle={{ color: 'var(--popover-foreground)' }}
                 />
                 <Area
                   type="monotone"
@@ -885,6 +969,7 @@ function DashboardContent({
                   strokeWidth={2.5}
                   fill="url(#loadArea)"
                   name="Load Score"
+                  activeDot={{ r: 5, fill: '#10b981', stroke: 'var(--popover)', strokeWidth: 1.5 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -906,7 +991,8 @@ function DashboardContent({
           heartbeatCount={computed.heartbeatCount}
         />
 
-        <Card className="lg:col-span-2 group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
+        <Card className="lg:col-span-2 group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+          <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -928,7 +1014,7 @@ function DashboardContent({
                 <p className="text-xs text-muted-foreground">All sources are healthy right now.</p>
               </div>
             ) : (
-              <div className="max-h-[420px] space-y-2.5 overflow-y-auto pr-2 [scrollbar-width:thin]">
+              <div className="scrollbar-thin max-h-[420px] space-y-2.5 overflow-y-auto pr-2">
                 {data.logs.map((log) => {
                   const bucket =
                     log.errorType.includes('validation')
@@ -940,9 +1026,9 @@ function DashboardContent({
                   return (
                     <div
                       key={log.id}
-                      className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/40"
+                      className="group/log flex items-start gap-3 rounded-lg border p-3 transition-all duration-200 hover:translate-x-0.5 hover:border-emerald-500/30 hover:bg-muted/40 hover:shadow-sm"
                     >
-                      <div className={`mt-0.5 rounded-full p-1.5 ${styles.bg} ${styles.text}`}>
+                      <div className={`mt-0.5 rounded-full p-1.5 transition-transform group-hover/log:scale-110 ${styles.bg} ${styles.text}`}>
                         <AlertTriangle className="h-3.5 w-3.5" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -1015,12 +1101,40 @@ function HeroHeader({
       : health === 'degraded'
         ? 'bg-amber-400/40'
         : 'bg-red-400/40'
+  const reduce = useReducedMotion()
+
+  // Subtle floating animation for the background blobs
+  const floatTransition = {
+    duration: 6,
+    repeat: Infinity,
+    ease: 'easeInOut' as const,
+  }
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500 via-teal-500 to-emerald-600 p-6 text-white shadow-lg">
-      {/* decorative blobs */}
-      <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-20 left-1/3 h-40 w-40 rounded-full bg-teal-300/20 blur-3xl" />
+    <div className="bg-animated-gradient relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500 via-teal-500 to-emerald-600 p-6 text-white shadow-lg shadow-emerald-500/10">
+      {/* decorative floating blobs */}
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-3xl"
+        animate={reduce ? undefined : { y: [0, 14, 0], x: [0, -8, 0] }}
+        transition={floatTransition}
+      />
+      <motion.div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-20 left-1/3 h-40 w-40 rounded-full bg-teal-300/20 blur-3xl"
+        animate={reduce ? undefined : { y: [0, -12, 0], x: [0, 10, 0] }}
+        transition={{ ...floatTransition, duration: 7.5, delay: 0.5 }}
+      />
+      {/* subtle grid pattern overlay */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)',
+          backgroundSize: '32px 32px',
+        }}
+      />
 
       <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-2">
@@ -1043,7 +1157,26 @@ function HeroHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm">
+          <motion.div
+            className={
+              'rounded-xl border px-4 py-2 backdrop-blur-sm transition-colors ' +
+              (health === 'healthy'
+                ? 'border-emerald-200/40 bg-white/15'
+                : health === 'degraded'
+                  ? 'border-amber-200/40 bg-white/15'
+                  : 'border-red-200/40 bg-white/15')
+            }
+            animate={
+              reduce || health !== 'healthy'
+                ? undefined
+                : { boxShadow: [
+                    '0 0 0 0 rgba(255,255,255,0.0)',
+                    '0 0 0 4px rgba(255,255,255,0.12)',
+                    '0 0 0 0 rgba(255,255,255,0.0)',
+                  ] }
+            }
+            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+          >
             <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-50/70">
               Status
             </div>
@@ -1051,8 +1184,8 @@ function HeroHeader({
               <Sparkles className="h-3.5 w-3.5" />
               {healthLabel}
             </div>
-          </div>
-          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm">
+          </motion.div>
+          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm transition-colors hover:bg-white/15">
             <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-50/70">
               Uptime
             </div>
@@ -1060,7 +1193,7 @@ function HeroHeader({
               {uptimePercent.toFixed(1)}% · {uptimeDuration}
             </div>
           </div>
-          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm">
+          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm transition-colors hover:bg-white/15">
             <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-50/70">
               Load
             </div>
@@ -1073,7 +1206,7 @@ function HeroHeader({
             variant="secondary"
             onClick={onRefresh}
             disabled={refreshing}
-            className="border-white/20 bg-white/15 text-white hover:bg-white/25 hover:text-white"
+            className="border-white/20 bg-white/15 text-white transition-colors hover:bg-white/25 hover:text-white"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
@@ -1121,33 +1254,41 @@ function KPICard({
   invertColor?: boolean
 }) {
   return (
-    <Card className="group relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-emerald-500/5">
-      {/* glassmorphism hover gradient */}
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {title}
-        </CardTitle>
-        <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600">{icon}</div>
-      </CardHeader>
-      <CardContent className="relative">
-        <div className="text-3xl font-bold tracking-tight">
-          <AnimatedNumber value={value} format={valueFormat} />
-        </div>
-        <div className="mt-1 flex items-center gap-1.5 text-xs">
-          {direction && changeLabel && (
-            <ChangePill direction={direction} label={changeLabel} invertColor={invertColor} />
-          )}
-          {description && <span className="text-muted-foreground">{description}</span>}
-          {sub && <span className="text-muted-foreground">{sub}</span>}
-        </div>
-        {spark && spark.length > 1 && (
-          <div className="mt-3 -mb-1">
-            <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={36} />
+    <motion.div
+      whileHover={{ y: -4 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+      className="group h-full"
+    >
+      <Card className="relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg hover:shadow-emerald-500/10">
+        {/* animated gradient top-border (sweeps in on hover) */}
+        <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+        {/* glassmorphism hover gradient */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {title}
+          </CardTitle>
+          <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">{icon}</div>
+        </CardHeader>
+        <CardContent className="relative">
+          <div className="text-3xl font-bold tracking-tight">
+            <AnimatedNumber value={value} format={valueFormat} />
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <div className="mt-1 flex items-center gap-1.5 text-xs">
+            {direction && changeLabel && (
+              <ChangePill direction={direction} label={changeLabel} invertColor={invertColor} />
+            )}
+            {description && <span className="text-muted-foreground">{description}</span>}
+            {sub && <span className="text-muted-foreground">{sub}</span>}
+          </div>
+          {spark && spark.length > 1 && (
+            <div className="mt-3 -mb-1">
+              <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={36} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
@@ -1178,36 +1319,52 @@ function ResourceCard({
 }) {
   const styles = PROGRESS_STYLES[bucket]
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
+  // bucket-specific gradient for the top accent border
+  const topGradient =
+    bucket === 'red'
+      ? 'from-red-400 via-rose-400 to-red-500'
+      : bucket === 'amber'
+        ? 'from-amber-400 via-orange-400 to-amber-500'
+        : 'from-emerald-400 via-teal-400 to-emerald-500'
 
   return (
-    <Card className="group relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-emerald-500/5">
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {title}
-        </CardTitle>
-        <div className={`rounded-md p-1.5 ${styles.bg} ${styles.text}`}>{icon}</div>
-      </CardHeader>
-      <CardContent className="relative">
-        <div className="flex items-baseline justify-between">
-          <div className={`text-3xl font-bold tracking-tight ${styles.text}`}>{displayValue}</div>
-        </div>
-        <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
-          <motion.div
-            className={`h-full ${styles.bar} rounded-full`}
-            initial={{ width: 0 }}
-            animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.7, ease: 'easeOut' }}
-          />
-        </div>
-        <p className="mt-2 truncate text-xs text-muted-foreground">{description}</p>
-        {spark && spark.length > 1 && (
-          <div className="mt-2 -mb-1">
-            <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={28} />
+    <motion.div
+      whileHover={{ y: -4 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+      className="group h-full"
+    >
+      <Card className="relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg hover:shadow-emerald-500/10">
+        {/* animated gradient top-border (sweeps in on hover) */}
+        <div className={`absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r ${topGradient} transition-transform duration-300 ease-out group-hover:scale-x-100`} />
+        {/* glassmorphism hover gradient */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {title}
+          </CardTitle>
+          <div className={`rounded-md p-1.5 ${styles.bg} ${styles.text} transition-colors`}>{icon}</div>
+        </CardHeader>
+        <CardContent className="relative">
+          <div className="flex items-baseline justify-between">
+            <div className={`text-3xl font-bold tracking-tight ${styles.text}`}>{displayValue}</div>
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+            <motion.div
+              className={`h-full ${styles.bar} rounded-full`}
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+            />
+          </div>
+          <p className="mt-2 truncate text-xs text-muted-foreground">{description}</p>
+          {spark && spark.length > 1 && (
+            <div className="mt-2 -mb-1">
+              <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={28} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
@@ -1227,12 +1384,13 @@ function ChartCard({
   children: React.ReactNode
 }) {
   return (
-    <Card className="group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
+    <Card className="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
-              <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600">{icon}</span>
+              <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">{icon}</span>
               {title}
             </CardTitle>
             <CardDescription className="mt-1">{subtitle}</CardDescription>
@@ -1269,74 +1427,150 @@ function ServiceStatusCard({
   health: 'healthy' | 'degraded' | 'down'
   heartbeatCount: number
 }) {
-  const dotFor = (active: boolean, hasIssue = false) =>
-    hasIssue ? 'bg-amber-500' : active ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+  type SvcStatus = 'healthy' | 'warning' | 'critical' | 'idle'
+  const dotFor = (active: boolean, hasIssue = false): SvcStatus =>
+    hasIssue ? 'warning' : active ? 'healthy' : 'idle'
+
+  // Card-level glow: only "healthy" gets the soft emerald glow ring.
+  const cardGlow =
+    health === 'healthy'
+      ? 'glow-emerald'
+      : health === 'degraded'
+        ? 'shadow-[0_0_0_1px_oklch(0.75_0.18_70/0.25),0_0_18px_2px_oklch(0.75_0.18_70/0.12)]'
+        : 'shadow-[0_0_0_1px_oklch(0.6_0.22_22/0.25),0_0_18px_2px_oklch(0.6_0.22_22/0.12)]'
+
+  const headerTint =
+    health === 'healthy'
+      ? 'text-emerald-600'
+      : health === 'degraded'
+        ? 'text-amber-600'
+        : 'text-red-600'
 
   return (
-    <Card className="group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Server className="h-4 w-4 text-emerald-600" />
-          Service Status
-        </CardTitle>
-        <CardDescription>Active services & runtime counts</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3.5">
-        <ServiceRow
-          dot={dotFor(health === 'healthy')}
-          label="API Server"
-          value={health === 'healthy' ? 'Running' : health === 'degraded' ? 'Degraded' : 'Down'}
+    <motion.div
+      whileHover={{ y: -2 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+      className="h-full"
+    >
+      <Card className={`group relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg ${cardGlow}`}>
+        {/* top accent border that brightens on hover */}
+        <div
+          className={
+            'absolute inset-x-0 top-0 h-[2px] origin-left scale-x-100 transition-transform duration-300 ' +
+            (health === 'healthy'
+              ? 'bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500'
+              : health === 'degraded'
+                ? 'bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500'
+                : 'bg-gradient-to-r from-red-400 via-rose-400 to-red-500')
+          }
         />
-        <ServiceRow
-          dot={dotFor(activePipelineRuns > 0)}
-          label="Pipeline Engine"
-          value={`${activePipelines} configured · ${activePipelineRuns} running`}
-          badge={`${activePipelines} active`}
-        />
-        <ServiceRow
-          dot={dotFor(activeScrapers > 0)}
-          label="Web Scraper"
-          value={`${activeScrapers} running now`}
-          badge={`${activeScrapers} active`}
-        />
-        <ServiceRow
-          dot={dotFor(activeFunctions > 0)}
-          label="Functions Runtime"
-          value={`${activeFunctions} active`}
-          badge={`${activeFunctions} active`}
-        />
-        <ServiceRow
-          dot={dotFor(queueTotal === 0, queueTotal > 0 && processingCount > 0)}
-          label="Priority Queue"
-          value={`${queuedCount} queued · ${processingCount} processing`}
-          badge={queueTotal > 0 ? `${queueTotal} total` : 'Empty'}
-        />
-        <ServiceRow
-          dot={dotFor(heartbeatCount > 0)}
-          label="Heartbeat Monitor"
-          value={`${heartbeatCount} beats (24h)`}
-        />
-        <ServiceRow dot="bg-emerald-500" label="Storage Layer" value="OK" />
-      </CardContent>
-    </Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <span className={`rounded-md bg-muted/60 p-1 ${headerTint}`}>
+              <Server className="h-4 w-4" />
+            </span>
+            Service Status
+          </CardTitle>
+          <CardDescription>Active services &amp; runtime counts</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2.5">
+          <ServiceRow
+            status={health === 'healthy' ? 'healthy' : health === 'degraded' ? 'warning' : 'critical'}
+            label="API Server"
+            value={health === 'healthy' ? 'Running' : health === 'degraded' ? 'Degraded' : 'Down'}
+          />
+          <ServiceRow
+            status={dotFor(activePipelineRuns > 0)}
+            label="Pipeline Engine"
+            value={`${activePipelines} configured · ${activePipelineRuns} running`}
+            badge={`${activePipelines} active`}
+          />
+          <ServiceRow
+            status={dotFor(activeScrapers > 0)}
+            label="Web Scraper"
+            value={`${activeScrapers} running now`}
+            badge={`${activeScrapers} active`}
+          />
+          <ServiceRow
+            status={dotFor(activeFunctions > 0)}
+            label="Functions Runtime"
+            value={`${activeFunctions} active`}
+            badge={`${activeFunctions} active`}
+          />
+          <ServiceRow
+            status={dotFor(queueTotal === 0, queueTotal > 0 && processingCount > 0)}
+            label="Priority Queue"
+            value={`${queuedCount} queued · ${processingCount} processing`}
+            badge={queueTotal > 0 ? `${queueTotal} total` : 'Empty'}
+          />
+          <ServiceRow
+            status={dotFor(heartbeatCount > 0)}
+            label="Heartbeat Monitor"
+            value={`${heartbeatCount} beats (24h)`}
+          />
+          <ServiceRow status="healthy" label="Storage Layer" value="OK" />
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
 function ServiceRow({
-  dot,
+  status,
   label,
   value,
   badge,
 }: {
-  dot: string
+  status: 'healthy' | 'warning' | 'critical' | 'idle'
   label: string
   value: string
   badge?: string
 }) {
+  const statusConfig = {
+    healthy: {
+      dot: 'bg-emerald-500',
+      ring: 'bg-emerald-400/40',
+      icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+      iconWrap: 'bg-emerald-500/10 text-emerald-600',
+    },
+    warning: {
+      dot: 'bg-amber-500',
+      ring: 'bg-amber-400/40',
+      icon: <AlertTriangle className="h-3.5 w-3.5" />,
+      iconWrap: 'bg-amber-500/10 text-amber-600',
+    },
+    critical: {
+      dot: 'bg-red-500',
+      ring: 'bg-red-400/40',
+      icon: <AlertTriangle className="h-3.5 w-3.5" />,
+      iconWrap: 'bg-red-500/10 text-red-600',
+    },
+    idle: {
+      dot: 'bg-muted-foreground/40',
+      ring: 'bg-muted-foreground/20',
+      icon: <Minus className="h-3.5 w-3.5" />,
+      iconWrap: 'bg-muted/60 text-muted-foreground',
+    },
+  }[status]
+
   return (
-    <div className="flex items-center justify-between gap-2">
+    <div className="group/row flex items-center justify-between gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-muted/40">
       <div className="flex items-center gap-2.5">
-        <div className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />
+        {/* status dot with ping ring for active healthy/warning/critical */}
+        <div className="relative flex h-2.5 w-2.5 items-center justify-center">
+          {status !== 'idle' && (
+            <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${statusConfig.ring} opacity-70`} />
+          )}
+          <span className={`relative inline-flex h-2 w-2 rounded-full ${statusConfig.dot}`} />
+        </div>
+        {/* status icon that scales on hover */}
+        <motion.div
+          whileHover={{ scale: 1.18 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 18 }}
+          className={`rounded-md p-1 ${statusConfig.iconWrap}`}
+        >
+          {statusConfig.icon}
+        </motion.div>
         <span className="text-sm">{label}</span>
       </div>
       <div className="flex items-center gap-2">
@@ -1402,10 +1636,13 @@ const QUICK_ACTIONS: Array<{
 function QuickActionsCard() {
   const setActiveSection = useAdminStore((s) => s.setActiveSection)
   return (
-    <Card className="group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
+    <Card className="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Sparkles className="h-4 w-4 text-emerald-600" />
+          <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600">
+            <Sparkles className="h-4 w-4" />
+          </span>
           Quick Actions
         </CardTitle>
         <CardDescription>Jump to common workflows</CardDescription>
@@ -1413,12 +1650,15 @@ function QuickActionsCard() {
       <CardContent>
         <div className="grid grid-cols-2 gap-2.5">
           {QUICK_ACTIONS.map((a) => (
-            <button
+            <motion.button
               key={a.section}
               onClick={() => setActiveSection(a.section)}
-              className="group/action flex items-start gap-3 rounded-lg border p-3 text-left transition-all hover:-translate-y-0.5 hover:border-emerald-500/40 hover:bg-emerald-500/5"
+              whileHover={{ y: -2, scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+              className="group/action flex items-start gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/5 hover:shadow-md hover:shadow-emerald-500/5"
             >
-              <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover/action:bg-emerald-500/20">
+              <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover/action:bg-emerald-500/20 group-hover/action:scale-110">
                 {a.icon}
               </div>
               <div className="min-w-0 flex-1">
@@ -1428,7 +1668,7 @@ function QuickActionsCard() {
                 </div>
                 <p className="text-[11px] text-muted-foreground">{a.description}</p>
               </div>
-            </button>
+            </motion.button>
           ))}
         </div>
       </CardContent>
@@ -1517,12 +1757,15 @@ const TOKEN_COLORS: Record<string, string> = {
 
 function ApiReferenceCard() {
   return (
-    <Card className="group transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
+    <Card className="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-base">
-              <CircleDot className="h-4 w-4 text-emerald-600" />
+              <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600">
+                <CircleDot className="h-4 w-4" />
+              </span>
               API Quick Reference
             </CardTitle>
             <CardDescription>Common SDK calls — copy &amp; ship</CardDescription>
@@ -1542,7 +1785,7 @@ function ApiReferenceCard() {
               <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 {ex.label}
               </div>
-              <pre className="overflow-x-auto font-mono text-xs leading-relaxed [scrollbar-width:thin]">
+              <pre className="scrollbar-thin overflow-x-auto font-mono text-xs leading-relaxed">
                 <code>
                   {ex.code.map((tok, j) => (
                     <span key={j} className={TOKEN_COLORS[tok.t]}>
@@ -1586,26 +1829,39 @@ function loadLevelLabel(level: string): string {
 // SKELETON
 // =====================================================================
 
+/** Skeleton with a moving shimmer overlay (uses .shimmer utility from globals.css). */
+function ShimmerSkeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={`relative overflow-hidden rounded-md bg-accent ${className ?? ''}`}
+      aria-hidden
+    >
+      <div className="shimmer absolute inset-0" />
+    </div>
+  )
+}
+
 function DashboardSkeleton() {
   return (
     <div className="space-y-6">
       {/* hero skeleton */}
-      <Skeleton className="h-[160px] w-full rounded-2xl" />
+      <ShimmerSkeleton className="h-[160px] w-full rounded-2xl" />
 
       {/* KPI row */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
+          <Card key={i} className="relative overflow-hidden">
+            <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-400/40 via-teal-400/40 to-emerald-500/40" />
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <Skeleton className="h-3 w-24" />
-                <Skeleton className="h-6 w-6 rounded-md" />
+                <ShimmerSkeleton className="h-3 w-24" />
+                <ShimmerSkeleton className="h-6 w-6 rounded-md" />
               </div>
             </CardHeader>
             <CardContent>
-              <Skeleton className="h-8 w-20" />
-              <Skeleton className="mt-2 h-3 w-28" />
-              <Skeleton className="mt-3 h-9 w-full" />
+              <ShimmerSkeleton className="h-8 w-20" />
+              <ShimmerSkeleton className="mt-2 h-3 w-28" />
+              <ShimmerSkeleton className="mt-3 h-9 w-full" />
             </CardContent>
           </Card>
         ))}
@@ -1614,17 +1870,18 @@ function DashboardSkeleton() {
       {/* Resource row */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
+          <Card key={i} className="relative overflow-hidden">
+            <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-400/40 via-teal-400/40 to-emerald-500/40" />
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <Skeleton className="h-3 w-20" />
-                <Skeleton className="h-6 w-6 rounded-md" />
+                <ShimmerSkeleton className="h-3 w-20" />
+                <ShimmerSkeleton className="h-6 w-6 rounded-md" />
               </div>
             </CardHeader>
             <CardContent>
-              <Skeleton className="h-8 w-16" />
-              <Skeleton className="mt-2 h-2 w-full" />
-              <Skeleton className="mt-2 h-3 w-32" />
+              <ShimmerSkeleton className="h-8 w-16" />
+              <ShimmerSkeleton className="mt-2 h-2 w-full" />
+              <ShimmerSkeleton className="mt-2 h-3 w-32" />
             </CardContent>
           </Card>
         ))}
@@ -1633,25 +1890,27 @@ function DashboardSkeleton() {
       {/* Charts */}
       <div className="grid gap-4 lg:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
-          <Card key={i}>
+          <Card key={i} className="relative overflow-hidden">
+            <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-400/40 via-teal-400/40 to-emerald-500/40" />
             <CardHeader>
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-3 w-56" />
+              <ShimmerSkeleton className="h-5 w-40" />
+              <ShimmerSkeleton className="h-3 w-56" />
             </CardHeader>
             <CardContent>
-              <Skeleton className="h-[280px] w-full" />
+              <ShimmerSkeleton className="h-[280px] w-full" />
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <Card>
+      <Card className="relative overflow-hidden">
+        <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-400/40 via-teal-400/40 to-emerald-500/40" />
         <CardHeader>
-          <Skeleton className="h-5 w-44" />
-          <Skeleton className="h-3 w-64" />
+          <ShimmerSkeleton className="h-5 w-44" />
+          <ShimmerSkeleton className="h-3 w-64" />
         </CardHeader>
         <CardContent>
-          <Skeleton className="h-[220px] w-full" />
+          <ShimmerSkeleton className="h-[220px] w-full" />
         </CardContent>
       </Card>
     </div>

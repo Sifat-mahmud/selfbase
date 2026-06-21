@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
   Database,
@@ -12,6 +12,9 @@ import {
   Eye,
   Columns3,
   ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Download,
   ChevronRight,
   Shield,
   Radio,
@@ -22,6 +25,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   RefreshCw,
+  Check,
+  X,
+  Loader2,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -74,6 +80,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client'
 
@@ -139,6 +146,78 @@ const emptyTrend = (rowCount: number) => {
   return { delta: Math.abs(delta), direction: delta >= 0 ? ('up' as const) : ('down' as const) }
 }
 
+const NEW_ROW_ID = '__new__'
+
+/**
+ * Render a type-aware editor cell for inline editing.
+ * - BOOLEAN  -> Switch
+ * - INTEGER/DECIMAL -> number Input
+ * - JSON/TIMESTAMP -> wider Input
+ * - TEXT/default  -> Input
+ */
+function renderCellInput(
+  col: ColumnItem,
+  value: unknown,
+  onChange: (v: unknown) => void,
+  disabled?: boolean,
+) {
+  const typeUpper = col.type.toUpperCase()
+  if (typeUpper === 'BOOLEAN') {
+    return (
+      <Switch
+        checked={Boolean(value)}
+        onCheckedChange={(v) => onChange(v)}
+        disabled={disabled}
+        aria-label={col.name}
+      />
+    )
+  }
+  if (typeUpper === 'INTEGER' || typeUpper === 'DECIMAL') {
+    return (
+      <Input
+        type="number"
+        value={value === null || value === undefined ? '' : String(value)}
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw === '') {
+            onChange(null)
+          } else if (typeUpper === 'INTEGER') {
+            const n = parseInt(raw, 10)
+            onChange(Number.isNaN(n) ? null : n)
+          } else {
+            const n = parseFloat(raw)
+            onChange(Number.isNaN(n) ? null : n)
+          }
+        }}
+        disabled={disabled}
+        className="h-8 font-mono text-xs min-w-[80px]"
+        aria-label={col.name}
+      />
+    )
+  }
+  if (typeUpper === 'JSON' || typeUpper === 'TIMESTAMP') {
+    return (
+      <Input
+        value={value === null || value === undefined ? '' : String(value)}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="h-8 font-mono text-xs min-w-[140px]"
+        placeholder={typeUpper === 'JSON' ? '{...}' : '2024-01-01T00:00:00Z'}
+        aria-label={col.name}
+      />
+    )
+  }
+  return (
+    <Input
+      value={value === null || value === undefined ? '' : String(value)}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className="h-8 font-mono text-xs min-w-[100px]"
+      aria-label={col.name}
+    />
+  )
+}
+
 export function TablesView() {
   const { toast } = useToast()
   const [tables, setTables] = useState<SbTableItem[]>([])
@@ -151,6 +230,22 @@ export function TablesView() {
   const [showDataDialog, setShowDataDialog] = useState(false)
   const [dataRows, setDataRows] = useState<SbRowItem[]>([])
   const [dataLoading, setDataLoading] = useState(false)
+
+  // Inline row editing state
+  const [editingRowId, setEditingRowId] = useState<string | null>(null) // null | row.id | NEW_ROW_ID
+  const [editBuffer, setEditBuffer] = useState<Record<string, unknown>>({})
+  const [rowSaving, setRowSaving] = useState(false)
+  // Bulk selection state
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set())
+  // Row delete confirmation
+  const [deleteRowTarget, setDeleteRowTarget] = useState<SbRowItem | null>(null)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+
+  // View Data dialog: client-side search/sort
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
 
   // New table form
   const [newTableName, setNewTableName] = useState('')
@@ -301,6 +396,13 @@ export function TablesView() {
   const handleViewData = async (table: SbTableItem) => {
     setShowDataDialog(true)
     setDataLoading(true)
+    // Reset any in-progress edit/selection/search/sort state when opening a fresh view
+    setEditingRowId(null)
+    setEditBuffer({})
+    setSelectedRowIds(new Set())
+    setSearchQuery('')
+    setSortColumn(null)
+    setSortDirection('asc')
     try {
       const rows = await apiGet<SbRowItem[]>(`/api/tables/${table.id}/rows`)
       setDataRows(Array.isArray(rows) ? rows : [])
@@ -314,6 +416,292 @@ export function TablesView() {
     } finally {
       setDataLoading(false)
     }
+  }
+
+  // Reload rows for the currently selected table without resetting the dialog state
+  const refreshRows = useCallback(async () => {
+    if (!selectedTable) return
+    setDataLoading(true)
+    try {
+      const rows = await apiGet<SbRowItem[]>(`/api/tables/${selectedTable.id}/rows`)
+      setDataRows(Array.isArray(rows) ? rows : [])
+    } catch (err) {
+      toast({
+        title: 'Failed to load rows',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setDataLoading(false)
+    }
+  }, [selectedTable, toast])
+
+  // Keep the displayed row count in sync after add/delete operations
+  const adjustRowCount = useCallback(
+    (delta: number) => {
+      if (!selectedTable) return
+      const newCount = Math.max(0, selectedTable.rowCount + delta)
+      setSelectedTable((prev) => (prev ? { ...prev, rowCount: newCount } : prev))
+      setTables((prev) =>
+        prev.map((t) => (t.id === selectedTable.id ? { ...t, rowCount: newCount } : t)),
+      )
+    },
+    [selectedTable],
+  )
+
+  function startEdit(row: SbRowItem) {
+    let parsed: Record<string, unknown> = {}
+    try {
+      parsed = JSON.parse(row.data)
+    } catch {
+      parsed = {}
+    }
+    setEditingRowId(row.id)
+    setEditBuffer(parsed)
+  }
+
+  function cancelEdit() {
+    setEditingRowId(null)
+    setEditBuffer({})
+  }
+
+  async function saveEdit(row: SbRowItem) {
+    if (!selectedTable) return
+    setRowSaving(true)
+    try {
+      await apiPut(`/api/tables/${selectedTable.id}/rows/${row.id}`, editBuffer)
+      toast({ title: 'Row updated', description: 'Changes saved successfully' })
+      setEditingRowId(null)
+      setEditBuffer({})
+      await refreshRows()
+    } catch (e) {
+      toast({
+        title: 'Update failed',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setRowSaving(false)
+    }
+  }
+
+  function startAddRow() {
+    if (!selectedTable) return
+    const buf: Record<string, unknown> = {}
+    selectedTable.columns.forEach((c) => {
+      const t = c.type.toUpperCase()
+      if (t === 'BOOLEAN') buf[c.name] = false
+      else if (t === 'INTEGER' || t === 'DECIMAL') buf[c.name] = null
+      else buf[c.name] = ''
+    })
+    setEditBuffer(buf)
+    setEditingRowId(NEW_ROW_ID)
+  }
+
+  async function saveNewRow() {
+    if (!selectedTable) return
+    setRowSaving(true)
+    try {
+      await apiPost(`/api/tables/${selectedTable.id}/rows`, { data: editBuffer })
+      toast({ title: 'Row added', description: 'New row created successfully' })
+      setEditingRowId(null)
+      setEditBuffer({})
+      adjustRowCount(1)
+      await refreshRows()
+    } catch (e) {
+      toast({
+        title: 'Add failed',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setRowSaving(false)
+    }
+  }
+
+  async function handleDeleteRow(row: SbRowItem) {
+    if (!selectedTable) return
+    try {
+      await apiDelete(`/api/tables/${selectedTable.id}/rows/${row.id}`)
+      toast({ title: 'Row deleted', description: 'Row removed successfully' })
+      setSelectedRowIds((prev) => {
+        const next = new Set(prev)
+        next.delete(row.id)
+        return next
+      })
+      adjustRowCount(-1)
+      await refreshRows()
+    } catch (e) {
+      toast({
+        title: 'Delete failed',
+        description: e instanceof Error ? e.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setDeleteRowTarget(null)
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedTable || selectedRowIds.size === 0) return
+    setBulkDeleting(true)
+    let okCount = 0
+    let failCount = 0
+    try {
+      const ids = Array.from(selectedRowIds)
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            await apiDelete(`/api/tables/${selectedTable.id}/rows/${id}`)
+            okCount += 1
+          } catch {
+            failCount += 1
+          }
+        }),
+      )
+      if (okCount > 0) adjustRowCount(-okCount)
+      setSelectedRowIds(new Set())
+      await refreshRows()
+      if (failCount === 0) {
+        toast({
+          title: 'Rows deleted',
+          description: `${okCount} row${okCount !== 1 ? 's' : ''} removed`,
+        })
+      } else {
+        toast({
+          title: 'Bulk delete partial',
+          description: `${okCount} deleted, ${failCount} failed`,
+          variant: 'destructive',
+        })
+      }
+    } finally {
+      setBulkDeleting(false)
+      setBulkDeleteOpen(false)
+    }
+  }
+
+  function toggleRowSelection(rowId: string) {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowId)) next.delete(rowId)
+      else next.add(rowId)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    setSelectedRowIds((prev) => {
+      if (sortedRows.length > 0 && prev.size === sortedRows.length) return new Set()
+      return new Set(sortedRows.map((r) => r.id))
+    })
+  }
+
+  function toggleSort(colName: string) {
+    if (sortColumn === colName) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortColumn(colName)
+      setSortDirection('asc')
+    }
+  }
+
+  // Client-side filter: any cell value contains the query (case-insensitive)
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return dataRows
+    const q = searchQuery.toLowerCase()
+    return dataRows.filter((row) => {
+      try {
+        const parsed = JSON.parse(row.data)
+        return Object.values(parsed).some(
+          (v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q),
+        )
+      } catch {
+        return false
+      }
+    })
+  }, [dataRows, searchQuery])
+
+  // Client-side sort: applied after filter
+  const sortedRows = useMemo(() => {
+    if (!sortColumn) return filteredRows
+    return [...filteredRows].sort((a, b) => {
+      let av: unknown = undefined
+      let bv: unknown = undefined
+      try {
+        av = JSON.parse(a.data)[sortColumn]
+      } catch {
+        av = undefined
+      }
+      try {
+        bv = JSON.parse(b.data)[sortColumn]
+      } catch {
+        bv = undefined
+      }
+      if (av === null || av === undefined) return 1
+      if (bv === null || bv === undefined) return -1
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return sortDirection === 'asc' ? av - bv : bv - av
+      }
+      const cmp = String(av).localeCompare(String(bv))
+      return sortDirection === 'asc' ? cmp : -cmp
+    })
+  }, [filteredRows, sortColumn, sortDirection])
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function exportData(format: 'csv' | 'json', selectedOnly = false) {
+    if (!selectedTable) return
+    const rowsToExport = selectedOnly
+      ? dataRows.filter((r) => selectedRowIds.has(r.id))
+      : dataRows
+    const parsedRows = rowsToExport.map((r) => {
+      try {
+        return JSON.parse(r.data)
+      } catch {
+        return {}
+      }
+    })
+    const safeName = selectedTable.name.replace(/[^a-z0-9_-]/gi, '_')
+    if (format === 'json') {
+      const blob = new Blob([JSON.stringify(parsedRows, null, 2)], {
+        type: 'application/json',
+      })
+      downloadBlob(blob, `${safeName}.json`)
+      toast({
+        title: 'Exported JSON',
+        description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}.json`,
+      })
+      return
+    }
+    const headers = selectedTable.columns.map((c) => c.name)
+    const csvLines = [headers.join(',')]
+    for (const row of parsedRows) {
+      const values = headers.map((h) => {
+        const v = row[h]
+        if (v === null || v === undefined) return ''
+        const s = String(v)
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+          return `"${s.replace(/"/g, '""')}"`
+        }
+        return s
+      })
+      csvLines.push(values.join(','))
+    }
+    const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' })
+    downloadBlob(blob, `${safeName}.csv`)
+    toast({
+      title: 'Exported CSV',
+      description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}.csv`,
+    })
   }
 
   if (loading) {
@@ -592,17 +980,171 @@ export function TablesView() {
         </Card>
 
         {/* View Data Dialog */}
-        <Dialog open={showDataDialog} onOpenChange={setShowDataDialog}>
+        <Dialog
+          open={showDataDialog}
+          onOpenChange={(open) => {
+            setShowDataDialog(open)
+            if (!open) {
+              setEditingRowId(null)
+              setEditBuffer({})
+              setSelectedRowIds(new Set())
+              setSearchQuery('')
+              setSortColumn(null)
+              setSortDirection('asc')
+            }
+          }}
+        >
           <DialogContent className="max-w-5xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <TableIcon className="h-4 w-4 text-emerald-600" />
                 {selectedTable.name} — Rows
+                <Badge variant="secondary" className="ml-1">
+                  {dataRows.length} row{dataRows.length !== 1 ? 's' : ''}
+                </Badge>
               </DialogTitle>
               <DialogDescription>
-                Showing latest {dataRows.length} rows (max 100). Click a row to inspect.
+                Inline-edit cells, add new rows, or delete with confirmation. Search,
+                sort, and export the currently loaded rows client-side.
               </DialogDescription>
+              {/* Toolbar: search (flex-1) | Export dropdown | Add Row */}
+              <div className="flex items-center gap-2 flex-wrap pt-2">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search rows by any cell value..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9"
+                    aria-label="Search rows"
+                  />
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={dataRows.length === 0}>
+                      <Download className="mr-1 h-3.5 w-3.5" /> Export
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      onClick={() => exportData('csv')}
+                      disabled={dataRows.length === 0}
+                    >
+                      <Download className="mr-2 h-3.5 w-3.5" /> Export as CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => exportData('json')}
+                      disabled={dataRows.length === 0}
+                    >
+                      <Download className="mr-2 h-3.5 w-3.5" /> Export as JSON
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => exportData('csv', true)}
+                      disabled={selectedRowIds.size === 0}
+                    >
+                      <Download className="mr-2 h-3.5 w-3.5" /> Export Selected as CSV
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {selectedRowIds.size > 0 ? selectedRowIds.size : '—'}
+                      </span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => exportData('json', true)}
+                      disabled={selectedRowIds.size === 0}
+                    >
+                      <Download className="mr-2 h-3.5 w-3.5" /> Export Selected as JSON
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {selectedRowIds.size > 0 ? selectedRowIds.size : '—'}
+                      </span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {selectedRowIds.size > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:bg-destructive/10"
+                    onClick={() => setBulkDeleteOpen(true)}
+                    disabled={editingRowId !== null}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Selected
+                    <Badge variant="secondary" className="ml-1.5">
+                      {selectedRowIds.size}
+                    </Badge>
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => startAddRow()}
+                  disabled={editingRowId !== null}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Add Row
+                </Button>
+              </div>
+              {/* Filter / sort status line */}
+              {(searchQuery.trim() || sortColumn) && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
+                  <span>
+                    Showing <span className="font-medium text-foreground">{sortedRows.length}</span> of{' '}
+                    <span className="font-medium text-foreground">{dataRows.length}</span> row{dataRows.length !== 1 ? 's' : ''}
+                  </span>
+                  {sortColumn && (
+                    <Badge variant="outline" className="text-xs gap-1 font-mono">
+                      <ArrowUpDown className="h-3 w-3" />
+                      {sortColumn}
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        {sortDirection === 'asc' ? '↑' : '↓'}
+                      </span>
+                      <button
+                        type="button"
+                        className="ml-1 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setSortColumn(null)
+                          setSortDirection('asc')
+                        }}
+                        aria-label="Clear sort"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  )}
+                  {searchQuery.trim() && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => setSearchQuery('')}
+                      aria-label="Clear search"
+                    >
+                      <X className="h-3 w-3 inline mr-1" />
+                      clear search
+                    </button>
+                  )}
+                </div>
+              )}
             </DialogHeader>
+
+            {selectedRowIds.size > 0 && (
+              <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-500/5 px-3 py-2 text-sm dark:border-emerald-900 dark:bg-emerald-500/10">
+                <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                  {selectedRowIds.size} selected
+                </span>
+                <span className="text-muted-foreground">
+                  of {sortedRows.length} visible row{sortedRows.length !== 1 ? 's' : ''}
+                  {sortedRows.length !== dataRows.length && (
+                    <span className="text-muted-foreground/70"> (filtered from {dataRows.length})</span>
+                  )}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-7 px-2 text-xs"
+                  onClick={() => setSelectedRowIds(new Set())}
+                >
+                  Clear
+                </Button>
+              </div>
+            )}
+
             <div className="max-h-[60vh] overflow-auto rounded-md border">
               {dataLoading ? (
                 <div className="space-y-2 p-4">
@@ -610,41 +1152,188 @@ export function TablesView() {
                     <Skeleton key={i} className="h-8 w-full" />
                   ))}
                 </div>
-              ) : dataRows.length === 0 ? (
+              ) : sortedRows.length === 0 && editingRowId !== NEW_ROW_ID ? (
                 <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                   <Database className="h-10 w-10 mb-2 opacity-40" />
-                  <p className="text-sm">No rows yet</p>
-                  <p className="text-xs">Insert data via the data API to populate this table.</p>
+                  <p className="text-sm">
+                    {searchQuery.trim() ? 'No rows match your search' : 'No rows yet'}
+                  </p>
+                  <p className="text-xs">
+                    {searchQuery.trim()
+                      ? 'Try a different search term or clear the search.'
+                      : 'Insert data via the data API or add a row manually.'}
+                  </p>
+                  {searchQuery.trim() ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setSearchQuery('')}
+                    >
+                      <X className="mr-1 h-3.5 w-3.5" /> Clear search
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" className="mt-3" onClick={() => startAddRow()}>
+                      <Plus className="mr-1 h-3.5 w-3.5" /> Add first row
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <Table>
-                  <TableHeader className="sticky top-0 bg-background">
+                  <TableHeader className="sticky top-0 bg-background z-10">
                     <TableRow>
-                      <TableHead className="w-12">#</TableHead>
-                      {selectedTable.columns.map((c) => (
-                        <TableHead key={c.id} className="font-mono text-xs">
-                          {c.name}
-                        </TableHead>
-                      ))}
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={
+                            sortedRows.length > 0 && selectedRowIds.size === sortedRows.length
+                          }
+                          onCheckedChange={toggleSelectAll}
+                          aria-label="Select all rows"
+                          disabled={editingRowId !== null || sortedRows.length === 0}
+                        />
+                      </TableHead>
+                      <TableHead className="w-10">#</TableHead>
+                      {selectedTable.columns.map((c) => {
+                        const isSorted = sortColumn === c.name
+                        return (
+                          <TableHead key={c.id} className="font-mono text-xs">
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(c.name)}
+                              className="inline-flex items-center gap-1 rounded hover:text-foreground transition-colors -ml-0.5"
+                              aria-label={`Sort by ${c.name}`}
+                            >
+                              <span>{c.name}</span>
+                              <span className="text-muted-foreground/70">({c.type})</span>
+                              {isSorted ? (
+                                sortDirection === 'asc' ? (
+                                  <ArrowUp className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                ) : (
+                                  <ArrowDown className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />
+                              )}
+                            </button>
+                          </TableHead>
+                        )
+                      })}
                       <TableHead>Version</TableHead>
+                      <TableHead className="w-32 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {dataRows.map((row, i) => {
+                    {editingRowId === NEW_ROW_ID && (
+                      <motion.tr
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="border-b bg-emerald-500/5 hover:bg-emerald-500/10"
+                      >
+                        <TableCell />
+                        <TableCell className="text-emerald-600 font-bold">+</TableCell>
+                        {selectedTable.columns.map((c) => (
+                          <TableCell key={c.id}>
+                            {renderCellInput(c, editBuffer[c.name], (v) =>
+                              setEditBuffer((prev) => ({ ...prev, [c.name]: v })),
+                            )}
+                          </TableCell>
+                        ))}
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-emerald-600 border-emerald-300 dark:border-emerald-800"
+                          >
+                            new
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-500/10"
+                              onClick={() => void saveNewRow()}
+                              disabled={rowSaving}
+                              title="Save new row"
+                              aria-label="Save new row"
+                            >
+                              {rowSaving ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Check className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0"
+                              onClick={() => cancelEdit()}
+                              disabled={rowSaving}
+                              title="Cancel"
+                              aria-label="Cancel add row"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </motion.tr>
+                    )}
+                    {sortedRows.map((row, i) => {
                       let parsed: Record<string, unknown> = {}
                       try {
                         parsed = JSON.parse(row.data)
                       } catch {
                         parsed = {}
                       }
+                      const isEditing = editingRowId === row.id
+                      const isSelected = selectedRowIds.has(row.id)
                       return (
-                        <TableRow key={row.id} className="hover:bg-muted/40">
+                        <motion.tr
+                          key={row.id}
+                          initial={false}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className={`border-b transition-colors duration-200 hover:bg-muted/40 ${
+                            isEditing
+                              ? 'bg-emerald-500/10 dark:bg-emerald-500/15'
+                              : isSelected
+                                ? 'bg-muted/50'
+                                : ''
+                          }`}
+                        >
+                          <TableCell>
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={() => toggleRowSelection(row.id)}
+                              aria-label={`Select row ${i + 1}`}
+                              disabled={isEditing || editingRowId !== null}
+                            />
+                          </TableCell>
                           <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
                           {selectedTable.columns.map((c) => (
                             <TableCell key={c.id} className="font-mono text-xs">
-                              {parsed[c.name] !== undefined && parsed[c.name] !== null
-                                ? String(parsed[c.name]).slice(0, 60)
-                                : <span className="text-muted-foreground">—</span>}
+                              {isEditing ? (
+                                renderCellInput(c, editBuffer[c.name], (v) =>
+                                  setEditBuffer((prev) => ({ ...prev, [c.name]: v })),
+                                )
+                              ) : parsed[c.name] !== undefined && parsed[c.name] !== null ? (
+                                c.type.toUpperCase() === 'BOOLEAN' ? (
+                                  <span
+                                    className={
+                                      parsed[c.name]
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-muted-foreground'
+                                    }
+                                  >
+                                    {parsed[c.name] ? 'true' : 'false'}
+                                  </span>
+                                ) : (
+                                  String(parsed[c.name]).slice(0, 60)
+                                )
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
                             </TableCell>
                           ))}
                           <TableCell>
@@ -652,7 +1341,64 @@ export function TablesView() {
                               v{row.version}
                             </Badge>
                           </TableCell>
-                        </TableRow>
+                          <TableCell className="text-right">
+                            {isEditing ? (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-500/10"
+                                  onClick={() => void saveEdit(row)}
+                                  disabled={rowSaving}
+                                  title="Save changes"
+                                  aria-label="Save changes"
+                                >
+                                  {rowSaving ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Check className="h-3.5 w-3.5" />
+                                  )}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => cancelEdit()}
+                                  disabled={rowSaving}
+                                  title="Cancel edit"
+                                  aria-label="Cancel edit"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => startEdit(row)}
+                                  disabled={editingRowId !== null}
+                                  title="Edit row"
+                                  aria-label={`Edit row ${i + 1}`}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteRowTarget(row)}
+                                  disabled={editingRowId !== null}
+                                  title="Delete row"
+                                  aria-label={`Delete row ${i + 1}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </motion.tr>
                       )
                     })}
                   </TableBody>
@@ -661,6 +1407,64 @@ export function TablesView() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Row Delete Confirmation */}
+        <AlertDialog
+          open={!!deleteRowTarget}
+          onOpenChange={(open) => !open && setDeleteRowTarget(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this row?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. The row will be permanently removed from
+                {' '}{selectedTable?.name}. Row version{' '}
+                <span className="font-mono">v{deleteRowTarget?.version}</span> will be discarded.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => deleteRowTarget && void handleDeleteRow(deleteRowTarget)}
+              >
+                Delete Row
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Bulk Delete Confirmation */}
+        <AlertDialog
+          open={bulkDeleteOpen}
+          onOpenChange={(open) => !open && !bulkDeleting && setBulkDeleteOpen(false)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {selectedRowIds.size} selected row{selectedRowIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. All {selectedRowIds.size} selected rows in
+                {' '}{selectedTable?.name} will be permanently removed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={bulkDeleting}
+                onClick={() => void handleBulkDelete()}
+              >
+                {bulkDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...
+                  </>
+                ) : (
+                  `Delete ${selectedRowIds.size} Row${selectedRowIds.size !== 1 ? 's' : ''}`
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Delete Confirmation */}
         <AlertDialog
