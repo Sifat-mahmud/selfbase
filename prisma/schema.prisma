@@ -1,0 +1,518 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTH & USERS ====================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  avatarUrl     String?
+  role          String    @default("user") // admin, user
+  isActive      Boolean   @default(true)
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String?
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  apiKeys       ApiKey[]
+  sessions      Session[]
+  oauthProviders OAuthProvider[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String   @unique
+  prefix      String   // first 8 chars for identification
+  permissions String   @default("read") // read, write, admin (comma-separated)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+}
+
+model OAuthProvider {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String   // google, github, etc.
+  providerId   String
+  accessToken  String?
+  refreshToken String?
+  createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId])
+  @@index([userId])
+}
+
+// ==================== TABLES & SCHEMA ====================
+
+model SbTable {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  displayName   String?
+  description   String?
+  priority      Int      @default(2) // 1=critical, 2=normal, 3=low, 4=deferred
+  schema        String   @default("{}") // JSON: column definitions
+  versionHash   String   @default("0") // SHA-256 based version
+  rowCount      Int      @default(0)
+  isSystem      Boolean  @default(false)
+  enableRealtime Boolean @default(false)
+  enableEmbedding Boolean @default(false)
+  embeddingColumns String? // JSON: columns to embed
+  rlsEnabled    Boolean  @default(false)
+  rlsRules      String?  // JSON: row-level security rules
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  columns       SbColumn[]
+  dataRows      SbRow[]
+  subscriptions SbSubscription[]
+  pipelineSources PipelineSource[]
+  sourceErrors  SourceError[]
+  tableCalls    TableCall[]
+  embeddings    Embedding[]
+  scraperSitemaps ScraperSitemap[]
+
+  @@index([name])
+  @@index([priority])
+}
+
+model SbColumn {
+  id          String   @id @default(cuid())
+  tableId     String
+  name        String
+  type        String   @default("TEXT") // TEXT, INTEGER, DECIMAL, BOOLEAN, TIMESTAMP, JSON
+  nullable    Boolean  @default(true)
+  defaultValue String?
+  isPrimaryKey Boolean @default(false)
+  isUnique    Boolean  @default(false)
+  isIndexed   Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  table       SbTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@unique([tableId, name])
+  @@index([tableId])
+}
+
+model SbRow {
+  id        String   @id @default(cuid())
+  tableId   String
+  data      String   @default("{}") // JSON: row data
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  table     SbTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  embedding Embedding?
+
+  @@index([tableId])
+  @@index([updatedAt])
+}
+
+// ==================== REALTIME SUBSCRIPTIONS ====================
+
+model SbSubscription {
+  id         String   @id @default(cuid())
+  tableId    String
+  sessionId  String
+  eventTypes String   @default("*") // insert, update, delete, or *
+  filter     String?  // JSON: filter conditions
+  createdAt  DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+
+  table      SbTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId])
+  @@index([sessionId])
+}
+
+// ==================== PRIORITY QUEUE ====================
+
+model DeferredRequest {
+  id          String   @id @default(cuid())
+  userId      String?
+  sessionId   String?
+  tableName   String
+  queryParams String   @default("{}") // JSON
+  priority    Int      @default(3)
+  status      String   @default("queued") // queued, processing, completed, expired
+  queuedAt    DateTime @default(now())
+  expiresAt   DateTime
+  completedAt DateTime?
+  result      String?  // JSON: query result
+
+  @@index([status, priority, queuedAt])
+  @@index([sessionId])
+  @@index([expiresAt])
+}
+
+// ==================== DATA SOURCE PIPELINE ====================
+
+model PipelineSource {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  sourceType      String   @default("rest") // rest, rss, websocket, scraper
+  url             String
+  method          String   @default("GET")
+  headers         String?  // JSON
+  authType        String?  // bearer, basic, api_key, none
+  authConfig      String?  // JSON (encrypted sensitive data)
+  jsonPath        String?  // JSONPath to extract array
+  columnMappings  String   @default("[]") // JSON: [{src, target, type, transform}]
+  targetTableId   String?
+  fetchInterval   Int      @default(300) // seconds
+  scheduleCron    String?
+  isActive        Boolean  @default(true)
+  isActiveWindow  String?  // JSON: {start: "09:00", end: "17:00", timezone: "UTC"}
+  onConflict      String   @default("update") // update, insert, replace
+  paginationMode  String   @default("none") // none, offset, cursor, link_header
+  paginationConfig String? // JSON
+  maxPages        Int      @default(100)
+  maxRetries      Int      @default(3)
+  retryBackoff    Int      @default(2) // exponential backoff base
+  timeoutMs       Int      @default(30000)
+  ssrfProtection  Boolean  @default(true)
+  autoSchema      Boolean  @default(true)
+  validationRules String?  // JSON: per-column validators
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  targetTable     SbTable? @relation(fields: [targetTableId], references: [id])
+  pipelineRuns    PipelineRun[]
+  sourceErrors    SourceError[]
+
+  @@index([sourceType])
+  @@index([isActive])
+}
+
+model PipelineRun {
+  id          String   @id @default(cuid())
+  sourceId    String
+  status      String   @default("pending") // pending, running, success, failed, timeout
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  durationMs  Int?
+  rowsFetched Int      @default(0)
+  rowsWritten Int      @default(0)
+  rowsFailed  Int      @default(0)
+  errorPayload String? // JSON
+  isManual    Boolean  @default(false)
+
+  source      PipelineSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+  @@index([status])
+  @@index([startedAt])
+}
+
+model SourceError {
+  id          String   @id @default(cuid())
+  sourceId    String?
+  tableId     String?
+  tableName   String?
+  errorType   String   // fetch_error, validation_error, transform_error, network_error
+  message     String
+  rawPayload  String?  // JSON: the problematic row data
+  occurredAt  DateTime @default(now())
+
+  source      PipelineSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  table       SbTable?        @relation(fields: [tableId], references: [id], onDelete: SetNull)
+
+  @@index([sourceId])
+  @@index([occurredAt])
+}
+
+// ==================== WEB SCRAPER ====================
+
+model ScraperSitemap {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  startUrl        String
+  selectorTree    String   @default("{}") // JSON: selector tree schema
+  paginationType  String   @default("none") // none, click, scroll, url_pattern
+  paginationConfig String? // JSON: {nextSelector, maxPages, waitMs, ...}
+  targetTableId   String?
+  outputFormat    String   @default("table") // table, csv, json
+  isActive        Boolean  @default(true)
+  scheduleCron    String?
+  fetchInterval   Int      @default(3600)
+  rateLimitMs     Int      @default(1000) // delay between requests
+  concurrency     Int      @default(1)
+  respectRobotsTxt Boolean @default(true)
+  proxyConfig     String?  // JSON: proxy pool config
+  useStealth      Boolean  @default(false)
+  maxPages        Int      @default(100)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  targetTable     SbTable? @relation(fields: [targetTableId], references: [id])
+  scrapeRuns      ScrapeRun[]
+
+  @@index([isActive])
+}
+
+model ScrapeRun {
+  id           String   @id @default(cuid())
+  sitemapId    String
+  status       String   @default("pending") // pending, running, success, failed
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+  durationMs   Int?
+  pagesScraped Int      @default(0)
+  rowsExtracted Int     @default(0)
+  rowsWritten  Int      @default(0)
+  errorPayload String?  // JSON
+  isPreview    Boolean  @default(false)
+
+  sitemap      ScraperSitemap @relation(fields: [sitemapId], references: [id], onDelete: Cascade)
+
+  @@index([sitemapId])
+  @@index([status])
+}
+
+// ==================== SERVERLESS FUNCTIONS ====================
+
+model SbFunction {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  code        String
+  runtime     String   @default("javascript") // javascript, typescript
+  triggerType String   @default("http") // http, schedule, event
+  triggerConfig String? // JSON: schedule cron, event pattern
+  envVars     String?  // JSON
+  timeoutMs   Int      @default(30000)
+  memoryMb    Int      @default(128)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  functionRuns FunctionRun[]
+
+  @@index([triggerType])
+  @@index([isActive])
+}
+
+model FunctionRun {
+  id          String   @id @default(cuid())
+  functionId  String
+  status      String   @default("pending") // pending, running, success, failed, timeout
+  triggeredBy String?  // http, schedule, event
+  input       String?  // JSON
+  output      String?  // JSON
+  errorPayload String?
+  durationMs  Int?
+  memoryUsedMb Float?
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  func        SbFunction @relation(fields: [functionId], references: [id], onDelete: Cascade)
+
+  @@index([functionId])
+  @@index([status])
+}
+
+// ==================== MONITORING & HEARTBEAT ====================
+
+model Heartbeat {
+  id            String   @id @default(cuid())
+  recordedAt    DateTime @default(now())
+  cpuTotal      Int      @default(0)    // percentage
+  cpuScraper    Int      @default(0)
+  cpuApi        Int      @default(0)
+  cpuFunctions  Int      @default(0)
+  ramUsedMb     Int      @default(0)
+  diskUsedMb    Int      @default(0)
+  activeConnections Int  @default(0)
+  reqPerSec     Int      @default(0)
+  intervalSec   Int      @default(60)
+  loadScore     Float    @default(0)
+
+  @@index([recordedAt])
+}
+
+model TableCall {
+  id            String   @id @default(cuid())
+  windowStart   DateTime @default(now())
+  tableName     String
+  callCount     Int      @default(0)
+  avgLatencyMs  Int      @default(0)
+  maxLatencyMs  Int      @default(0)
+  errorCount    Int      @default(0)
+
+  table         SbTable? @relation(fields: [tableId], references: [id])
+  tableId       String?
+
+  @@unique([windowStart, tableName])
+  @@index([windowStart])
+  @@index([tableName])
+}
+
+model AlertConfig {
+  id          String   @id @default(cuid())
+  metricType  String   // cpu, req_per_sec, error_rate, latency, disk
+  threshold   Float
+  operator    String   @default(">") // >, <, >=, <=
+  duration    Int      @default(300) // seconds the threshold must be breached
+  webhookUrl  String?
+  emailTo     String?
+  isEnabled   Boolean  @default(true)
+  lastTriggeredAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AlertEvent {
+  id          String   @id @default(cuid())
+  configId    String
+  metricType  String
+  metricValue Float
+  threshold   Float
+  message     String
+  isResolved  Boolean  @default(false)
+  resolvedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([configId])
+  @@index([createdAt])
+  @@index([isResolved])
+}
+
+// ==================== AI / EMBEDDINGS ====================
+
+model Embedding {
+  id        String   @id @default(cuid())
+  rowId     String   @unique
+  tableId   String
+  vector    String   // JSON array of floats (SQLite doesn't support vector types)
+  model     String   @default("default")
+  textContent String? // the text that was embedded
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  row       SbRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  table     SbTable  @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([tableId])
+  @@index([model])
+}
+
+model LlmConfig {
+  id          String   @id @default(cuid())
+  provider    String   // openai, anthropic, ollama, custom
+  name        String   @unique
+  baseUrl     String?
+  apiKey      String?  // encrypted
+  modelName   String
+  isActive    Boolean  @default(true)
+  maxTokens   Int      @default(4096)
+  temperature Float    @default(0.7)
+  costPer1kInput Float? 
+  costPer1kOutput Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  llmCalls    LlmCall[]
+}
+
+model LlmCall {
+  id          String   @id @default(cuid())
+  configId    String
+  model       String
+  promptTokens Int?
+  completionTokens Int?
+  totalTokens Int?
+  latencyMs   Int?
+  cost        Float?
+  status      String   @default("success") // success, error, timeout
+  errorPayload String?
+  createdAt   DateTime @default(now())
+
+  config      LlmConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@index([createdAt])
+}
+
+model RagSession {
+  id          String   @id @default(cuid())
+  tableId     String
+  query       String
+  model       String?
+  prompt      String?
+  context     String?  // JSON: retrieved rows
+  response    String?
+  status      String   @default("pending") // pending, completed, failed
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([tableId])
+  @@index([createdAt])
+}
+
+// ==================== FILE STORAGE ====================
+
+model StorageFile {
+  id          String   @id @default(cuid())
+  name        String
+  originalName String
+  path        String
+  bucket      String   @default("default")
+  mimeType    String?
+  sizeBytes   Int      @default(0)
+  isPublic    Boolean  @default(false)
+  metadata    String?  // JSON
+  userId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([bucket])
+  @@index([userId])
+}
+
+// ==================== SYSTEM CONFIG ====================
+
+model SystemConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+  description String?
+
+  @@index([key])
+}
