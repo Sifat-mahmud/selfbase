@@ -33,6 +33,8 @@ import {
   Search,
   Command,
   Settings,
+  Terminal,
+  Loader2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -47,7 +49,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { DashboardView } from '@/components/admin/dashboard'
 import { TablesView } from '@/components/admin/tables'
@@ -59,6 +61,7 @@ import { FunctionsView } from '@/components/admin/functions'
 import { MonitoringView } from '@/components/admin/monitoring'
 import { AiView } from '@/components/admin/ai'
 import { LogsView } from '@/components/admin/logs'
+import { PlaygroundView } from '@/components/admin/playground'
 import { SettingsView } from '@/components/admin/settings'
 import { RealtimeIndicator } from '@/components/admin/realtime-indicator'
 import { NotificationsBell } from '@/components/admin/notifications-bell'
@@ -75,8 +78,34 @@ const navItems: { section: AdminSection; label: string; icon: React.ComponentTyp
   { section: 'monitoring', label: 'Monitoring', icon: Activity },
   { section: 'ai', label: 'AI', icon: Brain },
   { section: 'logs', label: 'Logs', icon: FileText },
+  { section: 'playground' as AdminSection, label: 'API Playground', icon: Terminal },
   { section: 'settings', label: 'Settings', icon: Settings },
 ]
+
+// Normalizes API responses that may be either a raw array or { data: [...] }
+function normalize(data: any): any[] {
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.data)) return data.data
+  return []
+}
+
+interface SearchResults {
+  tables: Array<{ id: string; name: string; displayName?: string }>
+  pipelines: Array<{ id: string; name: string; url: string }>
+  functions: Array<{ id: string; name: string; description?: string }>
+  scrapers: Array<{ id: string; name: string; url: string }>
+  files: Array<{ id: string; filename: string; bucket: string }>
+  users: Array<{ id: string; email: string; name?: string }>
+}
+
+const EMPTY_SEARCH_RESULTS: SearchResults = {
+  tables: [],
+  pipelines: [],
+  functions: [],
+  scrapers: [],
+  files: [],
+  users: [],
+}
 
 function SectionContent({ section }: { section: AdminSection }) {
   switch (section) {
@@ -90,6 +119,7 @@ function SectionContent({ section }: { section: AdminSection }) {
     case 'monitoring': return <MonitoringView />
     case 'ai': return <AiView />
     case 'logs': return <LogsView />
+    case 'playground': return <PlaygroundView />
     case 'settings': return <SettingsView />
     default: return <DashboardView />
   }
@@ -98,6 +128,12 @@ function SectionContent({ section }: { section: AdminSection }) {
 export default function AdminStudio() {
   const { activeSection, setActiveSection } = useAdminStore()
   const [commandOpen, setCommandOpen] = useState(false)
+  const [searchResults, setSearchResults] = useState<SearchResults>(EMPTY_SEARCH_RESULTS)
+  const [dataLoaded, setDataLoaded] = useState(false)
+  // Ref guard prevents duplicate in-flight fetches when the palette reopens quickly
+  const fetchInFlight = useRef(false)
+  // Derived loading state — no synchronous setState in effect body needed
+  const dataLoading = commandOpen && !dataLoaded
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -109,6 +145,72 @@ export default function AdminStudio() {
     document.addEventListener('keydown', down)
     return () => document.removeEventListener('keydown', down)
   }, [])
+
+  // Fetch data from all major APIs when the command palette opens (cached via dataLoaded)
+  useEffect(() => {
+    if (!commandOpen || dataLoaded || fetchInFlight.current) return
+    fetchInFlight.current = true
+    let cancelled = false
+    Promise.all([
+      fetch('/api/tables').then((r) => r.json()).catch(() => []),
+      fetch('/api/pipelines').then((r) => r.json()).catch(() => []),
+      fetch('/api/functions').then((r) => r.json()).catch(() => []),
+      fetch('/api/scrapers').then((r) => r.json()).catch(() => []),
+      fetch('/api/storage').then((r) => r.json()).catch(() => []),
+      fetch('/api/auth/users').then((r) => r.json()).catch(() => []),
+    ])
+      .then(([tables, pipelines, functions, scrapers, files, users]) => {
+        if (cancelled) return
+        setSearchResults({
+          tables: normalize(tables).map((t: any) => ({
+            id: String(t.id),
+            name: String(t.name ?? ''),
+            displayName: t.displayName ?? undefined,
+          })),
+          pipelines: normalize(pipelines).map((p: any) => ({
+            id: String(p.id),
+            name: String(p.name ?? ''),
+            url: String(p.url ?? ''),
+          })),
+          functions: normalize(functions).map((f: any) => ({
+            id: String(f.id),
+            name: String(f.name ?? ''),
+            description: f.description ?? undefined,
+          })),
+          scrapers: normalize(scrapers).map((s: any) => ({
+            id: String(s.id),
+            name: String(s.name ?? ''),
+            url: String(s.startUrl ?? s.url ?? ''),
+          })),
+          files: normalize(files).map((f: any) => ({
+            id: String(f.id),
+            filename: String(f.originalName ?? f.name ?? ''),
+            bucket: String(f.bucket ?? 'default'),
+          })),
+          users: normalize(users).map((u: any) => ({
+            id: String(u.id),
+            email: String(u.email ?? ''),
+            name: u.name ?? undefined,
+          })),
+        })
+        setDataLoaded(true)
+        fetchInFlight.current = false
+      })
+      .catch(() => {
+        fetchInFlight.current = false
+      })
+    return () => {
+      cancelled = true
+      fetchInFlight.current = false
+    }
+  }, [commandOpen, dataLoaded])
+
+  // Reset the cache 30s after the palette closes so reopened data is fresh-ish
+  useEffect(() => {
+    if (commandOpen) return
+    const timer = setTimeout(() => setDataLoaded(false), 30000)
+    return () => clearTimeout(timer)
+  }, [commandOpen])
 
   return (
     <SidebarProvider>
@@ -234,9 +336,131 @@ export default function AdminStudio() {
 
       {/* Command Palette */}
       <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-        <CommandInput placeholder="Search sections, tables, functions..." />
+        <CommandInput placeholder="Search sections, tables, pipelines, functions, files, users..." />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
+
+          {/* Loading state */}
+          {dataLoading && !dataLoaded && (
+            <CommandGroup heading="Loading">
+              <CommandItem disabled className="gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+                <span>Loading data...</span>
+              </CommandItem>
+            </CommandGroup>
+          )}
+
+          {/* Dynamic: Tables */}
+          {dataLoaded && searchResults.tables.length > 0 && (
+            <CommandGroup heading="Tables">
+              {searchResults.tables.map((table) => (
+                <CommandItem
+                  key={table.id}
+                  onSelect={() => { setActiveSection('tables'); setCommandOpen(false) }}
+                  className="gap-2"
+                >
+                  <Database className="h-4 w-4 text-emerald-600" />
+                  <span>{table.displayName || table.name}</span>
+                  <span className="ml-auto text-xs text-muted-foreground font-mono truncate max-w-[180px]">{table.name}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {/* Dynamic: Pipelines */}
+          {dataLoaded && searchResults.pipelines.length > 0 && (
+            <CommandGroup heading="Pipelines">
+              {searchResults.pipelines.map((pipeline) => (
+                <CommandItem
+                  key={pipeline.id}
+                  onSelect={() => { setActiveSection('pipeline'); setCommandOpen(false) }}
+                  className="gap-2"
+                >
+                  <GitBranch className="h-4 w-4 text-teal-600" />
+                  <span>{pipeline.name}</span>
+                  {pipeline.url && (
+                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{pipeline.url}</span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {/* Dynamic: Functions */}
+          {dataLoaded && searchResults.functions.length > 0 && (
+            <CommandGroup heading="Functions">
+              {searchResults.functions.map((fn) => (
+                <CommandItem
+                  key={fn.id}
+                  onSelect={() => { setActiveSection('functions'); setCommandOpen(false) }}
+                  className="gap-2"
+                >
+                  <Code2 className="h-4 w-4 text-purple-600" />
+                  <span>{fn.name}</span>
+                  {fn.description && (
+                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{fn.description}</span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {/* Dynamic: Scrapers */}
+          {dataLoaded && searchResults.scrapers.length > 0 && (
+            <CommandGroup heading="Scrapers">
+              {searchResults.scrapers.map((scraper) => (
+                <CommandItem
+                  key={scraper.id}
+                  onSelect={() => { setActiveSection('scraper'); setCommandOpen(false) }}
+                  className="gap-2"
+                >
+                  <Globe className="h-4 w-4 text-amber-600" />
+                  <span>{scraper.name}</span>
+                  {scraper.url && (
+                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{scraper.url}</span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {/* Dynamic: Storage Files */}
+          {dataLoaded && searchResults.files.length > 0 && (
+            <CommandGroup heading="Storage Files">
+              {searchResults.files.map((file) => (
+                <CommandItem
+                  key={file.id}
+                  onSelect={() => { setActiveSection('storage'); setCommandOpen(false) }}
+                  className="gap-2"
+                >
+                  <HardDrive className="h-4 w-4 text-blue-600" />
+                  <span className="truncate">{file.filename}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{file.bucket}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {/* Dynamic: Users */}
+          {dataLoaded && searchResults.users.length > 0 && (
+            <CommandGroup heading="Users">
+              {searchResults.users.map((user) => (
+                <CommandItem
+                  key={user.id}
+                  onSelect={() => { setActiveSection('auth'); setCommandOpen(false) }}
+                  className="gap-2"
+                >
+                  <Shield className="h-4 w-4 text-rose-600" />
+                  <span>{user.email}</span>
+                  {user.name && (
+                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{user.name}</span>
+                  )}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
+
+          {/* Static: Navigation */}
           <CommandGroup heading="Navigation">
             {navItems.map((item) => (
               <CommandItem

@@ -11,6 +11,7 @@ export type AdminSection =
   | 'monitoring'
   | 'ai'
   | 'logs'
+  | 'playground'
   | 'settings'
 
 interface AdminState {

@@ -22,6 +22,11 @@ import {
   ExternalLink,
   Search,
   Eye,
+  Activity,
+  BarChart3,
+  TrendingUp,
+  Timer,
+  Database,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -78,6 +83,10 @@ import {
   CartesianGrid,
   Tooltip as RTooltip,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
 } from 'recharts'
 import { apiGet, apiPost, apiPut, parseJsonField } from '@/lib/api-client'
 
@@ -179,6 +188,29 @@ const sourceTypeBadge: Record<string, string> = {
   scraper: 'bg-purple-500/10 text-purple-700 border-purple-200',
 }
 
+// Theme-aware status colors for chart cells (oklch works in both light & dark mode).
+const STATUS_COLORS: Record<string, string> = {
+  success: 'oklch(0.65 0.17 162)', // emerald
+  failed: 'oklch(0.577 0.245 27.325)', // red
+  running: 'oklch(0.6 0.118 184.704)', // teal/blue
+  pending: 'oklch(0.769 0.188 70.08)', // amber
+  timeout: 'oklch(0.7 0.19 50)', // orange
+}
+
+// Framer Motion variants for staggered analytics card entrance.
+const analyticsContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.06, delayChildren: 0.05 },
+  },
+}
+
+const analyticsItemVariants = {
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' as const } },
+}
+
 export function PipelineView() {
   const { toast } = useToast()
   const [pipelines, setPipelines] = useState<PipelineSourceItem[]>([])
@@ -209,7 +241,7 @@ export function PipelineView() {
     try {
       const [p, r] = await Promise.all([
         apiGet<PipelineSourceItem[]>('/api/pipelines'),
-        apiGet<PipelineRunsResponse>('/api/pipelines/runs?limit=100').catch(() => null),
+        apiGet<PipelineRunItem[] | PipelineRunsResponse>('/api/pipelines/runs?limit=100').catch(() => null),
       ])
       const list = Array.isArray(p) ? p : []
       // Map targetTable.name -> targetTableName for convenience, normalize columnMappings
@@ -219,7 +251,9 @@ export function PipelineView() {
         lastRun: pl.pipelineRuns && pl.pipelineRuns.length > 0 ? pl.pipelineRuns[0] : null,
       }))
       setPipelines(normalized)
-      const runs = r?.data ?? []
+      // apiGet already unwraps `{ success, data }` envelopes, so the result is usually
+      // the raw array. Handle both shapes defensively.
+      const runs = Array.isArray(r) ? r : (r?.data ?? [])
       setAllRuns(Array.isArray(runs) ? runs : [])
     } catch (err) {
       toast({
@@ -365,6 +399,46 @@ export function PipelineView() {
     }
     return Array.from(map.values()).slice(-7)
   })()
+
+  // ----- Pipeline Analytics (Task 12) -----
+  // Most recent 20 runs, oldest first so the timeline reads left → right.
+  const timelineData = allRuns
+    .slice(0, 20)
+    .reverse()
+    .map((run) => {
+      const d = new Date(run.startedAt)
+      const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+      return {
+        time,
+        duration: run.durationMs ?? 0,
+        status: run.status,
+        rows: run.rowsWritten ?? 0,
+        name: run.source?.name ?? 'Pipeline',
+      }
+    })
+
+  // Status distribution for the donut chart.
+  const statusCounts = allRuns.reduce((acc, run) => {
+    acc[run.status] = (acc[run.status] || 0) + 1
+    return acc
+  }, {} as Record<string, number>)
+
+  const pieData = Object.entries(statusCounts).map(([name, value]) => ({
+    name,
+    value,
+    color: STATUS_COLORS[name] ?? STATUS_COLORS.pending,
+  }))
+
+  // Stat cards
+  const totalRuns = allRuns.length
+  const successCount = allRuns.filter((r) => r.status === 'success').length
+  const successRate = totalRuns > 0 ? Math.round((successCount / totalRuns) * 100) : 0
+  const completedRuns = allRuns.filter((r) => r.durationMs != null)
+  const avgDuration =
+    completedRuns.length > 0
+      ? Math.round(completedRuns.reduce((s, r) => s + (r.durationMs ?? 0), 0) / completedRuns.length)
+      : 0
+  const totalRowsWritten = allRuns.reduce((s, r) => s + (r.rowsWritten ?? 0), 0)
 
   if (loading) {
     return (
@@ -1120,6 +1194,285 @@ export function PipelineView() {
           })
         )}
       </div>
+
+      {/* Pipeline Analytics — run history timeline + status distribution */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.1 }}
+        className="space-y-4"
+      >
+        <div className="flex items-center gap-3 pt-2">
+          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white shadow-sm">
+            <Activity className="h-5 w-5" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+              Pipeline Analytics
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Run history and performance metrics across all pipelines
+            </p>
+          </div>
+        </div>
+
+        {/* Stat cards row */}
+        <motion.div
+          variants={analyticsContainerVariants}
+          initial="hidden"
+          animate="visible"
+          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+        >
+          <motion.div variants={analyticsItemVariants}>
+            <Card className="overflow-hidden relative">
+              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Total Runs
+                  </div>
+                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+                    <BarChart3 className="h-3.5 w-3.5 text-emerald-600" />
+                  </div>
+                </div>
+                <div className="mt-2 text-2xl font-bold">{totalRuns.toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {successCount} successful · {totalRuns - successCount} other
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div variants={analyticsItemVariants}>
+            <Card className="overflow-hidden relative">
+              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Success Rate
+                  </div>
+                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+                    <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+                  </div>
+                </div>
+                <div className="mt-2 text-2xl font-bold text-emerald-600">{successRate}%</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {totalRuns > 0 ? `${successCount} of ${totalRuns} runs` : 'No runs yet'}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div variants={analyticsItemVariants}>
+            <Card className="overflow-hidden relative">
+              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Avg Duration
+                  </div>
+                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+                    <Timer className="h-3.5 w-3.5 text-emerald-600" />
+                  </div>
+                </div>
+                <div className="mt-2 text-2xl font-bold">
+                  {avgDuration > 0 ? `${avgDuration.toLocaleString()}ms` : '—'}
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {completedRuns.length > 0
+                    ? `across ${completedRuns.length} completed runs`
+                    : 'no completed runs'}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div variants={analyticsItemVariants}>
+            <Card className="overflow-hidden relative">
+              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+              <CardContent className="pt-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                    Total Rows Written
+                  </div>
+                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+                    <Database className="h-3.5 w-3.5 text-emerald-600" />
+                  </div>
+                </div>
+                <div className="mt-2 text-2xl font-bold">{totalRowsWritten.toLocaleString()}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">across all runs</div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </motion.div>
+
+        {totalRuns === 0 ? (
+          <Card>
+            <CardContent className="py-12 flex flex-col items-center justify-center text-muted-foreground">
+              <Activity className="h-10 w-10 mb-2 opacity-40" />
+              <p className="text-sm font-medium">No run history yet</p>
+              <p className="text-xs mt-1">
+                Run a pipeline to populate the timeline and status charts.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-3">
+            {/* Run Duration Timeline (Bar Chart) */}
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-emerald-600" />
+                  Run Duration Timeline
+                </CardTitle>
+                <CardDescription>
+                  Duration (ms) of the last {timelineData.length} pipeline runs
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[280px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={timelineData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                      <XAxis
+                        dataKey="time"
+                        tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                        tickLine={false}
+                        axisLine={{ stroke: 'var(--border)' }}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+                        tickLine={false}
+                        axisLine={false}
+                        width={48}
+                      />
+                      <RTooltip
+                        cursor={{ fill: 'var(--muted)', opacity: 0.3 }}
+                        contentStyle={{
+                          backgroundColor: 'var(--popover)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: 'var(--popover-foreground)',
+                        }}
+                        labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600 }}
+                        itemStyle={{ color: 'var(--popover-foreground)' }}
+                        formatter={(value: number, _name, entry) => {
+                          const status = (entry?.payload as { status?: string })?.status ?? 'unknown'
+                          const rows = (entry?.payload as { rows?: number })?.rows ?? 0
+                          return [
+                            `${Number(value).toLocaleString()}ms · ${rows.toLocaleString()} rows`,
+                            status.charAt(0).toUpperCase() + status.slice(1),
+                          ]
+                        }}
+                        labelFormatter={(label) => `Started ${label}`}
+                      />
+                      <Bar dataKey="duration" radius={[4, 4, 0, 0]} name="Duration">
+                        {timelineData.map((entry, i) => (
+                          <Cell
+                            key={`cell-${i}`}
+                            fill={STATUS_COLORS[entry.status] ?? STATUS_COLORS.pending}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Status legend */}
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+                  {Object.entries(STATUS_COLORS).map(([status, color]) => {
+                    const count = statusCounts[status] ?? 0
+                    if (count === 0) return null
+                    return (
+                      <div key={status} className="flex items-center gap-1.5">
+                        <span
+                          className="inline-block h-2.5 w-2.5 rounded-sm"
+                          style={{ backgroundColor: color }}
+                          aria-hidden
+                        />
+                        <span className="capitalize text-muted-foreground">{status}</span>
+                        <span className="font-medium">{count}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Status Distribution (Donut Chart) */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-emerald-600" />
+                  Status Distribution
+                </CardTitle>
+                <CardDescription>Run outcome breakdown</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="h-[280px] w-full relative">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={90}
+                        paddingAngle={2}
+                        stroke="var(--background)"
+                        strokeWidth={2}
+                      >
+                        {pieData.map((entry, i) => (
+                          <Cell key={`pie-cell-${i}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <RTooltip
+                        contentStyle={{
+                          backgroundColor: 'var(--popover)',
+                          border: '1px solid var(--border)',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          color: 'var(--popover-foreground)',
+                        }}
+                        labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600 }}
+                        itemStyle={{ color: 'var(--popover-foreground)' }}
+                        formatter={(value: number, name: string) => [
+                          `${value} run${value === 1 ? '' : 's'}`,
+                          name.charAt(0).toUpperCase() + name.slice(1),
+                        ]}
+                      />
+                      <Legend
+                        verticalAlign="bottom"
+                        iconType="circle"
+                        iconSize={8}
+                        wrapperStyle={{
+                          fontSize: '11px',
+                          color: 'var(--muted-foreground)',
+                          paddingTop: '4px',
+                        }}
+                        formatter={(value: string) => (
+                          <span style={{ color: 'var(--muted-foreground)' }} className="capitalize">
+                            {value}
+                          </span>
+                        )}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Center label overlay */}
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center -mt-7">
+                    <div className="text-2xl font-bold">{totalRuns}</div>
+                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                      Total Runs
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </motion.div>
     </motion.div>
   )
 }

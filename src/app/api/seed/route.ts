@@ -441,7 +441,7 @@ export async function POST(request: NextRequest) {
       results.push('Created 5 storage files')
     }
 
-    // Create demo alert configs
+    // Create demo alert configs (idempotent: only create if no configs exist at all)
     const existingAlerts = await db.alertConfig.findMany()
     if (existingAlerts.length === 0) {
       await db.alertConfig.createMany({
@@ -453,6 +453,194 @@ export async function POST(request: NextRequest) {
         ]
       })
       results.push('Created 4 alert configs')
+    }
+
+    // Ensure a complete set of alert configs exists (add any missing metrics)
+    const desiredMetricConfigs = [
+      { metricType: 'cpu', threshold: 80, operator: '>', duration: 300, isEnabled: true },
+      { metricType: 'req_per_sec', threshold: 1000, operator: '>', duration: 60, isEnabled: true },
+      { metricType: 'error_rate', threshold: 5, operator: '>', duration: 120, isEnabled: true },
+      { metricType: 'disk', threshold: 85, operator: '>', duration: 600, isEnabled: true },
+      { metricType: 'ram', threshold: 90, operator: '>', duration: 180, isEnabled: true },
+      { metricType: 'latency', threshold: 500, operator: '>', duration: 60, isEnabled: true },
+    ]
+    const currentConfigs = await db.alertConfig.findMany()
+    let addedConfigs = 0
+    for (const desired of desiredMetricConfigs) {
+      const exists = currentConfigs.find(
+        (c) => c.metricType === desired.metricType,
+      )
+      if (!exists) {
+        await db.alertConfig.create({ data: desired })
+        addedConfigs++
+      }
+    }
+    if (addedConfigs > 0) {
+      results.push(`Added ${addedConfigs} missing alert config(s)`)
+    }
+
+    // Create demo alert events (only if none exist yet)
+    const existingEvents = await db.alertEvent.count()
+    if (existingEvents === 0) {
+      const allConfigs = await db.alertConfig.findMany()
+      const findConfig = (metric: string) =>
+        allConfigs.find((c) => c.metricType === metric)
+
+      const cpuConfig = findConfig('cpu')
+      const ramConfig = findConfig('ram')
+      const diskConfig = findConfig('disk')
+      const errorRateConfig = findConfig('error_rate')
+      const latencyConfig = findConfig('latency')
+      const reqPerSecConfig = findConfig('req_per_sec')
+
+      const now = Date.now()
+      type EventSeed = {
+        configId: string
+        metricType: string
+        metricValue: number
+        threshold: number
+        message: string
+        hoursAgo: number
+        resolved: boolean
+      }
+
+      const eventSeeds: EventSeed[] = []
+      if (cpuConfig) {
+        eventSeeds.push(
+          {
+            configId: cpuConfig.id,
+            metricType: 'cpu',
+            metricValue: 87.3,
+            threshold: cpuConfig.threshold,
+            message: 'CPU usage exceeded 80% threshold',
+            hoursAgo: 6,
+            resolved: true,
+          },
+          {
+            configId: cpuConfig.id,
+            metricType: 'cpu',
+            metricValue: 92.5,
+            threshold: cpuConfig.threshold,
+            message: 'CPU usage critical at 92.5% on api process',
+            hoursAgo: 3,
+            resolved: true,
+          },
+          {
+            configId: cpuConfig.id,
+            metricType: 'cpu',
+            metricValue: 82.1,
+            threshold: cpuConfig.threshold,
+            message: 'CPU usage spike detected on scraper worker',
+            hoursAgo: 1,
+            resolved: false,
+          },
+        )
+      }
+      if (ramConfig) {
+        eventSeeds.push(
+          {
+            configId: ramConfig.id,
+            metricType: 'ram',
+            metricValue: 94.2,
+            threshold: ramConfig.threshold,
+            message: 'RAM usage critical at 94.2% — possible memory leak',
+            hoursAgo: 2,
+            resolved: false,
+          },
+          {
+            configId: ramConfig.id,
+            metricType: 'ram',
+            metricValue: 91.0,
+            threshold: ramConfig.threshold,
+            message: 'RAM usage exceeded 90% threshold',
+            hoursAgo: 5,
+            resolved: true,
+          },
+        )
+      }
+      if (diskConfig) {
+        eventSeeds.push({
+          configId: diskConfig.id,
+          metricType: 'disk',
+          metricValue: 88.4,
+          threshold: diskConfig.threshold,
+          message: 'Disk usage approaching 85% threshold',
+          hoursAgo: 4,
+          resolved: true,
+        })
+      }
+      if (errorRateConfig) {
+        eventSeeds.push({
+          configId: errorRateConfig.id,
+          metricType: 'error_rate',
+          metricValue: 7.8,
+          threshold: errorRateConfig.threshold,
+          message: 'Error rate spike detected (7.8% of requests)',
+          hoursAgo: 1.5,
+          resolved: false,
+        })
+      }
+      if (latencyConfig) {
+        eventSeeds.push({
+          configId: latencyConfig.id,
+          metricType: 'latency',
+          metricValue: 612,
+          threshold: latencyConfig.threshold,
+          message: 'API latency exceeded 500ms threshold (p95: 612ms)',
+          hoursAgo: 0.5,
+          resolved: false,
+        })
+      }
+      if (reqPerSecConfig) {
+        eventSeeds.push({
+          configId: reqPerSecConfig.id,
+          metricType: 'req_per_sec',
+          metricValue: 1245,
+          threshold: reqPerSecConfig.threshold,
+          message: 'Request rate exceeded 1000 req/sec threshold',
+          hoursAgo: 8,
+          resolved: true,
+        })
+      }
+
+      for (const e of eventSeeds) {
+        const createdAt = new Date(now - e.hoursAgo * 60 * 60 * 1000)
+        await db.alertEvent.create({
+          data: {
+            configId: e.configId,
+            metricType: e.metricType,
+            metricValue: e.metricValue,
+            threshold: e.threshold,
+            message: e.message,
+            isResolved: e.resolved,
+            resolvedAt: e.resolved
+              ? new Date(createdAt.getTime() + 20 * 60 * 1000)
+              : null,
+            createdAt,
+          },
+        })
+      }
+      results.push(`Created ${eventSeeds.length} alert events`)
+
+      // Update lastTriggeredAt on each affected config based on most recent event
+      const configsById = new Map(allConfigs.map((c) => [c.id, c]))
+      const latestByConfig = new Map<string, Date>()
+      for (const e of eventSeeds) {
+        const createdAt = new Date(now - e.hoursAgo * 60 * 60 * 1000)
+        const existing = latestByConfig.get(e.configId)
+        if (!existing || createdAt > existing) {
+          latestByConfig.set(e.configId, createdAt)
+        }
+      }
+      for (const [configId, latestAt] of latestByConfig.entries()) {
+        const config = configsById.get(configId)
+        if (config) {
+          await db.alertConfig.update({
+            where: { id: configId },
+            data: { lastTriggeredAt: latestAt },
+          })
+        }
+      }
     }
 
     // Create demo pipeline runs

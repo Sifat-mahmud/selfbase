@@ -100,11 +100,18 @@ export async function parseBody(request: Request): Promise<any> {
   }
 }
 
-// Get params from route segments (Next.js 16 style)
+// Get query params from a Request URL
 export function getParams(request: Request): Record<string, string> {
-  // In Next.js App Router, params are passed as route handler arguments
-  // This is a placeholder that returns empty object
-  return {};
+  try {
+    const url = new URL(request.url);
+    const params: Record<string, string> = {};
+    url.searchParams.forEach((value, key) => {
+      params[key] = value;
+    });
+    return params;
+  } catch {
+    return {};
+  }
 }
 
 // Generate version hash from data
