@@ -32,6 +32,7 @@ import {
   FileText,
   Search,
   Command,
+  Settings,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -58,6 +59,9 @@ import { FunctionsView } from '@/components/admin/functions'
 import { MonitoringView } from '@/components/admin/monitoring'
 import { AiView } from '@/components/admin/ai'
 import { LogsView } from '@/components/admin/logs'
+import { SettingsView } from '@/components/admin/settings'
+import { RealtimeIndicator } from '@/components/admin/realtime-indicator'
+import { NotificationsBell } from '@/components/admin/notifications-bell'
 
 const navItems: { section: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { section: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -70,6 +74,7 @@ const navItems: { section: AdminSection; label: string; icon: React.ComponentTyp
   { section: 'monitoring', label: 'Monitoring', icon: Activity },
   { section: 'ai', label: 'AI', icon: Brain },
   { section: 'logs', label: 'Logs', icon: FileText },
+  { section: 'settings', label: 'Settings', icon: Settings },
 ]
 
 function SectionContent({ section }: { section: AdminSection }) {
@@ -84,6 +89,7 @@ function SectionContent({ section }: { section: AdminSection }) {
     case 'monitoring': return <MonitoringView />
     case 'ai': return <AiView />
     case 'logs': return <LogsView />
+    case 'settings': return <SettingsView />
     default: return <DashboardView />
   }
 }
@@ -181,12 +187,14 @@ export default function AdminStudio() {
           <header className="flex h-12 items-center gap-3 border-b bg-white px-4 shrink-0">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="h-5" />
+            <NotificationsBell />
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-xs capitalize text-emerald-600 border-emerald-200 bg-emerald-50">
                 {navItems.find((n) => n.section === activeSection)?.label ?? 'Dashboard'}
               </Badge>
             </div>
             <div className="ml-auto flex items-center gap-2">
+              <RealtimeIndicator />
               <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => setCommandOpen(true)}>
                 <Command className="h-3 w-3" />
                 <span className="hidden sm:inline">Command</span>

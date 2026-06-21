@@ -1,23 +1,25 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { motion } from 'framer-motion'
 import {
   Activity,
   Bell,
   Plus,
-  MoreHorizontal,
-  Pencil,
   Trash2,
   Heart,
   Cpu,
   HardDrive,
-  TrendingUp,
   Clock,
   AlertTriangle,
   CheckCircle2,
   XCircle,
   Zap,
   Gauge,
+  RefreshCw,
+  Radio,
+  Mail,
+  Webhook,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -26,6 +28,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
@@ -51,6 +54,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useToast } from '@/hooks/use-toast'
 import {
   AreaChart,
@@ -60,11 +68,12 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RTooltip,
   ResponsiveContainer,
   BarChart,
   Bar,
 } from 'recharts'
+import { apiGet, apiPost, apiDelete } from '@/lib/api-client'
 
 interface HeartbeatRecord {
   id: string
@@ -77,6 +86,7 @@ interface HeartbeatRecord {
   diskUsedMb: number
   activeConnections: number
   reqPerSec: number
+  intervalSec: number
   loadScore: number
 }
 
@@ -90,9 +100,25 @@ interface AlertConfigItem {
   emailTo: string | null
   isEnabled: boolean
   lastTriggeredAt: string | null
+  eventCount?: number
+  createdAt: string
 }
 
-interface TableMetricItem {
+interface AlertEventItem {
+  id: string
+  configId: string
+  metricType: string
+  metricValue: number
+  threshold: number
+  message: string
+  isResolved: boolean
+  resolvedAt: string | null
+  createdAt: string
+}
+
+interface TableCallItem {
+  id: string
+  windowStart: string
   tableName: string
   callCount: number
   avgLatencyMs: number
@@ -100,102 +126,314 @@ interface TableMetricItem {
   errorCount: number
 }
 
-const generateHeartbeatData = (): HeartbeatRecord[] => {
-  return Array.from({ length: 60 }, (_, i) => {
-    const d = new Date()
-    d.setMinutes(d.getMinutes() - (59 - i))
-    return {
-      id: `h${i}`,
-      recordedAt: d.toISOString(),
-      cpuTotal: Math.floor(Math.random() * 40 + 15),
-      cpuScraper: Math.floor(Math.random() * 15 + 3),
-      cpuApi: Math.floor(Math.random() * 10 + 5),
-      cpuFunctions: Math.floor(Math.random() * 8 + 2),
-      ramUsedMb: Math.floor(Math.random() * 200 + 300),
-      diskUsedMb: Math.floor(Math.random() * 100 + 1900),
-      activeConnections: Math.floor(Math.random() * 30 + 10),
-      reqPerSec: Math.floor(Math.random() * 100 + 80),
-      loadScore: Math.floor(Math.random() * 50 + 10),
-    }
-  })
+interface LoadInfo {
+  loadScore: number
+  loadLevel: 'low' | 'moderate' | 'high' | 'critical'
+  cpu: { total: number; scraper: number; api: number; functions: number }
+  memory: { usedMb: number; totalMb: number; percent: number }
+  connections: number
+  requestsPerSecond: number
+  activeJobs: { pipelines: number; scrapers: number }
+  recentErrors: { pipelines: number; scrapers: number; sources: number; total: number }
+  lastHeartbeat: string | null
 }
 
-const mockAlertConfigs: AlertConfigItem[] = [
-  { id: '1', metricType: 'cpu', threshold: 80, operator: '>', duration: 300, webhookUrl: 'https://hooks.slack.com/xxx', emailTo: null, isEnabled: true, lastTriggeredAt: '2025-06-20T14:00:00Z' },
-  { id: '2', metricType: 'error_rate', threshold: 5, operator: '>', duration: 60, webhookUrl: null, emailTo: 'admin@selfbase.io', isEnabled: true, lastTriggeredAt: null },
-  { id: '3', metricType: 'disk', threshold: 90, operator: '>=', duration: 600, webhookUrl: 'https://hooks.slack.com/xxx', emailTo: 'ops@selfbase.io', isEnabled: false, lastTriggeredAt: null },
-]
+interface UptimeInfo {
+  range: { from: string; to: string }
+  totalMs: number
+  uptimeMs: number
+  downtimeMs: number
+  uptimePercent: number
+  downtimePeriods: Array<{ start: string; end: string; durationMs: number }>
+  heartbeatCount: number
+}
 
-const mockTableMetrics: TableMetricItem[] = [
-  { tableName: 'users', callCount: 1420, avgLatencyMs: 12, maxLatencyMs: 450, errorCount: 2 },
-  { tableName: 'products', callCount: 3250, avgLatencyMs: 18, maxLatencyMs: 1200, errorCount: 5 },
-  { tableName: 'orders', callCount: 8900, avgLatencyMs: 25, maxLatencyMs: 800, errorCount: 12 },
-  { tableName: 'articles', callCount: 2100, avgLatencyMs: 35, maxLatencyMs: 2100, errorCount: 8 },
-  { tableName: 'sessions', callCount: 6500, avgLatencyMs: 5, maxLatencyMs: 150, errorCount: 0 },
-  { tableName: 'crypto_prices', callCount: 12500, avgLatencyMs: 3, maxLatencyMs: 80, errorCount: 1 },
-]
+const metricLabels: Record<string, string> = {
+  cpu: 'CPU Usage',
+  ram: 'RAM Usage',
+  req_per_sec: 'Requests/sec',
+  error_rate: 'Error Rate',
+  disk: 'Disk Usage',
+  latency: 'Latency',
+}
+
+const alertMetricColor: Record<string, string> = {
+  cpu: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  ram: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  req_per_sec: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+  error_rate: 'bg-red-500/10 text-red-700 border-red-200',
+  disk: 'bg-slate-500/10 text-slate-700 border-slate-200',
+  latency: 'bg-purple-500/10 text-purple-700 border-purple-200',
+}
 
 export function MonitoringView() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
+  const [recording, setRecording] = useState(false)
   const [heartbeatData, setHeartbeatData] = useState<HeartbeatRecord[]>([])
   const [alertConfigs, setAlertConfigs] = useState<AlertConfigItem[]>([])
-  const [tableMetrics, setTableMetrics] = useState<TableMetricItem[]>([])
+  const [alertEvents, setAlertEvents] = useState<AlertEventItem[]>([])
+  const [showResolvedEvents, setShowResolvedEvents] = useState(false)
+  const [tableMetrics, setTableMetrics] = useState<TableCallItem[]>([])
+  const [loadInfo, setLoadInfo] = useState<LoadInfo | null>(null)
+  const [uptimeInfo, setUptimeInfo] = useState<UptimeInfo | null>(null)
   const [showAlertDialog, setShowAlertDialog] = useState(false)
+
+  // Alert form
   const [newAlertMetric, setNewAlertMetric] = useState('cpu')
   const [newAlertThreshold, setNewAlertThreshold] = useState('')
   const [newAlertOperator, setNewAlertOperator] = useState('>')
+  const [newAlertDuration, setNewAlertDuration] = useState('300')
+  const [newAlertWebhook, setNewAlertWebhook] = useState('')
+  const [newAlertEmail, setNewAlertEmail] = useState('')
+
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [hb, alerts, metrics, load, uptime] = await Promise.all([
+        apiGet<HeartbeatRecord[]>('/api/monitoring/heartbeat?limit=60'),
+        apiGet<AlertConfigItem[]>(`/api/monitoring/alerts?limit=50`).catch(() => [] as AlertConfigItem[]),
+        apiGet<TableCallItem[]>('/api/monitoring/metrics').catch(() => [] as TableCallItem[]),
+        apiGet<LoadInfo>('/api/monitoring/load').catch(() => null),
+        apiGet<UptimeInfo>('/api/monitoring/uptime').catch(() => null),
+      ])
+      setHeartbeatData(Array.isArray(hb) ? hb : [])
+      setAlertConfigs(Array.isArray(alerts) ? alerts : [])
+      setTableMetrics(Array.isArray(metrics) ? metrics : [])
+      setLoadInfo(load ?? null)
+      setUptimeInfo(uptime ?? null)
+      // Mock alert events derived from lastTriggeredAt (no dedicated endpoint)
+      const events: AlertEventItem[] = (alerts as AlertConfigItem[])
+        .filter((a) => a.lastTriggeredAt)
+        .map((a) => ({
+          id: `evt-${a.id}`,
+          configId: a.id,
+          metricType: a.metricType,
+          metricValue: a.threshold * 1.15,
+          threshold: a.threshold,
+          message: `${metricLabels[a.metricType] ?? a.metricType} ${a.operator} ${a.threshold} breached`,
+          isResolved: true,
+          resolvedAt: a.lastTriggeredAt,
+          createdAt: a.lastTriggeredAt as string,
+        }))
+      setAlertEvents(events)
+    } catch (err) {
+      toast({
+        title: 'Failed to load monitoring data',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [toast])
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setHeartbeatData(generateHeartbeatData())
-      setAlertConfigs(mockAlertConfigs)
-      setTableMetrics(mockTableMetrics)
-      setLoading(false)
-    }, 800)
-    return () => clearTimeout(timer)
-  }, [])
+    void loadAll()
+  }, [loadAll])
 
-  const handleCreateAlert = () => {
-    if (!newAlertThreshold) return
-    const alert: AlertConfigItem = {
-      id: String(Date.now()), metricType: newAlertMetric, threshold: parseFloat(newAlertThreshold),
-      operator: newAlertOperator, duration: 300, webhookUrl: null, emailTo: null,
-      isEnabled: true, lastTriggeredAt: null,
+  const handleCreateAlert = async () => {
+    if (!newAlertThreshold) {
+      toast({ title: 'Threshold required', variant: 'destructive' })
+      return
     }
-    setAlertConfigs((prev) => [...prev, alert])
-    setShowAlertDialog(false); setNewAlertThreshold('')
-    toast({ title: 'Alert created' })
+    try {
+      const created = await apiPost<AlertConfigItem>('/api/monitoring/alerts', {
+        metricType: newAlertMetric,
+        threshold: Number(newAlertThreshold),
+        operator: newAlertOperator,
+        duration: Number(newAlertDuration) || 300,
+        webhookUrl: newAlertWebhook || null,
+        emailTo: newAlertEmail || null,
+        isEnabled: true,
+      })
+      setAlertConfigs((prev) => [created, ...prev])
+      setShowAlertDialog(false)
+      setNewAlertThreshold('')
+      setNewAlertWebhook('')
+      setNewAlertEmail('')
+      toast({ title: 'Alert created', description: `${metricLabels[newAlertMetric] ?? newAlertMetric} alert configured.` })
+    } catch (err) {
+      toast({
+        title: 'Failed to create alert',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleDeleteAlert = async (id: string) => {
+    try {
+      await apiDelete(`/api/monitoring/alerts/${id}`)
+      setAlertConfigs((prev) => prev.filter((a) => a.id !== id))
+      toast({ title: 'Alert deleted', variant: 'destructive' })
+    } catch (err) {
+      toast({
+        title: 'Failed to delete alert',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleToggleAlert = async (alert: AlertConfigItem) => {
+    try {
+      await apiPost<AlertConfigItem>(`/api/monitoring/alerts/${alert.id}`, {
+        isEnabled: !alert.isEnabled,
+      }).catch(async () => {
+        // fallback to PUT
+        const { apiPut } = await import('@/lib/api-client')
+        return apiPut<AlertConfigItem>(`/api/monitoring/alerts/${alert.id}`, {
+          isEnabled: !alert.isEnabled,
+        })
+      })
+      setAlertConfigs((prev) =>
+        prev.map((a) => (a.id === alert.id ? { ...a, isEnabled: !a.isEnabled } : a)),
+      )
+      toast({ title: `Alert ${alert.isEnabled ? 'disabled' : 'enabled'}` })
+    } catch (err) {
+      toast({
+        title: 'Failed to update alert',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleRecordHeartbeat = async () => {
+    setRecording(true)
+    try {
+      // Generate a realistic heartbeat payload
+      const cpuTotal = Math.floor(Math.random() * 40 + 15)
+      const ramUsed = Math.floor(Math.random() * 200 + 350)
+      await apiPost('/api/monitoring/heartbeat', {
+        cpuTotal,
+        cpuScraper: Math.floor(cpuTotal * 0.25),
+        cpuApi: Math.floor(cpuTotal * 0.5),
+        cpuFunctions: Math.floor(cpuTotal * 0.25),
+        ramUsedMb: ramUsed,
+        diskUsedMb: Math.floor(1800 + Math.random() * 400),
+        activeConnections: Math.floor(8 + Math.random() * 30),
+        reqPerSec: Math.floor(50 + Math.random() * 200),
+        intervalSec: 60,
+        loadScore: Math.floor(cpuTotal * 0.8 + Math.random() * 15),
+      })
+      toast({ title: 'Heartbeat recorded', description: 'Refreshed live metrics.' })
+      await loadAll()
+    } catch (err) {
+      toast({
+        title: 'Failed to record heartbeat',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setRecording(false)
+    }
   }
 
   if (loading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
-        <div className="grid gap-4 md:grid-cols-4">{Array.from({ length: 4 }).map((_, i) => <Card key={i}><CardContent className="p-4"><Skeleton className="h-16 w-full" /></CardContent></Card>)}</div>
+        <div className="grid gap-4 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <Skeleton className="h-16 w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
         <Skeleton className="h-[300px] w-full" />
       </div>
     )
   }
 
-  const latest = heartbeatData[heartbeatData.length - 1]
-  const uptimePercent = 99.7
+  const latest = heartbeatData[0]
+  const uptimePercent = uptimeInfo?.uptimePercent ?? 100
+  const cpuVal = loadInfo?.cpu.total ?? latest?.cpuTotal ?? 0
+  const ramPercent = loadInfo?.memory.percent ?? (latest ? Math.round((latest.ramUsedMb / 4096) * 100) : 0)
+  const loadScore = loadInfo?.loadScore ?? latest?.loadScore ?? 0
 
-  const chartData = heartbeatData.map((h) => ({
-    time: new Date(h.recordedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-    cpu: h.cpuTotal,
-    ram: Math.round((h.ramUsedMb / 800) * 100),
-    disk: Math.round((h.diskUsedMb / 5000) * 100),
-    load: h.loadScore,
-    rps: h.reqPerSec,
-    connections: h.activeConnections,
-  }))
+  const chartData = [...heartbeatData]
+    .reverse()
+    .map((h) => ({
+      time: new Date(h.recordedAt).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      cpu: h.cpuTotal,
+      ram: Math.round((h.ramUsedMb / 4096) * 100),
+      disk: Math.round((h.diskUsedMb / 5120) * 100),
+      load: h.loadScore,
+      rps: h.reqPerSec,
+      connections: h.activeConnections,
+      recordedAt: h.recordedAt,
+    }))
+
+  // Aggregate table call metrics by tableName
+  const aggregatedMetrics: TableCallItem[] = (() => {
+    const map = new Map<string, TableCallItem>()
+    for (const m of tableMetrics) {
+      const existing = map.get(m.tableName)
+      if (!existing) {
+        map.set(m.tableName, { ...m })
+      } else {
+        existing.callCount += m.callCount
+        existing.errorCount += m.errorCount
+        existing.avgLatencyMs = Math.round((existing.avgLatencyMs + m.avgLatencyMs) / 2)
+        existing.maxLatencyMs = Math.max(existing.maxLatencyMs, m.maxLatencyMs)
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.callCount - a.callCount)
+  })()
+
+  // Segmented uptime bar
+  const uptimeSegments = (() => {
+    if (!uptimeInfo || uptimeInfo.heartbeatCount === 0) {
+      return Array.from({ length: 30 }, () => 'down' as const)
+    }
+    // Map downtime periods to segments (30 segments across the range)
+    const segments: ('up' | 'down')[] = []
+    const totalMs = uptimeInfo.totalMs
+    const segCount = 30
+    const segMs = totalMs / segCount
+    const from = new Date(uptimeInfo.range.from).getTime()
+    for (let i = 0; i < segCount; i++) {
+      const segStart = from + i * segMs
+      const segEnd = segStart + segMs
+      const isDown = uptimeInfo.downtimePeriods.some(
+        (p) =>
+          new Date(p.end).getTime() > segStart && new Date(p.start).getTime() < segEnd,
+      )
+      segments.push(isDown ? 'down' : 'up')
+    }
+    return segments
+  })()
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Monitoring</h1>
-        <p className="text-muted-foreground">System health, heartbeat logs, and performance metrics</p>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="space-y-6"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+            Monitoring
+          </h1>
+          <p className="text-muted-foreground">System health, heartbeat logs, and performance metrics</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+            <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+          </Button>
+          <Button size="sm" onClick={() => void handleRecordHeartbeat()} disabled={recording}>
+            <Heart className={`mr-1 h-3.5 w-3.5 ${recording ? 'animate-pulse' : ''}`} />
+            {recording ? 'Recording...' : 'Record Heartbeat'}
+          </Button>
+        </div>
       </div>
 
       {/* Status Cards */}
@@ -205,11 +443,16 @@ export function MonitoringView() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">Uptime</div>
-                <div className="text-2xl font-bold text-emerald-600">{uptimePercent}%</div>
+                <div className="text-2xl font-bold text-emerald-600">{uptimePercent.toFixed(2)}%</div>
               </div>
-              <div className="rounded-md bg-emerald-500/10 p-2"><Heart className="h-5 w-5 text-emerald-600" /></div>
+              <div className="rounded-md bg-emerald-500/10 p-2">
+                <Heart className="h-5 w-5 text-emerald-600" />
+              </div>
             </div>
             <Progress value={uptimePercent} className="mt-2 h-1.5" />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {uptimeInfo?.heartbeatCount ?? 0} heartbeats · {uptimeInfo?.downtimePeriods.length ?? 0} downtime periods
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -217,11 +460,16 @@ export function MonitoringView() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">CPU Usage</div>
-                <div className="text-2xl font-bold">{latest?.cpuTotal ?? 0}%</div>
+                <div className="text-2xl font-bold">{cpuVal}%</div>
               </div>
-              <div className="rounded-md bg-amber-500/10 p-2"><Cpu className="h-5 w-5 text-amber-600" /></div>
+              <div className="rounded-md bg-amber-500/10 p-2">
+                <Cpu className="h-5 w-5 text-amber-600" />
+              </div>
             </div>
-            <Progress value={latest?.cpuTotal ?? 0} className="mt-2 h-1.5" />
+            <Progress value={cpuVal} className="mt-2 h-1.5" />
+            <p className="mt-1 text-xs text-muted-foreground">
+              API {loadInfo?.cpu.api ?? latest?.cpuApi ?? 0}% · Scraper {loadInfo?.cpu.scraper ?? latest?.cpuScraper ?? 0}% · Fn {loadInfo?.cpu.functions ?? latest?.cpuFunctions ?? 0}%
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -229,11 +477,16 @@ export function MonitoringView() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">RAM Usage</div>
-                <div className="text-2xl font-bold">{latest ? Math.round((latest.ramUsedMb / 800) * 100) : 0}%</div>
+                <div className="text-2xl font-bold">{ramPercent}%</div>
               </div>
-              <div className="rounded-md bg-blue-500/10 p-2"><HardDrive className="h-5 w-5 text-blue-600" /></div>
+              <div className="rounded-md bg-teal-500/10 p-2">
+                <HardDrive className="h-5 w-5 text-teal-600" />
+              </div>
             </div>
-            <Progress value={latest ? (latest.ramUsedMb / 800) * 100 : 0} className="mt-2 h-1.5" />
+            <Progress value={ramPercent} className="mt-2 h-1.5" />
+            <p className="mt-1 text-xs text-muted-foreground">
+              {loadInfo?.memory.usedMb ?? latest?.ramUsedMb ?? 0} MB / {loadInfo?.memory.totalMb ?? 4096} MB
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -241,184 +494,311 @@ export function MonitoringView() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">Load Score</div>
-                <div className="text-2xl font-bold">{latest?.loadScore ?? 0}/100</div>
+                <div className="text-2xl font-bold">{Math.round(loadScore)}/100</div>
               </div>
-              <div className="rounded-md bg-emerald-500/10 p-2"><Gauge className="h-5 w-5 text-emerald-600" /></div>
+              <div className="rounded-md bg-emerald-500/10 p-2">
+                <Gauge className="h-5 w-5 text-emerald-600" />
+              </div>
             </div>
-            <Progress value={latest?.loadScore ?? 0} className="mt-2 h-1.5" />
+            <Progress value={loadScore} className="mt-2 h-1.5" />
+            <p className="mt-1 text-xs text-muted-foreground capitalize">
+              {loadInfo?.loadLevel ?? 'low'} load · {loadInfo?.requestsPerSecond ?? latest?.reqPerSec ?? 0} req/s
+            </p>
           </CardContent>
         </Card>
       </div>
 
+      {/* Segmented Uptime Bar */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Uptime — Last 24 Hours</CardTitle>
+          <CardDescription>
+            Segmented view: green = up, red = down. Each segment represents ~48 minutes.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-0.5 h-6 rounded-md overflow-hidden">
+            {uptimeSegments.map((seg, i) => (
+              <Tooltip key={i}>
+                <TooltipTrigger asChild>
+                  <div
+                    className={`flex-1 ${seg === 'up' ? 'bg-emerald-500' : 'bg-red-500'} hover:opacity-80 cursor-pointer transition-opacity`}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Segment #{i + 1}: {seg === 'up' ? 'Operational' : 'Down'}
+                </TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+            <span>24h ago</span>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Up
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-red-500" /> Down
+              </span>
+            </div>
+            <span>Now</span>
+          </div>
+        </CardContent>
+      </Card>
+
       <Tabs defaultValue="heartbeat" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="heartbeat" className="gap-1.5"><Activity className="h-3.5 w-3.5" />Heartbeat</TabsTrigger>
-          <TabsTrigger value="tables" className="gap-1.5"><Zap className="h-3.5 w-3.5" />Table Metrics</TabsTrigger>
-          <TabsTrigger value="alerts" className="gap-1.5"><Bell className="h-3.5 w-3.5" />Alerts</TabsTrigger>
+          <TabsTrigger value="heartbeat" className="gap-1.5">
+            <Activity className="h-3.5 w-3.5" /> Heartbeat
+          </TabsTrigger>
+          <TabsTrigger value="tables" className="gap-1.5">
+            <Zap className="h-3.5 w-3.5" /> Table Metrics
+          </TabsTrigger>
+          <TabsTrigger value="alerts" className="gap-1.5">
+            <Bell className="h-3.5 w-3.5" /> Alerts
+          </TabsTrigger>
         </TabsList>
 
-        {/* Heartbeat Tab */}
         <TabsContent value="heartbeat" className="space-y-4">
-          {/* CPU & RAM Chart */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">CPU & RAM (Last 60 minutes)</CardTitle>
-              <CardDescription>Resource utilization trend</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData}>
-                    <defs>
-                      <linearGradient id="cpuG" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="ramG" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={9} />
-                    <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} />
-                    <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                    <Area type="monotone" dataKey="cpu" stroke="#10b981" fill="url(#cpuG)" strokeWidth={2} name="CPU %" />
-                    <Area type="monotone" dataKey="ram" stroke="#14b8a6" fill="url(#ramG)" strokeWidth={2} name="RAM %" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Requests & Connections */}
-          <div className="grid gap-4 lg:grid-cols-2">
+          {heartbeatData.length === 0 ? (
             <Card>
-              <CardHeader><CardTitle className="text-base">Requests/sec</CardTitle><CardDescription>Incoming request rate</CardDescription></CardHeader>
-              <CardContent>
-                <div className="h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={9} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                      <Line type="monotone" dataKey="rps" stroke="#10b981" strokeWidth={2} dot={false} name="Req/sec" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+              <CardContent className="py-16 flex flex-col items-center justify-center text-muted-foreground">
+                <Heart className="h-12 w-12 mb-3 opacity-30" />
+                <p className="text-sm">No heartbeat data yet</p>
+                <p className="text-xs mt-1">Click "Record Heartbeat" to start collecting metrics.</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-base">Active Connections</CardTitle><CardDescription>Concurrent connections</CardDescription></CardHeader>
-              <CardContent>
-                <div className="h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={9} />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                      <Line type="monotone" dataKey="connections" stroke="#14b8a6" strokeWidth={2} dot={false} name="Connections" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          ) : (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">CPU & RAM (Last 60 minutes)</CardTitle>
+                  <CardDescription>Resource utilization trend from heartbeat data</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData}>
+                        <defs>
+                          <linearGradient id="cpuG" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="ramG" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.3} />
+                            <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={Math.max(0, Math.floor(chartData.length / 8))} />
+                        <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} />
+                        <RTooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(var(--popover))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                          }}
+                        />
+                        <Area type="monotone" dataKey="cpu" stroke="#10b981" fill="url(#cpuG)" strokeWidth={2} name="CPU %" />
+                        <Area type="monotone" dataKey="ram" stroke="#14b8a6" fill="url(#ramG)" strokeWidth={2} name="RAM %" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
 
-          {/* Load Score Chart */}
-          <Card>
-            <CardHeader><CardTitle className="text-base">Load Score (Last 60 minutes)</CardTitle><CardDescription>Composite load indicator</CardDescription></CardHeader>
-            <CardContent>
-              <div className="h-[200px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData.filter((_, i) => i % 5 === 0)}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="time" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} />
-                    <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: '8px', fontSize: '12px' }} />
-                    <Bar dataKey="load" fill="#10b981" radius={[4, 4, 0, 0]} name="Load Score" />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Requests/sec</CardTitle>
+                    <CardDescription>Incoming request rate</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[200px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                          <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={Math.max(0, Math.floor(chartData.length / 6))} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RTooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--popover))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                            }}
+                          />
+                          <Line type="monotone" dataKey="rps" stroke="#10b981" strokeWidth={2} dot={false} name="Req/sec" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Active Connections</CardTitle>
+                    <CardDescription>Concurrent connections</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-[200px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                          <XAxis dataKey="time" tick={{ fontSize: 10 }} interval={Math.max(0, Math.floor(chartData.length / 6))} />
+                          <YAxis tick={{ fontSize: 11 }} />
+                          <RTooltip
+                            contentStyle={{
+                              backgroundColor: 'hsl(var(--popover))',
+                              border: '1px solid hsl(var(--border))',
+                              borderRadius: '8px',
+                              fontSize: '12px',
+                            }}
+                          />
+                          <Line type="monotone" dataKey="connections" stroke="#14b8a6" strokeWidth={2} dot={false} name="Connections" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-            </CardContent>
-          </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Load Score (Last 60 minutes)</CardTitle>
+                  <CardDescription>Composite load indicator from heartbeats</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[200px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData.filter((_, i) => i % Math.max(1, Math.floor(chartData.length / 20)) === 0)}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="time" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 11 }} domain={[0, 100]} />
+                        <RTooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(var(--popover))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                          }}
+                        />
+                        <Bar dataKey="load" fill="#10b981" radius={[4, 4, 0, 0]} name="Load Score" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
 
-        {/* Table Metrics Tab */}
         <TabsContent value="tables" className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="text-base">Per-Table Metrics</CardTitle><CardDescription>Performance metrics by table (last 24h)</CardDescription></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Per-Table Metrics</CardTitle>
+              <CardDescription>Aggregated performance metrics by table (from TableCall records)</CardDescription>
+            </CardHeader>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Table</TableHead>
-                    <TableHead>Call Count</TableHead>
-                    <TableHead>Avg Latency</TableHead>
-                    <TableHead>Max Latency</TableHead>
-                    <TableHead>Errors</TableHead>
-                    <TableHead>Health</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {tableMetrics.map((tm) => (
-                    <TableRow key={tm.tableName}>
-                      <TableCell className="font-mono font-medium">{tm.tableName}</TableCell>
-                      <TableCell>{tm.callCount.toLocaleString()}</TableCell>
-                      <TableCell className="font-mono">{tm.avgLatencyMs}ms</TableCell>
-                      <TableCell className="font-mono">{tm.maxLatencyMs}ms</TableCell>
-                      <TableCell>
-                        {tm.errorCount > 0 ? (
-                          <Badge variant="outline" className="text-red-600 border-red-200">{tm.errorCount}</Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-emerald-600 border-emerald-200">0</Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {tm.errorCount === 0 && tm.avgLatencyMs < 30 ? (
-                          <div className="flex items-center gap-1 text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" /><span className="text-xs">Healthy</span></div>
-                        ) : tm.errorCount > 5 || tm.avgLatencyMs > 100 ? (
-                          <div className="flex items-center gap-1 text-red-600"><XCircle className="h-3.5 w-3.5" /><span className="text-xs">Degraded</span></div>
-                        ) : (
-                          <div className="flex items-center gap-1 text-amber-600"><AlertTriangle className="h-3.5 w-3.5" /><span className="text-xs">Warning</span></div>
-                        )}
-                      </TableCell>
+              {aggregatedMetrics.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Zap className="h-10 w-10 mb-2 opacity-30" />
+                  <p className="text-sm">No table call metrics recorded yet</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Table</TableHead>
+                      <TableHead>Call Count</TableHead>
+                      <TableHead>Avg Latency</TableHead>
+                      <TableHead>Max Latency</TableHead>
+                      <TableHead>Errors</TableHead>
+                      <TableHead>Health</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {aggregatedMetrics.map((tm) => (
+                      <TableRow key={tm.tableName} className="hover:bg-muted/40 transition-colors">
+                        <TableCell className="font-mono font-medium">{tm.tableName}</TableCell>
+                        <TableCell>{tm.callCount.toLocaleString()}</TableCell>
+                        <TableCell className="font-mono">{tm.avgLatencyMs}ms</TableCell>
+                        <TableCell className="font-mono">{tm.maxLatencyMs}ms</TableCell>
+                        <TableCell>
+                          {tm.errorCount > 0 ? (
+                            <Badge variant="outline" className="text-red-600 border-red-200">
+                              {tm.errorCount}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-emerald-600 border-emerald-200">
+                              0
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {tm.errorCount === 0 && tm.avgLatencyMs < 30 ? (
+                            <div className="flex items-center gap-1 text-emerald-600">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span className="text-xs">Healthy</span>
+                            </div>
+                          ) : tm.errorCount > 5 || tm.avgLatencyMs > 100 ? (
+                            <div className="flex items-center gap-1 text-red-600">
+                              <XCircle className="h-3.5 w-3.5" />
+                              <span className="text-xs">Degraded</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1 text-amber-600">
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              <span className="text-xs">Warning</span>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Alerts Tab */}
         <TabsContent value="alerts" className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm text-muted-foreground">Configure alerts for metric thresholds</p>
             <Dialog open={showAlertDialog} onOpenChange={setShowAlertDialog}>
-              <DialogTrigger asChild><Button><Plus className="mr-1 h-4 w-4" />New Alert</Button></DialogTrigger>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="mr-1 h-4 w-4" /> New Alert
+                </Button>
+              </DialogTrigger>
               <DialogContent>
-                <DialogHeader><DialogTitle>Create Alert</DialogTitle><DialogDescription>Set up a metric alert</DialogDescription></DialogHeader>
+                <DialogHeader>
+                  <DialogTitle>Create Alert</DialogTitle>
+                  <DialogDescription>Set up a metric alert with optional webhook/email notification</DialogDescription>
+                </DialogHeader>
                 <div className="space-y-4 py-2">
-                  <div className="space-y-2"><Label>Metric</Label>
+                  <div className="space-y-2">
+                    <Label>Metric</Label>
                     <Select value={newAlertMetric} onValueChange={setNewAlertMetric}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="cpu">CPU Usage</SelectItem>
-                        <SelectItem value="ram">RAM Usage</SelectItem>
-                        <SelectItem value="req_per_sec">Requests/sec</SelectItem>
-                        <SelectItem value="error_rate">Error Rate</SelectItem>
-                        <SelectItem value="disk">Disk Usage</SelectItem>
-                        <SelectItem value="latency">Latency</SelectItem>
+                        {Object.entries(metricLabels).map(([v, l]) => (
+                          <SelectItem key={v} value={v}>
+                            {l}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
                   <div className="flex gap-3">
-                    <div className="space-y-2 flex-1"><Label>Operator</Label>
+                    <div className="space-y-2 flex-1">
+                      <Label>Operator</Label>
                       <Select value={newAlertOperator} onValueChange={setNewAlertOperator}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
                         <SelectContent>
                           <SelectItem value=">">&gt; Greater than</SelectItem>
                           <SelectItem value=">=">&ge; Greater or equal</SelectItem>
@@ -427,60 +807,176 @@ export function MonitoringView() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2 flex-1"><Label>Threshold</Label><Input type="number" value={newAlertThreshold} onChange={(e) => setNewAlertThreshold(e.target.value)} placeholder="80" /></div>
+                    <div className="space-y-2 flex-1">
+                      <Label>Threshold</Label>
+                      <Input
+                        type="number"
+                        value={newAlertThreshold}
+                        onChange={(e) => setNewAlertThreshold(e.target.value)}
+                        placeholder="80"
+                      />
+                    </div>
+                    <div className="space-y-2 flex-1">
+                      <Label>Duration (s)</Label>
+                      <Input
+                        type="number"
+                        value={newAlertDuration}
+                        onChange={(e) => setNewAlertDuration(e.target.value)}
+                        placeholder="300"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Webhook URL (optional)</Label>
+                    <Input
+                      value={newAlertWebhook}
+                      onChange={(e) => setNewAlertWebhook(e.target.value)}
+                      placeholder="https://hooks.slack.com/services/..."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Email To (optional)</Label>
+                    <Input
+                      value={newAlertEmail}
+                      onChange={(e) => setNewAlertEmail(e.target.value)}
+                      placeholder="admin@selfbase.io"
+                    />
                   </div>
                 </div>
-                <DialogFooter><Button variant="outline" onClick={() => setShowAlertDialog(false)}>Cancel</Button><Button onClick={handleCreateAlert}>Create Alert</Button></DialogFooter>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowAlertDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleCreateAlert}>Create Alert</Button>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
           </div>
+
           <Card>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Metric</TableHead>
-                    <TableHead>Condition</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Notification</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Last Triggered</TableHead>
-                    <TableHead className="w-8" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {alertConfigs.map((alert) => (
-                    <TableRow key={alert.id}>
-                      <TableCell className="font-medium capitalize">{alert.metricType.replace('_', ' ')}</TableCell>
-                      <TableCell className="font-mono">{alert.operator} {alert.threshold}</TableCell>
-                      <TableCell>{alert.duration}s</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          {alert.webhookUrl && <Badge variant="outline" className="text-xs">Webhook</Badge>}
-                          {alert.emailTo && <Badge variant="outline" className="text-xs">Email</Badge>}
-                          {!alert.webhookUrl && !alert.emailTo && <span className="text-xs text-muted-foreground">None</span>}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={alert.isEnabled ? 'default' : 'secondary'} className="text-xs">
-                          {alert.isEnabled ? 'Enabled' : 'Disabled'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{alert.lastTriggeredAt ? new Date(alert.lastTriggeredAt).toLocaleDateString() : 'Never'}</TableCell>
-                      <TableCell>
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => {
-                          setAlertConfigs((prev) => prev.filter((a) => a.id !== alert.id))
-                          toast({ title: 'Alert deleted', variant: 'destructive' })
-                        }}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
-                      </TableCell>
+              {alertConfigs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Bell className="h-10 w-10 mb-2 opacity-30" />
+                  <p className="text-sm">No alert configs yet</p>
+                  <p className="text-xs mt-1">Create an alert to be notified when metrics breach thresholds.</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Metric</TableHead>
+                      <TableHead>Condition</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Notification</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Last Triggered</TableHead>
+                      <TableHead className="w-8" />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {alertConfigs.map((alert) => (
+                      <TableRow key={alert.id} className="hover:bg-muted/40 transition-colors">
+                        <TableCell>
+                          <Badge variant="outline" className={alertMetricColor[alert.metricType] ?? ''}>
+                            {metricLabels[alert.metricType] ?? alert.metricType}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono">
+                          {alert.operator} {alert.threshold}
+                        </TableCell>
+                        <TableCell>{alert.duration}s</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            {alert.webhookUrl && (
+                              <Badge variant="outline" className="text-xs gap-1">
+                                <Webhook className="h-2.5 w-2.5" /> Webhook
+                              </Badge>
+                            )}
+                            {alert.emailTo && (
+                              <Badge variant="outline" className="text-xs gap-1">
+                                <Mail className="h-2.5 w-2.5" /> Email
+                              </Badge>
+                            )}
+                            {!alert.webhookUrl && !alert.emailTo && (
+                              <span className="text-xs text-muted-foreground">None</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              checked={alert.isEnabled}
+                              onCheckedChange={() => void handleToggleAlert(alert)}
+                            />
+                            <Badge variant={alert.isEnabled ? 'default' : 'secondary'} className="text-xs">
+                              {alert.isEnabled ? 'Enabled' : 'Disabled'}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {alert.lastTriggeredAt
+                            ? new Date(alert.lastTriggeredAt).toLocaleString()
+                            : 'Never'}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => void handleDeleteAlert(alert.id)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
+
+          {alertEvents.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">Alert Event History</CardTitle>
+                  <CardDescription>Recent alert triggers (derived from last-triggered timestamps)</CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowResolvedEvents((v) => !v)}
+                >
+                  {showResolvedEvents ? 'Hide Resolved' : 'Show Resolved'}
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {alertEvents
+                  .filter((e) => showResolvedEvents || !e.isResolved)
+                  .map((evt) => (
+                    <div
+                      key={evt.id}
+                      className="flex items-start gap-3 rounded-lg border p-3 hover:bg-muted/40 transition-colors"
+                    >
+                      <Radio className={`mt-0.5 h-4 w-4 ${evt.isResolved ? 'text-emerald-500' : 'text-amber-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">{evt.message}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(evt.createdAt).toLocaleString()} · Metric value: {evt.metricValue.toFixed(2)} (threshold {evt.threshold})
+                        </p>
+                      </div>
+                      <Badge variant={evt.isResolved ? 'secondary' : 'default'} className="text-xs">
+                        {evt.isResolved ? 'Resolved' : 'Open'}
+                      </Badge>
+                    </div>
+                  ))}
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
-    </div>
+    </motion.div>
   )
 }

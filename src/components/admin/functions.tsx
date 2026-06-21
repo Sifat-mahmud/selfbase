@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { motion } from 'framer-motion'
 import {
   Code2,
   Plus,
@@ -16,10 +17,11 @@ import {
   Zap,
   Calendar,
   Radio,
-  Webhook,
   ArrowRight,
   Terminal,
   Copy,
+  RefreshCw,
+  Loader2,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -60,22 +62,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useToast } from '@/hooks/use-toast'
-
-interface SbFunctionItem {
-  id: string
-  name: string
-  description: string | null
-  code: string
-  runtime: string
-  triggerType: 'http' | 'schedule' | 'event'
-  triggerConfig: string | null
-  timeoutMs: number
-  memoryMb: number
-  isActive: boolean
-  createdAt: string
-  runs: FunctionRunItem[]
-}
+import { apiGet, apiPost, apiPut, apiDelete, parseJsonField } from '@/lib/api-client'
 
 interface FunctionRunItem {
   id: string
@@ -85,66 +78,36 @@ interface FunctionRunItem {
   memoryUsedMb: number | null
   startedAt: string
   completedAt: string | null
+  errorPayload?: string | null
+  output?: string | null
 }
 
-const mockFunctions: SbFunctionItem[] = [
-  {
-    id: '1', name: 'emailWorker', description: 'Process email notifications from queue',
-    code: `export default async function handler(req, res) {
-  const { to, subject, body } = req.body;
-  // Send email via SMTP
-  await sendEmail({ to, subject, body });
-  return res.json({ success: true });
-}`,
-    runtime: 'javascript', triggerType: 'http', triggerConfig: null,
-    timeoutMs: 30000, memoryMb: 128, isActive: true, createdAt: '2025-03-15',
-    runs: [
-      { id: 'fr1', status: 'success', triggeredBy: 'http', durationMs: 250, memoryUsedMb: 45, startedAt: '2025-06-21T10:00:00Z', completedAt: '2025-06-21T10:00:00Z' },
-      { id: 'fr2', status: 'timeout', triggeredBy: 'http', durationMs: 30000, memoryUsedMb: 128, startedAt: '2025-06-21T09:45:00Z', completedAt: '2025-06-21T09:45:30Z' },
-    ],
-  },
-  {
-    id: '2', name: 'dailyReport', description: 'Generate and send daily analytics report',
-    code: `export default async function handler(event) {
-  const report = await generateReport('daily');
-  await sendToSlack(report);
-  return { status: 'ok' };
-}`,
-    runtime: 'javascript', triggerType: 'schedule', triggerConfig: '{"cron":"0 9 * * *"}',
-    timeoutMs: 60000, memoryMb: 256, isActive: true, createdAt: '2025-04-01',
-    runs: [
-      { id: 'fr3', status: 'success', triggeredBy: 'schedule', durationMs: 4500, memoryUsedMb: 180, startedAt: '2025-06-21T09:00:00Z', completedAt: '2025-06-21T09:00:05Z' },
-    ],
-  },
-  {
-    id: '3', name: 'webhookHandler', description: 'Handle incoming webhook events',
-    code: `export default async function handler(req, res) {
-  const event = req.body;
-  await processEvent(event);
-  return res.json({ received: true });
-}`,
-    runtime: 'javascript', triggerType: 'event', triggerConfig: '{"pattern":"webhook.*"}',
-    timeoutMs: 15000, memoryMb: 128, isActive: true, createdAt: '2025-05-10',
-    runs: [],
-  },
-  {
-    id: '4', name: 'dataTransform', description: 'ETL transformation pipeline',
-    code: `export default async function handler(req, res) {
-  const data = await fetchSourceData();
-  const transformed = transform(data);
-  await writeToTable(transformed);
-  return res.json({ rows: transformed.length });
-}`,
-    runtime: 'typescript', triggerType: 'http', triggerConfig: null,
-    timeoutMs: 45000, memoryMb: 256, isActive: false, createdAt: '2025-06-01',
-    runs: [],
-  },
-]
+interface SbFunctionItem {
+  id: string
+  name: string
+  description: string | null
+  code: string
+  runtime: string
+  triggerType: 'http' | 'schedule' | 'event'
+  triggerConfig: string | null
+  envVars?: string | null
+  timeoutMs: number
+  memoryMb: number
+  isActive: boolean
+  createdAt: string
+  functionRuns?: FunctionRunItem[]
+}
 
 const triggerIcons = {
   http: Zap,
-  schedule: Calendar,
-  event: Webhook,
+  schedule: Clock,
+  event: Radio,
+}
+
+const triggerBadgeColors: Record<string, string> = {
+  http: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  schedule: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  event: 'bg-purple-500/10 text-purple-700 border-purple-200',
 }
 
 const statusIcons = {
@@ -163,82 +126,293 @@ const statusColors = {
   timeout: 'text-amber-500',
 }
 
+const statusBadgeColors: Record<string, string> = {
+  pending: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  running: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  success: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+  failed: 'bg-red-500/10 text-red-700 border-red-200',
+  timeout: 'bg-amber-500/10 text-amber-700 border-amber-200',
+}
+
+const defaultCode = `export default async function handler(ctx) {
+  const { input, env } = ctx;
+  // Your code here
+  console.log('Input:', input);
+  return { ok: true, received: Object.keys(input || {}).length };
+}
+`
+
 export function FunctionsView() {
   const { toast } = useToast()
   const [functions, setFunctions] = useState<SbFunctionItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [selectedFunction, setSelectedFunction] = useState<SbFunctionItem | null>(null)
+  const [runningId, setRunningId] = useState<string | null>(null)
+
+  // Create form
   const [newName, setNewName] = useState('')
+  const [newDesc, setNewDesc] = useState('')
   const [newRuntime, setNewRuntime] = useState('javascript')
   const [newTrigger, setNewTrigger] = useState<'http' | 'schedule' | 'event'>('http')
-  const [codeText, setCodeText] = useState('')
+  const [newTimeout, setNewTimeout] = useState('30000')
+  const [newMemory, setNewMemory] = useState('128')
+  const [newCron, setNewCron] = useState('')
+  const [newEventPattern, setNewEventPattern] = useState('')
+  const [newEnvVars, setNewEnvVars] = useState('{}')
+  const [codeText, setCodeText] = useState(defaultCode)
+
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await apiGet<SbFunctionItem[]>('/api/functions')
+      setFunctions(Array.isArray(data) ? data : [])
+    } catch (err) {
+      toast({
+        title: 'Failed to load functions',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [toast])
 
   useEffect(() => {
-    const timer = setTimeout(() => { setFunctions(mockFunctions); setLoading(false) }, 600)
-    return () => clearTimeout(timer)
-  }, [])
+    void loadAll()
+  }, [loadAll])
 
-  const handleCreate = () => {
-    if (!newName.trim()) return
-    const fn: SbFunctionItem = {
-      id: String(Date.now()), name: newName, description: null,
-      code: `export default async function handler(req, res) {\n  // Your code here\n  return res.json({ ok: true });\n}`,
-      runtime: newRuntime, triggerType: newTrigger, triggerConfig: null,
-      timeoutMs: 30000, memoryMb: 128, isActive: false, createdAt: new Date().toISOString(), runs: [],
+  const handleCreate = async () => {
+    if (!newName.trim()) {
+      toast({ title: 'Name required', variant: 'destructive' })
+      return
     }
-    setFunctions((prev) => [...prev, fn])
-    setShowCreateDialog(false); setNewName('')
-    toast({ title: 'Function created', description: `"${newName}" has been created.` })
+    const triggerConfig: Record<string, unknown> = {}
+    if (newTrigger === 'schedule' && newCron) triggerConfig.cron = newCron
+    if (newTrigger === 'event' && newEventPattern) triggerConfig.pattern = newEventPattern
+    try {
+      const created = await apiPost<SbFunctionItem>('/api/functions', {
+        name: newName.trim(),
+        description: newDesc || null,
+        code: codeText,
+        runtime: newRuntime,
+        triggerType: newTrigger,
+        triggerConfig: Object.keys(triggerConfig).length > 0 ? JSON.stringify(triggerConfig) : null,
+        envVars: newEnvVars || null,
+        timeoutMs: Number(newTimeout) || 30000,
+        memoryMb: Number(newMemory) || 128,
+        isActive: true,
+      })
+      setFunctions((prev) => [{ ...created, functionRuns: [] }, ...prev])
+      setShowCreateDialog(false)
+      setNewName('')
+      setNewDesc('')
+      setNewRuntime('javascript')
+      setNewTrigger('http')
+      setNewTimeout('30000')
+      setNewMemory('128')
+      setNewCron('')
+      setNewEventPattern('')
+      setNewEnvVars('{}')
+      setCodeText(defaultCode)
+      toast({ title: 'Function created', description: `"${created.name}" has been deployed.` })
+    } catch (err) {
+      toast({
+        title: 'Failed to create function',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
   }
 
-  const handleRun = (id: string) => {
-    toast({ title: 'Function invoked', description: 'The function is now running.' })
+  const handleToggleActive = async (fn: SbFunctionItem) => {
+    try {
+      await apiPut(`/api/functions/${fn.id}`, { isActive: !fn.isActive })
+      setFunctions((prev) =>
+        prev.map((f) => (f.id === fn.id ? { ...f, isActive: !f.isActive } : f)),
+      )
+      if (selectedFunction?.id === fn.id) {
+        setSelectedFunction((prev) => (prev ? { ...prev, isActive: !prev.isActive } : prev))
+      }
+      toast({ title: `Function ${fn.isActive ? 'deactivated' : 'activated'}` })
+    } catch (err) {
+      toast({
+        title: 'Failed to toggle function',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
   }
+
+  const handleRun = async (fn: SbFunctionItem) => {
+    setRunningId(fn.id)
+    try {
+      const result = await apiPost<{ runId: string; status: string; output?: unknown; durationMs?: number; error?: string }>(
+        `/api/functions/${fn.id}/run`,
+        {},
+      )
+      toast({
+        title: result.status === 'success' ? 'Function executed' : 'Function run failed',
+        description:
+          result.status === 'success'
+            ? `Completed in ${result.durationMs ?? 0}ms.`
+            : result.error ?? `Status: ${result.status}`,
+        variant: result.status === 'success' ? 'default' : 'destructive',
+      })
+      await loadAll()
+      if (selectedFunction?.id === fn.id) {
+        const fresh = (await apiGet<SbFunctionItem[]>('/api/functions')).find((f) => f.id === fn.id)
+        if (fresh) setSelectedFunction(fresh)
+      }
+    } catch (err) {
+      toast({
+        title: 'Function run failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setRunningId(null)
+    }
+  }
+
+  const handleDelete = async (fn: SbFunctionItem) => {
+    try {
+      await apiDelete(`/api/functions/${fn.id}`)
+      setFunctions((prev) => prev.filter((f) => f.id !== fn.id))
+      if (selectedFunction?.id === fn.id) setSelectedFunction(null)
+      toast({ title: 'Function deleted', variant: 'destructive' })
+    } catch (err) {
+      toast({
+        title: 'Failed to delete function',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const filteredFunctions = functions.filter(
+    (f) =>
+      f.name.toLowerCase().includes(search.toLowerCase()) ||
+      (f.description ?? '').toLowerCase().includes(search.toLowerCase()),
+  )
 
   if (loading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
-        <div className="grid gap-4 md:grid-cols-2">{Array.from({ length: 4 }).map((_, i) => <Card key={i}><CardContent className="p-4"><Skeleton className="h-40 w-full" /></CardContent></Card>)}</div>
+        <div className="grid gap-4 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="p-4">
+                <Skeleton className="h-40 w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     )
   }
 
   if (selectedFunction) {
     const TriggerIcon = triggerIcons[selectedFunction.triggerType]
+    const runs = selectedFunction.functionRuns ?? []
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-2">
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="space-y-6"
+      >
+        <div className="flex items-center gap-2 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => setSelectedFunction(null)}>
             <ArrowRight className="h-4 w-4 rotate-180" /> Back
           </Button>
           <div className="h-6 w-px bg-border" />
-          <Code2 className="h-5 w-5 text-emerald-500" />
+          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white">
+            <Code2 className="h-5 w-5" />
+          </div>
           <h1 className="text-2xl font-bold tracking-tight">{selectedFunction.name}</h1>
-          <Badge variant="outline" className="capitalize">{selectedFunction.runtime}</Badge>
+          <Badge variant="outline" className={`capitalize ${triggerBadgeColors[selectedFunction.triggerType]}`}>
+            <TriggerIcon className="h-3 w-3 mr-1" />
+            {selectedFunction.triggerType}
+          </Badge>
           <Badge variant={selectedFunction.isActive ? 'default' : 'secondary'}>
             {selectedFunction.isActive ? 'Active' : 'Inactive'}
           </Badge>
+          <div className="ml-auto flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => void handleRun(selectedFunction)}
+              disabled={runningId === selectedFunction.id || !selectedFunction.isActive}
+            >
+              {runningId === selectedFunction.id ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="mr-1 h-3.5 w-3.5" />
+              )}
+              Run
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
-          <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Trigger</div><div className="flex items-center gap-1 text-lg font-bold capitalize"><TriggerIcon className="h-4 w-4" />{selectedFunction.triggerType}</div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Timeout</div><div className="text-lg font-bold">{(selectedFunction.timeoutMs / 1000)}s</div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Memory</div><div className="text-lg font-bold">{selectedFunction.memoryMb} MB</div></CardContent></Card>
-          <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Total Runs</div><div className="text-lg font-bold">{selectedFunction.runs.length}</div></CardContent></Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-sm text-muted-foreground">Trigger</div>
+              <div className="flex items-center gap-1 text-lg font-bold capitalize">
+                <TriggerIcon className="h-4 w-4" />
+                {selectedFunction.triggerType}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-sm text-muted-foreground">Timeout</div>
+              <div className="text-lg font-bold">{selectedFunction.timeoutMs / 1000}s</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-sm text-muted-foreground">Memory</div>
+              <div className="text-lg font-bold">{selectedFunction.memoryMb} MB</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-4">
+              <div className="text-sm text-muted-foreground">Total Runs</div>
+              <div className="text-lg font-bold">{runs.length}</div>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Code Editor */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-base">Source Code</CardTitle>
-              <CardDescription>Function implementation</CardDescription>
+              <CardDescription>
+                {selectedFunction.runtime} · {selectedFunction.code.split('\n').length} lines
+              </CardDescription>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => { navigator.clipboard.writeText(selectedFunction.code); toast({ title: 'Code copied' }) }}><Copy className="h-3.5 w-3.5 mr-1" />Copy</Button>
-              <Button size="sm" onClick={() => handleRun(selectedFunction.id)}><Play className="h-3.5 w-3.5 mr-1" />Run</Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(selectedFunction.code)
+                      toast({ title: 'Code copied' })
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Copy code to clipboard</TooltipContent>
+              </Tooltip>
+              <Button size="sm" onClick={() => void handleRun(selectedFunction)} disabled={runningId === selectedFunction.id || !selectedFunction.isActive}>
+                <Play className="h-3.5 w-3.5 mr-1" /> Run
+              </Button>
             </div>
           </CardHeader>
           <CardContent>
@@ -248,169 +422,364 @@ export function FunctionsView() {
           </CardContent>
         </Card>
 
-        {/* Trigger Config */}
         {selectedFunction.triggerConfig && (
           <Card>
-            <CardHeader><CardTitle className="text-base">Trigger Configuration</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Trigger Configuration</CardTitle>
+              <CardDescription>How this function is invoked</CardDescription>
+            </CardHeader>
             <CardContent>
               <div className="rounded-md bg-muted/50 p-3">
-                <pre className="text-sm font-mono">{JSON.stringify(JSON.parse(selectedFunction.triggerConfig), null, 2)}</pre>
+                <pre className="text-sm font-mono">
+                  {JSON.stringify(parseJsonField(selectedFunction.triggerConfig, {}), null, 2)}
+                </pre>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* Run History */}
         <Card>
-          <CardHeader><CardTitle className="text-base">Run History</CardTitle><CardDescription>Recent function executions</CardDescription></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">Run History</CardTitle>
+            <CardDescription>Recent function executions</CardDescription>
+          </CardHeader>
           <CardContent>
-            {selectedFunction.runs.length === 0 ? (
+            {runs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                 <Terminal className="h-10 w-10 mb-2 opacity-40" />
                 <p className="text-sm">No runs yet</p>
+                <p className="text-xs mt-1">Click "Run" to execute this function.</p>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Trigger</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Memory</TableHead>
-                    <TableHead>Started</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedFunction.runs.map((run) => {
-                    const RunIcon = statusIcons[run.status]
-                    return (
-                      <TableRow key={run.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            <RunIcon className={`h-3.5 w-3.5 ${statusColors[run.status]}`} />
-                            <span className={`text-sm capitalize font-medium ${statusColors[run.status]}`}>{run.status}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell><Badge variant="outline" className="text-xs capitalize">{run.triggeredBy ?? '—'}</Badge></TableCell>
-                        <TableCell className="font-mono text-sm">{run.durationMs ? `${run.durationMs}ms` : '—'}</TableCell>
-                        <TableCell className="text-sm">{run.memoryUsedMb ? `${run.memoryUsedMb} MB` : '—'}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">{new Date(run.startedAt).toLocaleString()}</TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
+              <div className="rounded-md border max-h-96 overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background">
+                    <TableRow>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Trigger</TableHead>
+                      <TableHead>Duration</TableHead>
+                      <TableHead>Memory</TableHead>
+                      <TableHead>Started</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {runs.map((run) => {
+                      const RunIcon = statusIcons[run.status]
+                      return (
+                        <TableRow key={run.id} className="hover:bg-muted/40">
+                          <TableCell>
+                            <div className="flex items-center gap-1.5">
+                              <RunIcon className={`h-3.5 w-3.5 ${statusColors[run.status]}`} />
+                              <span className={`text-sm capitalize font-medium ${statusColors[run.status]}`}>
+                                {run.status}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs capitalize">
+                              {run.triggeredBy ?? '—'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {run.durationMs ? `${run.durationMs}ms` : '—'}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {run.memoryUsedMb ? `${Math.round(run.memoryUsedMb)} MB` : '—'}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(run.startedAt).toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
-      </div>
+      </motion.div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="space-y-6"
+    >
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Functions</h1>
+          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+            Functions
+          </h1>
           <p className="text-muted-foreground">Manage serverless functions and triggers</p>
         </div>
         <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-          <DialogTrigger asChild><Button><Plus className="mr-1 h-4 w-4" />New Function</Button></DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Create Function</DialogTitle><DialogDescription>Deploy a new serverless function</DialogDescription></DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2"><Label>Function Name</Label><Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="myFunction" /></div>
-              <div className="space-y-2"><Label>Runtime</Label>
-                <Select value={newRuntime} onValueChange={setNewRuntime}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="javascript">JavaScript</SelectItem>
-                    <SelectItem value="typescript">TypeScript</SelectItem>
-                  </SelectContent>
-                </Select>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="mr-1 h-4 w-4" /> New Function
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Create Function</DialogTitle>
+              <DialogDescription>Deploy a new serverless function</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Function Name</Label>
+                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="myFunction" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Runtime</Label>
+                  <Select value={newRuntime} onValueChange={setNewRuntime}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="javascript">JavaScript</SelectItem>
+                      <SelectItem value="typescript">TypeScript</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2"><Label>Trigger Type</Label>
-                <Select value={newTrigger} onValueChange={(v) => setNewTrigger(v as typeof newTrigger)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="http">HTTP Endpoint</SelectItem>
-                    <SelectItem value="schedule">Scheduled (Cron)</SelectItem>
-                    <SelectItem value="event">Event-driven</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="What does this function do?" />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Trigger Type</Label>
+                  <Select value={newTrigger} onValueChange={(v) => setNewTrigger(v as typeof newTrigger)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="http">HTTP Endpoint</SelectItem>
+                      <SelectItem value="schedule">Scheduled (Cron)</SelectItem>
+                      <SelectItem value="event">Event-driven</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Timeout (ms)</Label>
+                  <Input type="number" value={newTimeout} onChange={(e) => setNewTimeout(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Memory (MB)</Label>
+                  <Input type="number" value={newMemory} onChange={(e) => setNewMemory(e.target.value)} />
+                </div>
+              </div>
+              {newTrigger === 'schedule' && (
+                <div className="space-y-2">
+                  <Label>Cron Expression</Label>
+                  <Input
+                    value={newCron}
+                    onChange={(e) => setNewCron(e.target.value)}
+                    placeholder="0 9 * * *"
+                  />
+                  <p className="text-xs text-muted-foreground">Standard cron format (min hour day month weekday)</p>
+                </div>
+              )}
+              {newTrigger === 'event' && (
+                <div className="space-y-2">
+                  <Label>Event Pattern</Label>
+                  <Input
+                    value={newEventPattern}
+                    onChange={(e) => setNewEventPattern(e.target.value)}
+                    placeholder="orders.*"
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label>Environment Variables (JSON)</Label>
+                <Textarea
+                  value={newEnvVars}
+                  onChange={(e) => setNewEnvVars(e.target.value)}
+                  className="font-mono text-xs"
+                  rows={3}
+                  placeholder='{"API_KEY": "..."}'
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Code</Label>
+                <Textarea
+                  value={codeText}
+                  onChange={(e) => setCodeText(e.target.value)}
+                  className="font-mono text-xs bg-slate-950 text-emerald-400 min-h-[260px]"
+                  rows={12}
+                />
               </div>
             </div>
-            <DialogFooter><Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancel</Button><Button onClick={handleCreate}>Create Function</Button></DialogFooter>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreate}>Create Function</Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* Stats */}
       <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Total Functions</div><div className="text-2xl font-bold">{functions.length}</div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Active</div><div className="text-2xl font-bold text-emerald-600">{functions.filter(f => f.isActive).length}</div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">HTTP Triggers</div><div className="text-2xl font-bold">{functions.filter(f => f.triggerType === 'http').length}</div></CardContent></Card>
-        <Card><CardContent className="pt-4"><div className="text-sm text-muted-foreground">Total Runs</div><div className="text-2xl font-bold">{functions.reduce((s, f) => s + f.runs.length, 0)}</div></CardContent></Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="text-sm text-muted-foreground">Total Functions</div>
+            <div className="text-2xl font-bold">{functions.length}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="text-sm text-muted-foreground">Active</div>
+            <div className="text-2xl font-bold text-emerald-600">
+              {functions.filter((f) => f.isActive).length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="text-sm text-muted-foreground">HTTP Triggers</div>
+            <div className="text-2xl font-bold">
+              {functions.filter((f) => f.triggerType === 'http').length}
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="text-sm text-muted-foreground">Total Runs</div>
+            <div className="text-2xl font-bold">
+              {functions.reduce((s, f) => s + (f.functionRuns?.length ?? 0), 0)}
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Function Cards */}
-      <div className="grid gap-4 md:grid-cols-2">
-        {functions.map((fn) => {
-          const TriggerIcon = triggerIcons[fn.triggerType]
-          const lastRun = fn.runs[0]
-          return (
-            <Card key={fn.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelectedFunction(fn)}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="rounded-md bg-emerald-500/10 p-1.5"><Code2 className="h-4 w-4 text-emerald-600" /></div>
-                    <CardTitle className="text-base">{fn.name}</CardTitle>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={fn.isActive ? 'default' : 'secondary'} className="text-xs">{fn.isActive ? 'Active' : 'Inactive'}</Badge>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="h-7 w-7"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleRun(fn.id) }}><Play className="mr-2 h-3.5 w-3.5" />Run Now</DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => e.stopPropagation()}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive" onClick={(e) => e.stopPropagation()}><Trash2 className="mr-2 h-3.5 w-3.5" />Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-                <CardDescription className="line-clamp-1">{fn.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <TriggerIcon className="h-3 w-3" />
-                    <span className="capitalize">{fn.triggerType}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">·</span>
-                  <span className="text-xs text-muted-foreground">{fn.runtime}</span>
-                  <span className="text-xs text-muted-foreground">·</span>
-                  <span className="text-xs text-muted-foreground">{fn.timeoutMs / 1000}s timeout</span>
-                  <span className="text-xs text-muted-foreground">·</span>
-                  <span className="text-xs text-muted-foreground">{fn.memoryMb} MB</span>
-                </div>
-                <div className="rounded-md bg-slate-950 text-emerald-400 p-2 overflow-hidden">
-                  <pre className="text-xs font-mono line-clamp-3 whitespace-pre-wrap">{fn.code.slice(0, 150)}...</pre>
-                </div>
-                {lastRun && (
-                  <div className="mt-3 flex items-center gap-2 text-xs border-t pt-2">
-                    {(() => { const Icon = statusIcons[lastRun.status]; return <Icon className={`h-3 w-3 ${statusColors[lastRun.status]}`} /> })()}
-                    <span className={`capitalize ${statusColors[lastRun.status]}`}>{lastRun.status}</span>
-                    <span className="text-muted-foreground">· {lastRun.durationMs ? `${lastRun.durationMs}ms` : '—'}</span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )
-        })}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search functions..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+        </Button>
       </div>
-    </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {filteredFunctions.length === 0 ? (
+          <Card className="md:col-span-2">
+            <CardContent className="py-16 flex flex-col items-center justify-center text-muted-foreground">
+              <Code2 className="h-14 w-14 mb-3 opacity-30" />
+              <p className="text-base font-medium">No functions yet</p>
+              <p className="text-sm mt-1">Deploy your first serverless function to get started.</p>
+              <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+                <Plus className="mr-1 h-4 w-4" /> New Function
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          filteredFunctions.map((fn) => {
+            const TriggerIcon = triggerIcons[fn.triggerType]
+            const lastRun = fn.functionRuns?.[0]
+            const LastStatusIcon = lastRun ? statusIcons[lastRun.status] : null
+            return (
+              <Card
+                key={fn.id}
+                className="cursor-pointer hover:shadow-md hover:border-emerald-200 transition-all"
+                onClick={() => setSelectedFunction(fn)}
+              >
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="rounded-md bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-1.5">
+                        <Code2 className="h-4 w-4 text-emerald-600" />
+                      </div>
+                      <CardTitle className="text-base font-mono">{fn.name}</CardTitle>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={fn.isActive}
+                        onCheckedChange={() => void handleToggleActive(fn)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleRun(fn)
+                            }}
+                          >
+                            <Play className="mr-2 h-3.5 w-3.5" /> Run Now
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleDelete(fn)
+                            }}
+                          >
+                            <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </div>
+                  <CardDescription className="line-clamp-1">{fn.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <Badge variant="outline" className={`text-xs capitalize ${triggerBadgeColors[fn.triggerType]}`}>
+                      <TriggerIcon className="h-3 w-3 mr-1" />
+                      {fn.triggerType}
+                    </Badge>
+                    <Badge variant="outline" className="text-xs">
+                      {fn.runtime}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{fn.timeoutMs / 1000}s timeout</span>
+                    <span className="text-xs text-muted-foreground">·</span>
+                    <span className="text-xs text-muted-foreground">{fn.memoryMb} MB</span>
+                  </div>
+                  <div className="rounded-md bg-slate-950 text-emerald-400 p-2 overflow-hidden">
+                    <pre className="text-xs font-mono line-clamp-3 whitespace-pre-wrap">
+                      {fn.code.slice(0, 180)}
+                      {fn.code.length > 180 ? '...' : ''}
+                    </pre>
+                  </div>
+                  {lastRun && LastStatusIcon && (
+                    <div className="mt-3 flex items-center gap-2 text-xs border-t pt-2">
+                      <LastStatusIcon className={`h-3 w-3 ${statusColors[lastRun.status]}`} />
+                      <span className={`capitalize ${statusColors[lastRun.status]}`}>{lastRun.status}</span>
+                      <span className="text-muted-foreground">
+                        · {lastRun.durationMs ? `${lastRun.durationMs}ms` : 'running'}
+                      </span>
+                      <span className="text-muted-foreground ml-auto">
+                        {new Date(lastRun.startedAt).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })
+        )}
+      </div>
+    </motion.div>
   )
 }
