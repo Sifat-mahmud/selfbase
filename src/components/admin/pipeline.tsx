@@ -659,7 +659,7 @@ export function PipelineView() {
             {selectedPipeline.sourceType}
           </Badge>
           <Badge variant={selectedPipeline.isActive ? 'default' : 'secondary'}>
-            {selectedPipeline.isActive ? 'Active' : 'Paused'}
+            {selectedPipeline.isActive ? <><span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />Active</> : 'Paused'}
           </Badge>
           <div className="ml-auto flex gap-2">
             <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedPipeline)}>
@@ -1845,7 +1845,7 @@ export function PipelineView() {
             </CardContent>
           </Card>
         ) : (
-          filteredPipelines.map((pipeline) => {
+          filteredPipelines.map((pipeline, idx) => {
             const SourceIcon = sourceIcons[pipeline.sourceType]
             const lastRun = pipeline.lastRun ?? pipeline.pipelineRuns?.[0] ?? null
             const StatusIcon = lastRun ? statusIcons[lastRun.status] : Clock
@@ -1856,9 +1856,15 @@ export function PipelineView() {
                 : String(lastRun.durationMs) + 'ms')
               : null
             return (
-              <Card
+              <motion.div
                 key={pipeline.id}
-                className={`cursor-pointer hover:shadow-md hover:border-emerald-300/50 transition-all duration-200 relative overflow-hidden border-l-4 group ${borderClass}`}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.3, delay: idx * 0.05 }}
+              >
+              <Card
+                className={`cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-emerald-300/50 transition-all duration-200 relative overflow-hidden border-l-4 group ${borderClass}`}
                 onClick={() => setSelectedPipeline(pipeline)}
               >
                 <CardHeader className="pb-2">
@@ -1945,7 +1951,7 @@ export function PipelineView() {
                         {pipeline.sourceType}
                       </Badge>
                       {pipeline.isActive ? (
-                        <Badge className="bg-emerald-500/10 text-emerald-600 border-0">Active</Badge>
+                        <Badge className="bg-emerald-500/10 text-emerald-600 border-0"><span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />Active</Badge>
                       ) : (
                         <Badge variant="secondary">Paused</Badge>
                       )}
@@ -2011,6 +2017,7 @@ export function PipelineView() {
                   )}
                 </CardContent>
               </Card>
+              </motion.div>
             )
           })
         )}

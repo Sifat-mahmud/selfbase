@@ -396,7 +396,7 @@ export function FunctionsView() {
             {selectedFunction.triggerType}
           </Badge>
           <Badge variant={selectedFunction.isActive ? 'default' : 'secondary'}>
-            {selectedFunction.isActive ? 'Active' : 'Inactive'}
+            {selectedFunction.isActive ? <><span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />Active</> : 'Inactive'}
           </Badge>
           <div className="ml-auto flex gap-2">
             <Button
@@ -839,14 +839,20 @@ export function FunctionsView() {
             </CardContent>
           </Card>
         ) : (
-          filteredFunctions.map((fn) => {
+          filteredFunctions.map((fn, idx) => {
             const TriggerIcon = triggerIcons[fn.triggerType]
             const lastRun = fn.functionRuns?.[0]
             const LastStatusIcon = lastRun ? statusIcons[lastRun.status] : null
             return (
-              <Card
+              <motion.div
                 key={fn.id}
-                className="cursor-pointer hover:shadow-md hover:border-emerald-200 transition-all"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.3, delay: idx * 0.05 }}
+              >
+              <Card
+                className="cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-emerald-200 transition-all duration-200"
                 onClick={() => setSelectedFunction(fn)}
               >
                 <CardHeader className="pb-2">
@@ -927,6 +933,7 @@ export function FunctionsView() {
                   )}
                 </CardContent>
               </Card>
+              </motion.div>
             )
           })
         )}

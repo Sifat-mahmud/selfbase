@@ -937,4 +937,229 @@ Three-part enhancement task: fix dark mode in Notifications Bell, enhance the Da
 1. Dev server instability in sandbox (environmental, not code bug)
 2. WebSocket/Realtime indicator shows "Connecting..." (Caddy gateway limitation)
 3. Scraper preview needs Playwright (heavy for sandbox)
-4. Future: Cron scheduling, webhook notifications, pipeline templates, table relationships, data import/export
+4. Future: Cron scheduling, webhook notifications, pipeline templates, table relationships
+
+---
+Task ID: R9-2
+Agent: Full-Stack Developer
+Task: Onboarding Tour, Schema Designer, Data Import/Export
+
+Work Log:
+- Read worklog.md and existing code (page.tsx, tables.tsx, api-client.ts, admin-store.ts)
+- Created Onboarding Welcome Tour component (/src/components/admin/onboarding-tour.tsx):
+  - 5-step guided tour: Welcome, Data Hub, Pipelines, AI-Powered, Get Started
+  - localStorage check for `selfbase_onboarding_done` flag
+  - Framer Motion animations between steps (slide + fade)
+  - Emerald/teal gradient theme with step-specific icons
+  - Navigation dots, Skip/Back/Next buttons
+  - Quick action buttons on final step (Create Table, Set Up Pipeline, Explore AI)
+  - Auto-navigates to chosen section on completion
+- Integrated OnboardingTour into page.tsx:
+  - Added `onboardingDone` state to prevent re-rendering after dismissal
+  - Passes `onComplete` callback that navigates to chosen section
+- Created Table Schema Designer in tables.tsx:
+  - Visual Column Cards: Replaced plain table with styled cards per column
+    - Colored left border by type (text=emerald, number=amber, boolean=teal, date=cyan, json=purple)
+    - Type badge with icon, constraint badges (PK, Unique, Indexed, Nullable)
+    - Drag handle icon, edit/delete buttons on hover
+    - Framer Motion staggered animation on load
+  - Add Column Dialog Enhancement:
+    - Live preview card that updates in real-time as user fills form
+    - Type selector with icons (Type, Hash, ToggleLeft, Calendar, Braces)
+    - Auto-suggest for common column names (id, name, email, status, etc.)
+  - Schema Stats Bar: Shows columns count, indexed, unique, primary key with colored dots
+- Added Data Import/Export feature in tables.tsx:
+  - Export button in detail view header with dropdown (CSV, JSON)
+  - `exportFromDetail()` function that fetches data on-demand for export
+  - Filename format: `{tableName}_export.csv` or `.json`
+  - Import button in detail view header
+  - Import dialog with: file input (.csv/.json), preview table (first 5 rows),
+    column mapping (auto-detect + manual), import mode (Append/Replace),
+    progress indicator, success/error toast
+  - CSV parser handles quoted fields
+  - JSON import supports both array and {data: [...]} formats
+  - Type coercion during import (INTEGER, DECIMAL, BOOLEAN, null for empty)
+- Fixed pre-existing lint error in dashboard.tsx (setState in effect → requestAnimationFrame wrapper)
+- Lint clean (0 errors)
+
+Stage Summary:
+- 3 new features implemented: Onboarding Tour, Schema Designer, Import/Export
+- 2 files modified (page.tsx, tables.tsx, dashboard.tsx), 1 file created (onboarding-tour.tsx)
+- All features support light/dark mode with emerald/teal color scheme
+- Lint passes, dev server compiles successfully
+
+---
+
+## R9-3: Dashboard Enhancements, Webhook Management, Micro-Animations
+
+### Task ID: R9-3 | Agent: Full-Stack Developer
+
+### 1. Dashboard Interactive Enhancements (`dashboard.tsx`)
+
+#### a) Animated Counter Hook (`useAnimatedCounter`)
+- Created `useAnimatedCounter(target: number, duration = 1000)` hook
+- Uses `requestAnimationFrame` with ease-out cubic easing
+- Counts up from 0 on first render, then smoothly transitions on value changes
+- Respects `useReducedMotion()` — returns target immediately for accessibility
+- Refactored `AnimatedNumber` component to use the new hook internally
+- Applied to all 4 KPI cards (connections, tables, requests/sec, error rate)
+
+#### b) Interactive Resource Gauge (SVG Semi-circular Speedometer)
+- New `ResourceGauge` component replaces the plain Load Score `ResourceCard`
+- SVG semi-circular gauge with:
+  - Green zone (0-40), amber zone (40-70), red zone (70-100)
+  - Animated arc segments using `motion.path` with staggered `pathLength` animation
+  - Animated needle driven by `useAnimatedCounter` — smoothly rotates to target value
+  - Center score displayed in large bold font with `AnimatedNumber`
+  - Zone label (Low/Moderate/High) with color-coded text
+- Full hover effects (lift + shadow) consistent with other cards
+- Respects reduced motion preferences
+
+#### c) Global Stats Animation (Staggered Slide-in)
+- KPI cards now individually animate in from bottom with staggered delay
+- Each card has `transition={{ delay: index * 0.1 }}` (100ms between each)
+- Uses `initial={{ opacity: 0, y: 20 }}` → `animate={{ opacity: 1, y: 0 }}`
+- Resource cards use `whileInView` scroll reveal with staggered delays
+
+### 2. Webhook Management (`settings.tsx`)
+
+#### New "Webhooks" Tab
+- Added 6th tab to Settings with `Webhook` icon from lucide-react
+- Full CRUD operations for webhooks stored in local component state (demo)
+
+#### a) Webhook List Table
+- Shows URL (truncated with copy button), events, status badge, last triggered, actions
+- Active webhooks have pulsing green dot in status badge
+- Actions: Edit, Test, Delete with tooltip descriptions
+
+#### b) Add Webhook Dialog
+- URL input with `https://` validation
+- Event multi-select with checkboxes (5 events: pipeline.success, pipeline.failed, scraper.complete, alert.triggered, function.error)
+- Auto-generated secret key with copy button (`whk_xxxxxxxx_xxxxxxxx_xxxxxxxx_xxxxxxxx`)
+- Optional description field
+- Active toggle switch
+
+#### c) Edit Webhook Dialog
+- Same form fields as Add dialog (except secret key is read-only)
+- Pre-populated with existing webhook data
+
+#### d) Test Webhook Button
+- Simulates sending a test payload (800-1500ms random delay)
+- 80% success rate for demo realism
+- Shows spinner while testing, then green check or red X icon
+- Tooltip shows result and response time
+- Toast notification with success/failure details
+
+#### e) Tab Switch Animation
+- Replaced `TabsContent` with `AnimatePresence` + `motion.div`
+- Subtle fade-in on tab switch (150ms duration)
+
+### 3. Micro-Animations Across All Sections
+
+#### a) Card Hover Effects
+- **Pipeline cards**: Added `hover:-translate-y-0.5` lift effect
+- **Function cards**: Added `hover:-translate-y-0.5` lift effect
+- **Table column cards**: Added `hover:-translate-y-0.5 hover:shadow-md` lift
+- **Storage bucket cards**: Added `hover:-translate-y-0.5 hover:shadow-md` lift
+- **Monitoring alert cards**: Added `hover:-translate-y-0.5 hover:shadow-md` lift
+- All with `transition-all duration-200`
+
+#### b) Button Press Effect
+- Added `active:scale-[0.97] transition-transform` to all primary buttons in Webhooks tab
+- Applied to Create Webhook, Save Changes, Add Webhook buttons
+
+#### c) Tab Switch Animation
+- Settings: `AnimatePresence mode="wait"` with `motion.div` fade-in (0.15s)
+- Content rendered conditionally based on `activeTab` state
+
+#### d) Badge Pulse
+- **Pipeline "Active" badge**: Added pulsing emerald dot (`animate-pulse`)
+- **Function "Active" badge**: Added pulsing emerald dot (`animate-pulse`)
+- **Webhook "Active" badge**: Added pulsing emerald dot (`animate-pulse`)
+- **Monitoring "Open" alert badge**: Added pulsing amber dot (`animate-pulse`)
+
+#### e) Scroll Reveal (whileInView)
+- **Dashboard resource cards**: `whileInView` with staggered delays (0s, 0.05s, 0.1s, 0.15s)
+- **Pipeline list cards**: `whileInView` with `delay: idx * 0.05`
+- **Function list cards**: `whileInView` with `delay: idx * 0.05`
+- All use `viewport={{ once: true }}` so animation only plays once
+
+### Files Modified
+1. `/src/components/admin/dashboard.tsx` — Animated counter hook, ResourceGauge, staggered animations, scroll reveal
+2. `/src/components/admin/settings.tsx` — Webhooks tab, AnimatePresence tab switching, framer-motion import
+3. `/src/components/admin/pipeline.tsx` — Hover lift, badge pulse, scroll reveal on pipeline cards
+4. `/src/components/admin/functions.tsx` — Hover lift, badge pulse, scroll reveal on function cards
+5. `/src/components/admin/tables.tsx` — Hover lift on column cards
+6. `/src/components/admin/storage.tsx` — Hover lift on bucket cards
+7. `/src/components/admin/monitoring.tsx` — Hover lift on alert cards, badge pulse on open alerts
+
+### Quality Checks
+- ✅ `bun run lint` passes (0 errors)
+- ✅ Dev server compiles successfully
+- ✅ No unused imports
+- ✅ All animations respect `useReducedMotion()`
+- ✅ Light/dark mode supported
+- ✅ No indigo/blue colors used
+
+---
+
+## Round 9 — New Features & Polish (Orchestrator Summary)
+
+**Date**: 2025-06-22
+**Agent**: Main Orchestrator (with 2 sub-agents: R9-2, R9-3)
+
+### Project Status Assessment
+- 12 admin sections fully functional with 15+ API endpoints
+- All APIs return HTTP 200
+- Lint passes clean (0 errors)
+- Dark mode fully supported via next-themes
+- Real data: CSE pipeline with 387 stock rows
+- Onboarding tour working for first-time users
+- Webhook management added to Settings
+- All sections have micro-animations and polish
+
+### Round 9 Total Changes
+
+**Onboarding & Schema Design (R9-2):**
+1. Onboarding Welcome Tour — 5-step guided tour with Framer Motion animations, localStorage persistence
+2. Visual Column Cards — Colored borders by type, constraint badges, drag handle icons, staggered animations
+3. Add Column Enhancement — Live preview card, type icons, auto-suggest chips for common names
+4. Schema Stats Bar — "X columns · Y indexed · Z unique · 1 primary key" with colored dots
+5. Data Export — CSV/JSON export with dropdown, triggers browser download
+6. Data Import — File input, preview, column mapping, append/replace mode, progress indicator
+
+**Dashboard & Webhooks & Polish (R9-3):**
+7. Animated Counter — requestAnimationFrame-based counter animating KPI numbers from 0
+8. Interactive Resource Gauge — SVG semi-circular speedometer with green/amber/red zones and animated needle
+9. Staggered KPI Animation — Cards slide in from bottom with 100ms stagger
+10. Webhook Management — New Settings tab with CRUD, event multi-select, auto-generated secrets, test button
+11. Card Hover Lift — Consistent hover:translateY(-2px) across all sections
+12. Button Press Effect — active:scale-[0.97] on primary buttons
+13. Tab Switch Animation — AnimatePresence fade-in on tab content
+14. Badge Pulse — animate-pulse dot for active/running/live badges
+15. Scroll Reveal — whileInView fade-in for below-fold cards
+
+### Files Modified (10 files, 1 new)
+- `onboarding-tour.tsx` — NEW: Welcome tour component
+- `dashboard.tsx` — Animated counter, SVG gauge, staggered animations, scroll reveal
+- `tables.tsx` — Visual column cards, schema stats, import/export, auto-suggest
+- `settings.tsx` — Webhooks tab with CRUD, test functionality, tab animations
+- `pipeline.tsx` — Hover lift, badge pulse, scroll reveal
+- `functions.tsx` — Hover lift, badge pulse, scroll reveal
+- `storage.tsx` — Hover lift on bucket cards
+- `monitoring.tsx` — Hover lift on alert cards, badge pulse
+- `page.tsx` — Onboarding tour integration
+
+### QA Verification
+- `bun run lint` passes with 0 errors
+- All 15+ API endpoints return 200
+- Onboarding tour shows and steps through correctly
+- Webhooks tab visible in Settings
+- Dark mode functional
+- All 12 sections render correctly
+- Micro-animations work (hover, press, scroll reveal)
+
+### Unresolved Issues / Next Steps
+1. Dev server instability in sandbox (environmental, not code bug)
+2. WebSocket/Realtime indicator shows "Connecting..." (Caddy gateway limitation)
+3. Future features: Table relationships view, Pipeline templates gallery, Real-time data sync, Cron scheduling UI, Notification channels (email/Slack), Data backup/restore

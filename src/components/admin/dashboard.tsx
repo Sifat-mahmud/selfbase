@@ -264,7 +264,49 @@ const PROGRESS_STYLES: Record<'emerald' | 'amber' | 'red', { bar: string; text: 
 }
 
 // =====================================================================
-// ANIMATED COUNTER
+// ANIMATED COUNTER HOOK — requestAnimationFrame-based count-up from 0
+// =====================================================================
+
+function useAnimatedCounter(target: number, duration = 1000): number {
+  const reduce = useReducedMotion()
+  const [current, setCurrent] = useState(0)
+  const rafRef = useRef<number | null>(null)
+  const startValRef = useRef(0)
+
+  useEffect(() => {
+    if (reduce) {
+      // Use a microtask to avoid synchronous setState in effect
+      const id = requestAnimationFrame(() => setCurrent(target))
+      return () => cancelAnimationFrame(id)
+    }
+    const start = startValRef.current
+    const delta = target - start
+    if (delta === 0) return
+    const startTs = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - startTs) / duration)
+      // ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3)
+      const val = start + delta * eased
+      setCurrent(val)
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick)
+      } else {
+        setCurrent(target)
+        startValRef.current = target
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+  }, [target, duration, reduce])
+
+  return current
+}
+
+// =====================================================================
+// ANIMATED NUMBER DISPLAY (uses useAnimatedCounter)
 // =====================================================================
 
 function AnimatedNumber({
@@ -278,40 +320,17 @@ function AnimatedNumber({
   duration?: number
   className?: string
 }) {
+  const shown = useAnimatedCounter(value, duration)
   const reduce = useReducedMotion()
-  const [display, setDisplay] = useState(value)
-  const rafRef = useRef<number | null>(null)
+  const display = reduce ? value : shown
 
-  useEffect(() => {
-    if (reduce) return // reduced-motion users see raw value, no state writes
-    const start = display
-    const delta = value - start
-    if (delta === 0) return
-    const startTs = performance.now()
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - startTs) / duration)
-      const eased = 1 - Math.pow(1 - t, 3)
-      setDisplay(start + delta * eased)
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(tick)
-      } else {
-        setDisplay(value)
-      }
-    }
-    rafRef.current = requestAnimationFrame(tick)
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current)
-    }
-  }, [value, duration, reduce])
-
-  const shown = reduce ? value : display
   if (format === 'compact') {
-    return <span className={className}>{formatNumber(Math.round(shown))}</span>
+    return <span className={className}>{formatNumber(Math.round(display))}</span>
   }
   if (format === 'percent') {
-    return <span className={className}>{shown.toFixed(1)}%</span>
+    return <span className={className}>{display.toFixed(1)}%</span>
   }
-  return <span className={className}>{Math.round(shown).toLocaleString()}</span>
+  return <span className={className}>{Math.round(display).toLocaleString()}</span>
 }
 
 // =====================================================================
@@ -784,111 +803,129 @@ function DashboardContent({
 
       {/* ====================== KPI CARDS ====================== */}
       <motion.div
-        variants={itemVariants}
         className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
       >
-        <KPICard
-          title="Active Connections"
-          value={computed.connections}
-          icon={<Users className="h-4 w-4" />}
-          spark={computed.sparkConnections}
-          sparkColor="#10b981"
-          direction={computed.connectionsDir}
-          changeLabel={
-            computed.connectionsDir === 'neutral'
-              ? 'stable'
-              : computed.connectionsDir === 'up'
-                ? `+${Math.abs((data.heartbeats[0]?.activeConnections ?? 0) - (data.heartbeats[1]?.activeConnections ?? 0))}`
-                : `-${Math.abs((data.heartbeats[0]?.activeConnections ?? 0) - (data.heartbeats[1]?.activeConnections ?? 0))}`
-          }
-          description="vs last heartbeat"
-        />
-        <KPICard
-          title="Total Tables"
-          value={computed.totalTables}
-          valueFormat="plain"
-          icon={<Database className="h-4 w-4" />}
-          sub={`${formatNumber(computed.totalRows)} rows stored`}
-          sparkColor="#14b8a6"
-          spark={computed.sparkLoad}
-        />
-        <KPICard
-          title="Requests / sec"
-          value={computed.reqPerSec}
-          icon={<Zap className="h-4 w-4" />}
-          spark={computed.sparkReq}
-          sparkColor="#0d9488"
-          direction={computed.reqDir}
-          changeLabel={
-            computed.reqDir === 'neutral'
-              ? 'stable'
-              : `${computed.reqDir === 'up' ? '+' : '-'}${Math.abs(
-                  (data.heartbeats[0]?.reqPerSec ?? 0) - (data.heartbeats[1]?.reqPerSec ?? 0),
-                )}`
-          }
-          description="vs last heartbeat"
-        />
-        <KPICard
-          title="Error Rate"
-          value={computed.errorRate}
-          valueFormat="percent"
-          icon={<AlertTriangle className="h-4 w-4" />}
-          spark={computed.sparkLoad}
-          sparkColor="#f43f5e"
-          direction={computed.loadDir}
-          invertColor
-          changeLabel={`${computed.recentErrorsTotal} errs / hr`}
-          description="last hour"
-        />
+        {[0, 1, 2, 3].map((index) => (
+          <motion.div
+            key={index}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.1, duration: 0.4, ease: 'easeOut' }}
+          >
+            {index === 0 && (
+              <KPICard
+                title="Active Connections"
+                value={computed.connections}
+                icon={<Users className="h-4 w-4" />}
+                spark={computed.sparkConnections}
+                sparkColor="#10b981"
+                direction={computed.connectionsDir}
+                changeLabel={
+                  computed.connectionsDir === 'neutral'
+                    ? 'stable'
+                    : computed.connectionsDir === 'up'
+                      ? `+${Math.abs((data.heartbeats[0]?.activeConnections ?? 0) - (data.heartbeats[1]?.activeConnections ?? 0))}`
+                      : `-${Math.abs((data.heartbeats[0]?.activeConnections ?? 0) - (data.heartbeats[1]?.activeConnections ?? 0))}`
+                }
+                description="vs last heartbeat"
+              />
+            )}
+            {index === 1 && (
+              <KPICard
+                title="Total Tables"
+                value={computed.totalTables}
+                valueFormat="plain"
+                icon={<Database className="h-4 w-4" />}
+                sub={`${formatNumber(computed.totalRows)} rows stored`}
+                sparkColor="#14b8a6"
+                spark={computed.sparkLoad}
+              />
+            )}
+            {index === 2 && (
+              <KPICard
+                title="Requests / sec"
+                value={computed.reqPerSec}
+                icon={<Zap className="h-4 w-4" />}
+                spark={computed.sparkReq}
+                sparkColor="#0d9488"
+                direction={computed.reqDir}
+                changeLabel={
+                  computed.reqDir === 'neutral'
+                    ? 'stable'
+                    : `${computed.reqDir === 'up' ? '+' : '-'}${Math.abs(
+                        (data.heartbeats[0]?.reqPerSec ?? 0) - (data.heartbeats[1]?.reqPerSec ?? 0),
+                      )}`
+                }
+                description="vs last heartbeat"
+              />
+            )}
+            {index === 3 && (
+              <KPICard
+                title="Error Rate"
+                value={computed.errorRate}
+                valueFormat="percent"
+                icon={<AlertTriangle className="h-4 w-4" />}
+                spark={computed.sparkLoad}
+                sparkColor="#f43f5e"
+                direction={computed.loadDir}
+                invertColor
+                changeLabel={`${computed.recentErrorsTotal} errs / hr`}
+                description="last hour"
+              />
+            )}
+          </motion.div>
+        ))}
       </motion.div>
 
       {/* ====================== RESOURCE CARDS ====================== */}
       <motion.div
-        variants={itemVariants}
         className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
       >
-        <ResourceCard
-          title="Load Score"
-          icon={<TrendingUp className="h-4 w-4" />}
-          value={computed.loadScore}
-          max={100}
-          displayValue={`${computed.loadScore}/100`}
-          bucket={progressBucket(computed.loadScore)}
-          description={loadLevelLabel(computed.loadLevel)}
-          spark={computed.sparkLoad}
-          sparkColor="#10b981"
-        />
-        <ResourceCard
-          title="CPU Usage"
-          icon={<Cpu className="h-4 w-4" />}
-          value={computed.cpuTotal}
-          max={100}
-          displayValue={`${computed.cpuTotal}%`}
-          bucket={progressBucket(computed.cpuTotal)}
-          description={`API ${computed.cpuApi}% · Scraper ${computed.cpuScraper}% · Funcs ${computed.cpuFunctions}%`}
-          spark={computed.sparkCpu}
-          sparkColor="#14b8a6"
-        />
-        <ResourceCard
-          title="RAM Usage"
-          icon={<MemoryStick className="h-4 w-4" />}
-          value={computed.ramPercent}
-          max={100}
-          displayValue={`${computed.ramPercent}%`}
-          bucket={progressBucket(computed.ramPercent)}
-          description={`${formatNumber(computed.ramUsedMb)} MB / ${formatNumber(computed.ramTotalMb, 'full')} MB`}
-          spark={computed.sparkRam}
-          sparkColor="#0d9488"
-        />
-        <ResourceCard
-          title="Active Jobs"
-          icon={<Layers className="h-4 w-4" />}
-          value={computed.activePipelineRuns + computed.activeScrapers}
-          max={20}
-          displayValue={`${computed.activePipelineRuns + computed.activeScrapers}`}
-          bucket={computed.activePipelineRuns + computed.activeScrapers >= 15 ? 'red' : computed.activePipelineRuns + computed.activeScrapers >= 8 ? 'amber' : 'emerald'}
-          description={`${computed.activePipelineRuns} pipelines · ${computed.activeScrapers} scrapers running`}
-        />
+        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.3 }}>
+          <ResourceGauge
+            value={computed.loadScore}
+            maxValue={100}
+            label="Load Score"
+            description={loadLevelLabel(computed.loadLevel)}
+          />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.3, delay: 0.05 }}>
+          <ResourceCard
+            title="CPU Usage"
+            icon={<Cpu className="h-4 w-4" />}
+            value={computed.cpuTotal}
+            max={100}
+            displayValue={`${computed.cpuTotal}%`}
+            bucket={progressBucket(computed.cpuTotal)}
+            description={`API ${computed.cpuApi}% · Scraper ${computed.cpuScraper}% · Funcs ${computed.cpuFunctions}%`}
+            spark={computed.sparkCpu}
+            sparkColor="#14b8a6"
+          />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.3, delay: 0.1 }}>
+          <ResourceCard
+            title="RAM Usage"
+            icon={<MemoryStick className="h-4 w-4" />}
+            value={computed.ramPercent}
+            max={100}
+            displayValue={`${computed.ramPercent}%`}
+            bucket={progressBucket(computed.ramPercent)}
+            description={`${formatNumber(computed.ramUsedMb)} MB / ${formatNumber(computed.ramTotalMb, 'full')} MB`}
+            spark={computed.sparkRam}
+            sparkColor="#0d9488"
+          />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.3, delay: 0.15 }}>
+          <ResourceCard
+            title="Active Jobs"
+            icon={<Layers className="h-4 w-4" />}
+            value={computed.activePipelineRuns + computed.activeScrapers}
+            max={20}
+            displayValue={`${computed.activePipelineRuns + computed.activeScrapers}`}
+            bucket={computed.activePipelineRuns + computed.activeScrapers >= 15 ? 'red' : computed.activePipelineRuns + computed.activeScrapers >= 8 ? 'amber' : 'emerald'}
+            description={`${computed.activePipelineRuns} pipelines · ${computed.activeScrapers} scrapers running`}
+          />
+        </motion.div>
       </motion.div>
 
       {/* ====================== CHARTS ROW 1 ====================== */}
@@ -1332,6 +1369,171 @@ function KPICard({
               <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={36} />
             </div>
           )}
+        </CardContent>
+      </Card>
+    </motion.div>
+  )
+}
+
+// =====================================================================
+// RESOURCE GAUGE — SVG semi-circular speedometer gauge
+// =====================================================================
+
+function ResourceGauge({
+  value,
+  maxValue = 100,
+  label,
+  description,
+}: {
+  value: number
+  maxValue?: number
+  label: string
+  description: string
+}) {
+  const reduce = useReducedMotion()
+  const animatedValue = useAnimatedCounter(value, 1200)
+  const displayValue = reduce ? value : animatedValue
+
+  // Gauge geometry
+  const size = 180
+  const strokeWidth = 14
+  const radius = (size - strokeWidth) / 2
+  const cx = size / 2
+  const cy = size / 2 + 10
+  // Semi-circle from 180° to 0° (left to right)
+
+  // Zone boundaries (as fractions of the arc)
+  const greenEnd = 0.4
+  const amberEnd = 0.7
+
+  // Needle angle: 0 = left (180°), 1 = right (0°)
+  const fraction = Math.min(1, Math.max(0, value / maxValue))
+  const needleLen = radius - 8
+
+  // Animated needle angle
+  const animFraction = Math.min(1, Math.max(0, displayValue / maxValue))
+  const animAngleDeg = 180 - animFraction * 180
+  const animAngleRad = (animAngleDeg * Math.PI) / 180
+  const animNeedleX = cx + needleLen * Math.cos(animAngleRad)
+  const animNeedleY = cy - needleLen * Math.sin(animAngleRad)
+
+  // Zone colors
+  const greenColor = '#10b981'
+  const amberColor = '#f59e0b'
+  const redColor = '#ef4444'
+
+  // Zone arc path segments
+  const describeArc = (startFrac: number, endFrac: number) => {
+    const startAngle = Math.PI - startFrac * Math.PI
+    const endAngle = Math.PI - endFrac * Math.PI
+    const x1 = cx + radius * Math.cos(startAngle)
+    const y1 = cy - radius * Math.sin(startAngle)
+    const x2 = cx + radius * Math.cos(endAngle)
+    const y2 = cy - radius * Math.sin(endAngle)
+    const largeArc = endFrac - startFrac > 0.5 ? 1 : 0
+    return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 ${largeArc} 0 ${x2.toFixed(2)} ${y2.toFixed(2)}`
+  }
+
+  // Zone label for the current value
+  const zone =
+    fraction <= greenEnd ? 'Low' : fraction <= amberEnd ? 'Moderate' : 'High'
+  const zoneColor =
+    fraction <= greenEnd
+      ? 'text-emerald-600 dark:text-emerald-400'
+      : fraction <= amberEnd
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-red-600 dark:text-red-400'
+
+  return (
+    <motion.div
+      whileHover={{ y: -2 }}
+      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+      className="group h-full"
+    >
+      <Card className="relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg hover:shadow-emerald-500/10">
+        <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-amber-400 to-red-400 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+          <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {label}
+          </CardTitle>
+          <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">
+            <TrendingUp className="h-4 w-4" />
+          </div>
+        </CardHeader>
+        <CardContent className="relative flex flex-col items-center pt-0">
+          <svg
+            viewBox={`0 0 ${size} ${size * 0.62}`}
+            width="100%"
+            className="max-w-[220px]"
+            aria-label={`Load score: ${value} out of ${maxValue}`}
+          >
+            {/* Background track */}
+            <path
+              d={describeArc(0, 1)}
+              fill="none"
+              stroke="var(--muted)"
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              opacity={0.25}
+            />
+            {/* Green zone */}
+            <motion.path
+              d={describeArc(0, greenEnd)}
+              fill="none"
+              stroke={greenColor}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 1 }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}
+            />
+            {/* Amber zone */}
+            <motion.path
+              d={describeArc(greenEnd, amberEnd)}
+              fill="none"
+              stroke={amberColor}
+              strokeWidth={strokeWidth}
+              strokeLinecap="butt"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 1 }}
+              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.2 }}
+            />
+            {/* Red zone */}
+            <motion.path
+              d={describeArc(amberEnd, 1)}
+              fill="none"
+              stroke={redColor}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 1 }}
+              transition={{ duration: 0.8, ease: 'easeOut', delay: 0.4 }}
+            />
+            {/* Needle */}
+            <motion.line
+              x1={cx}
+              y1={cy}
+              x2={animNeedleX}
+              y2={animNeedleY}
+              stroke="var(--foreground)"
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.3 }}
+            />
+            {/* Needle center dot */}
+            <circle cx={cx} cy={cy} r={4} fill="var(--foreground)" />
+          </svg>
+          {/* Score in center */}
+          <div className="-mt-6 text-center">
+            <div className="text-3xl font-bold tracking-tight">
+              <AnimatedNumber value={value} format="plain" duration={1200} />
+              <span className="text-base font-medium text-muted-foreground">/{maxValue}</span>
+            </div>
+            <div className={`mt-0.5 text-xs font-medium ${zoneColor}`}>{zone} · {description}</div>
+          </div>
         </CardContent>
       </Card>
     </motion.div>

@@ -15,6 +15,7 @@ import {
   ArrowUp,
   ArrowDown,
   Download,
+  Upload,
   ChevronRight,
   Shield,
   Radio,
@@ -32,6 +33,11 @@ import {
   ArrowRight,
   Hash,
   Rows3,
+  GripVertical,
+  Type,
+  ToggleLeft,
+  Calendar,
+  Braces,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -141,6 +147,40 @@ const priorityLabels: Record<number, string> = {
 }
 
 const columnTypes = ['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON']
+
+const typeColorMap: Record<string, string> = {
+  TEXT: 'border-l-emerald-500',
+  INTEGER: 'border-l-amber-500',
+  DECIMAL: 'border-l-amber-500',
+  BOOLEAN: 'border-l-teal-500',
+  TIMESTAMP: 'border-l-cyan-500',
+  JSON: 'border-l-purple-500',
+}
+
+const typeBadgeColors: Record<string, string> = {
+  TEXT: 'bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-400 dark:border-emerald-800',
+  INTEGER: 'bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-400 dark:border-amber-800',
+  DECIMAL: 'bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-400 dark:border-amber-800',
+  BOOLEAN: 'bg-teal-500/10 text-teal-700 border-teal-200 dark:text-teal-400 dark:border-teal-800',
+  TIMESTAMP: 'bg-cyan-500/10 text-cyan-700 border-cyan-200 dark:text-cyan-400 dark:border-cyan-800',
+  JSON: 'bg-purple-500/10 text-purple-700 border-purple-200 dark:text-purple-400 dark:border-purple-800',
+}
+
+const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  TEXT: Type,
+  INTEGER: Hash,
+  DECIMAL: Hash,
+  BOOLEAN: ToggleLeft,
+  TIMESTAMP: Calendar,
+  JSON: Braces,
+}
+
+const columnSuggestions = [
+  'id', 'name', 'email', 'status', 'created_at', 'updated_at',
+  'description', 'title', 'type', 'value', 'count', 'is_active',
+  'deleted_at', 'slug', 'url', 'image', 'price', 'quantity',
+  'category', 'tags', 'metadata', 'priority', 'order', 'parent_id',
+]
 
 const emptyTrend = (rowCount: number) => {
   // Demo trend derived from row count for visual interest.
@@ -262,6 +302,14 @@ export function TablesView() {
   // New column form
   const [newColumnName, setNewColumnName] = useState('')
   const [newColumnType, setNewColumnType] = useState('TEXT')
+
+  // Import state
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importPreview, setImportPreview] = useState<{ headers: string[]; rows: Record<string, string>[] } | null>(null)
+  const [importMode, setImportMode] = useState<'append' | 'replace'>('append')
+  const [importColumnMapping, setImportColumnMapping] = useState<Record<string, string>>({})
+  const [importing, setImporting] = useState(false)
 
   const [sortField, setSortField] = useState<'name' | 'rowCount' | 'priority'>('name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
@@ -679,10 +727,10 @@ export function TablesView() {
       const blob = new Blob([JSON.stringify(parsedRows, null, 2)], {
         type: 'application/json',
       })
-      downloadBlob(blob, `${safeName}.json`)
+      downloadBlob(blob, `${safeName}_export.json`)
       toast({
         title: 'Exported JSON',
-        description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}.json`,
+        description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}_export.json`,
       })
       return
     }
@@ -701,11 +749,188 @@ export function TablesView() {
       csvLines.push(values.join(','))
     }
     const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' })
-    downloadBlob(blob, `${safeName}.csv`)
+    downloadBlob(blob, `${safeName}_export.csv`)
     toast({
       title: 'Exported CSV',
-      description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}.csv`,
+      description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}_export.csv`,
     })
+  }
+
+  async function exportFromDetail(format: 'csv' | 'json') {
+    if (!selectedTable) return
+    try {
+      const rows = await apiGet<SbRowItem[]>(`/api/tables/${selectedTable.id}/rows`)
+      const rowsArr = Array.isArray(rows) ? rows : []
+      // Temporarily set data rows for the export function
+      const prevRows = dataRows
+      setDataRows(rowsArr)
+      // Use a micro-task to let React process the state update
+      await new Promise((r) => setTimeout(r, 0))
+      exportData(format)
+      setDataRows(prevRows)
+    } catch (err) {
+      toast({
+        title: 'Export failed',
+        description: err instanceof Error ? err.message : 'Failed to load data for export',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // --- Import helpers ---
+  function parseCsv(text: string): { headers: string[]; rows: Record<string, string>[] } {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim())
+    if (lines.length === 0) return { headers: [], rows: [] }
+    // Simple CSV parser (handles quoted fields)
+    function splitLine(line: string): string[] {
+      const result: string[] = []
+      let current = ''
+      let inQuotes = false
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i]
+        if (inQuotes) {
+          if (ch === '"' && line[i + 1] === '"') { current += '"'; i++ }
+          else if (ch === '"') { inQuotes = false }
+          else { current += ch }
+        } else {
+          if (ch === '"') { inQuotes = true }
+          else if (ch === ',') { result.push(current); current = '' }
+          else { current += ch }
+        }
+      }
+      result.push(current)
+      return result
+    }
+    const headers = splitLine(lines[0])
+    const rows = lines.slice(1).map((line) => {
+      const vals = splitLine(line)
+      const obj: Record<string, string> = {}
+      headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
+      return obj
+    })
+    return { headers, rows }
+  }
+
+  async function handleImportFile(file: File) {
+    setImportFile(file)
+    setImportPreview(null)
+    setImportColumnMapping({})
+    try {
+      const text = await file.text()
+      let headers: string[] = []
+      let rows: Record<string, string>[] = []
+
+      if (file.name.endsWith('.json')) {
+        const json = JSON.parse(text)
+        const arr = Array.isArray(json) ? json : json.data ?? []
+        if (arr.length > 0 && typeof arr[0] === 'object') {
+          headers = Object.keys(arr[0])
+          rows = arr.slice(0, 100).map((item: Record<string, unknown>) => {
+            const obj: Record<string, string> = {}
+            headers.forEach((h) => { obj[h] = String(item[h] ?? '') })
+            return obj
+          })
+        }
+      } else {
+        // CSV
+        const parsed = parseCsv(text)
+        headers = parsed.headers
+        rows = parsed.rows.slice(0, 100)
+      }
+
+      setImportPreview({ headers, rows })
+
+      // Auto-map headers to existing columns
+      if (selectedTable) {
+        const mapping: Record<string, string> = {}
+        const colNames = selectedTable.columns.map((c) => c.name.toLowerCase())
+        headers.forEach((h) => {
+          const lower = h.toLowerCase().replace(/\s+/g, '_')
+          if (colNames.includes(lower)) {
+            mapping[h] = lower
+          }
+        })
+        setImportColumnMapping(mapping)
+      }
+    } catch (err) {
+      toast({
+        title: 'Failed to parse file',
+        description: err instanceof Error ? err.message : 'Invalid file format',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  async function handleImport() {
+    if (!selectedTable || !importPreview) return
+    setImporting(true)
+    try {
+      const colNames = selectedTable.columns.map((c) => c.name)
+      const rowsToInsert = importPreview.rows.map((row) => {
+        const mapped: Record<string, unknown> = {}
+        importPreview.headers.forEach((h) => {
+          const target = importColumnMapping[h]
+          if (target && colNames.includes(target)) {
+            let val: unknown = row[h]
+            // Find the column type for coercion
+            const col = selectedTable.columns.find((c) => c.name === target)
+            if (col) {
+              const t = col.type.toUpperCase()
+              if (t === 'INTEGER') { const n = parseInt(val as string, 10); val = Number.isNaN(n) ? null : n }
+              else if (t === 'DECIMAL') { const n = parseFloat(val as string); val = Number.isNaN(n) ? null : n }
+              else if (t === 'BOOLEAN') { val = val === 'true' || val === '1' }
+              else if (val === '') val = null
+            }
+            mapped[target] = val
+          }
+        })
+        return mapped
+      }).filter((r) => Object.keys(r).length > 0)
+
+      if (importMode === 'replace') {
+        // Delete existing rows first
+        const existingRows = await apiGet<SbRowItem[]>(`/api/tables/${selectedTable.id}/rows`)
+        const rowsArr = Array.isArray(existingRows) ? existingRows : []
+        await Promise.all(rowsArr.map((r) => apiDelete(`/api/tables/${selectedTable.id}/rows/${r.id}`)))
+      }
+
+      // Insert rows one by one
+      let okCount = 0
+      let failCount = 0
+      await Promise.all(
+        rowsToInsert.map(async (data) => {
+          try {
+            await apiPost(`/api/tables/${selectedTable.id}/rows`, { data })
+            okCount += 1
+          } catch {
+            failCount += 1
+          }
+        }),
+      )
+
+      toast({
+        title: 'Import complete',
+        description: `${okCount} row${okCount !== 1 ? 's' : ''} imported${failCount > 0 ? `, ${failCount} failed` : ''}${importMode === 'replace' ? ' (replace mode)' : ''}`,
+      })
+
+      // Refresh table data
+      await loadTables()
+      const fresh = tables.find((t) => t.id === selectedTable.id)
+      if (fresh) setSelectedTable(fresh)
+
+      setShowImportDialog(false)
+      setImportFile(null)
+      setImportPreview(null)
+      setImportColumnMapping({})
+    } catch (err) {
+      toast({
+        title: 'Import failed',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setImporting(false)
+    }
   }
 
   if (loading) {
@@ -760,7 +985,25 @@ export function TablesView() {
           <Badge variant="outline" className={priorityColors[selectedTable.priority]}>
             {priorityLabels[selectedTable.priority]}
           </Badge>
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex gap-2 flex-wrap">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Download className="mr-1 h-3.5 w-3.5" /> Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => void exportFromDetail('csv')}>
+                  <Download className="mr-2 h-3.5 w-3.5" /> Export as CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void exportFromDetail('json')}>
+                  <Download className="mr-2 h-3.5 w-3.5" /> Export as JSON
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" size="sm" onClick={() => { setShowImportDialog(true); setImportFile(null); setImportPreview(null); setImportColumnMapping({}) }}>
+              <Upload className="mr-1 h-3.5 w-3.5" /> Import
+            </Button>
             <Button variant="outline" size="sm" onClick={() => handleViewData(selectedTable)}>
               <Eye className="mr-1 h-3.5 w-3.5" /> View Data
             </Button>
@@ -781,7 +1024,7 @@ export function TablesView() {
               className="text-destructive hover:bg-destructive/10"
               onClick={() => setDeleteTarget(selectedTable)}
             >
-              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Table
+              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
             </Button>
           </div>
         </div>
@@ -856,12 +1099,31 @@ export function TablesView() {
                   <Plus className="mr-1 h-4 w-4" /> Add Column
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-md">
                 <DialogHeader>
                   <DialogTitle>Add Column</DialogTitle>
                   <DialogDescription>Add a new column to {selectedTable.name}</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-2">
+                  {/* Live Preview Card */}
+                  {newColumnName.trim() && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <Label className="text-xs text-muted-foreground mb-1.5 block">Preview</Label>
+                      <div className={`rounded-lg border border-l-4 p-3 ${typeColorMap[newColumnType] ?? 'border-l-emerald-500'} bg-card`}>
+                        <div className="flex items-center gap-2">
+                          <GripVertical className="h-3.5 w-3.5 text-muted-foreground/40" />
+                          <span className="font-mono font-medium text-sm">{newColumnName.trim().toLowerCase().replace(/\s+/g, '_')}</span>
+                          <Badge variant="outline" className={`font-mono text-xs ${typeBadgeColors[newColumnType] ?? ''}`}>
+                            {newColumnType}
+                          </Badge>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
                   <div className="space-y-2">
                     <Label>Column Name</Label>
                     <Input
@@ -869,6 +1131,24 @@ export function TablesView() {
                       onChange={(e) => setNewColumnName(e.target.value)}
                       placeholder="column_name"
                     />
+                    {/* Auto-suggest */}
+                    {newColumnName.trim() && !columnSuggestions.includes(newColumnName.trim().toLowerCase()) && (
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {columnSuggestions
+                          .filter((s) => s.includes(newColumnName.trim().toLowerCase()) || newColumnName.trim().toLowerCase().includes(s.slice(0, 3)))
+                          .slice(0, 5)
+                          .map((s) => (
+                            <button
+                              key={s}
+                              type="button"
+                              className="rounded border px-2 py-0.5 text-xs font-mono text-muted-foreground hover:bg-muted transition-colors"
+                              onClick={() => setNewColumnName(s)}
+                            >
+                              {s}
+                            </button>
+                          ))}
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Type</Label>
@@ -877,11 +1157,17 @@ export function TablesView() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {columnTypes.map((t) => (
-                          <SelectItem key={t} value={t}>
-                            {t}
-                          </SelectItem>
-                        ))}
+                        {columnTypes.map((t) => {
+                          const Icon = typeIcons[t]
+                          return (
+                            <SelectItem key={t} value={t}>
+                              <span className="flex items-center gap-2">
+                                {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
+                                {t}
+                              </span>
+                            </SelectItem>
+                          )
+                        })}
                       </SelectContent>
                     </Select>
                   </div>
@@ -896,6 +1182,28 @@ export function TablesView() {
             </Dialog>
           </CardHeader>
           <CardContent>
+            {/* Schema Stats Bar */}
+            {selectedTable.columns.length > 0 && (
+              <div className="mb-4 flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  {selectedTable.columns.length} column{selectedTable.columns.length !== 1 ? 's' : ''}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-cyan-500" />
+                  {selectedTable.columns.filter((c) => c.isIndexed).length} indexed
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  {selectedTable.columns.filter((c) => c.isUnique).length} unique
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-rose-500" />
+                  {selectedTable.columns.filter((c) => c.isPrimaryKey).length} primary key
+                </span>
+              </div>
+            )}
+
             {selectedTable.columns.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
                 <Columns3 className="h-10 w-10 mb-2 opacity-40" />
@@ -905,80 +1213,60 @@ export function TablesView() {
                 </Button>
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8">#</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Nullable</TableHead>
-                    <TableHead>Primary Key</TableHead>
-                    <TableHead>Unique</TableHead>
-                    <TableHead>Indexed</TableHead>
-                    <TableHead>Default</TableHead>
-                    <TableHead className="w-8" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedTable.columns.map((col, i) => (
-                    <TableRow key={col.id} className="hover:bg-muted/40 transition-colors">
-                      <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
-                      <TableCell className="font-mono font-medium">{col.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="font-mono text-xs">
-                          {col.type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {col.nullable ? (
-                          <span className="text-emerald-500">✓</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{col.isPrimaryKey ? <span>🔑</span> : <span className="text-muted-foreground">—</span>}</TableCell>
-                      <TableCell>
-                        {col.isUnique ? (
-                          <span className="text-emerald-500">✓</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {col.isIndexed ? (
-                          <span className="text-emerald-500">✓</span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {col.defaultValue ?? '—'}
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-7 w-7">
-                              <MoreHorizontal className="h-3.5 w-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>
-                              <Copy className="mr-2 h-3.5 w-3.5" /> Duplicate
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive">
-                              <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {selectedTable.columns.map((col, i) => {
+                  const borderClass = typeColorMap[col.type.toUpperCase()] ?? 'border-l-emerald-500'
+                  const badgeClass = typeBadgeColors[col.type.toUpperCase()] ?? ''
+                  const TypeIcon = typeIcons[col.type.toUpperCase()]
+                  return (
+                    <motion.div
+                      key={col.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.15, delay: i * 0.03 }}
+                      className={`group relative rounded-lg border border-l-4 bg-card p-3 transition-all hover:bg-muted/30 hover:-translate-y-0.5 hover:shadow-md ${borderClass}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/30" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-medium text-sm truncate">{col.name}</span>
+                            <Badge variant="outline" className={`font-mono text-[10px] px-1.5 py-0 ${badgeClass}`}>
+                              {TypeIcon && <TypeIcon className="mr-1 h-2.5 w-2.5" />}
+                              {col.type}
+                            </Badge>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {col.isPrimaryKey && (
+                              <span className="inline-flex items-center rounded bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400">PK</span>
+                            )}
+                            {col.isUnique && (
+                              <span className="inline-flex items-center rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">Unique</span>
+                            )}
+                            {col.isIndexed && (
+                              <span className="inline-flex items-center rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400">Indexed</span>
+                            )}
+                            {col.nullable && (
+                              <span className="inline-flex items-center rounded bg-slate-500/10 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-400">Nullable</span>
+                            )}
+                            {col.defaultValue !== null && (
+                              <span className="inline-flex items-center rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-mono text-emerald-600 dark:text-emerald-400">= {col.defaultValue}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" className="h-6 w-6" title="Edit column">
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" title="Delete column">
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )
+                })}
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1494,6 +1782,144 @@ export function TablesView() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Import Dialog */}
+        <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Upload className="h-4 w-4 text-emerald-600" /> Import Data
+              </DialogTitle>
+              <DialogDescription>
+                Import data from CSV or JSON files into {selectedTable.name}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              {/* File input */}
+              <div className="space-y-2">
+                <Label>Choose File</Label>
+                <Input
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) void handleImportFile(f)
+                  }}
+                  className="cursor-pointer"
+                />
+                {importFile && (
+                  <p className="text-xs text-muted-foreground">
+                    Selected: <span className="font-mono">{importFile.name}</span> ({(importFile.size / 1024).toFixed(1)} KB)
+                  </p>
+                )}
+              </div>
+
+              {/* Preview */}
+              {importPreview && importPreview.rows.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Preview (first {Math.min(importPreview.rows.length, 5)} rows)</Label>
+                  <div className="max-h-48 overflow-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {importPreview.headers.map((h) => (
+                            <TableHead key={h} className="font-mono text-xs">{h}</TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {importPreview.rows.slice(0, 5).map((row, i) => (
+                          <TableRow key={i}>
+                            {importPreview.headers.map((h) => (
+                              <TableCell key={h} className="font-mono text-xs max-w-[120px] truncate">{row[h]}</TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+
+              {/* Column Mapping */}
+              {importPreview && importPreview.headers.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Column Mapping</Label>
+                  <div className="grid gap-2">
+                    {importPreview.headers.map((h) => (
+                      <div key={h} className="flex items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground w-32 truncate">{h}</span>
+                        <span className="text-muted-foreground">→</span>
+                        <Select
+                          value={importColumnMapping[h] ?? ''}
+                          onValueChange={(v) => {
+                            setImportColumnMapping((prev) => ({
+                              ...prev,
+                              [h]: v === '__skip__' ? '' : v,
+                            }))
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Skip column" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__skip__">— Skip —</SelectItem>
+                            {selectedTable.columns.map((c) => (
+                              <SelectItem key={c.id} value={c.name}>
+                                <span className="flex items-center gap-1">
+                                  <span className="font-mono">{c.name}</span>
+                                  <span className="text-muted-foreground">({c.type})</span>
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Import Mode */}
+              <div className="space-y-2">
+                <Label>Import Mode</Label>
+                <Select value={importMode} onValueChange={(v) => setImportMode(v as 'append' | 'replace')}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="append">Append — Add rows to existing data</SelectItem>
+                    <SelectItem value="replace">Replace — Clear all rows, then import</SelectItem>
+                  </SelectContent>
+                </Select>
+                {importMode === 'replace' && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    ⚠ Replace mode will delete all existing rows before importing.
+                  </p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowImportDialog(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleImport()}
+                disabled={!importPreview || importing || Object.values(importColumnMapping).every((v) => !v)}
+              >
+                {importing ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> Importing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-1 h-3.5 w-3.5" /> Import
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </motion.div>
     )
   }

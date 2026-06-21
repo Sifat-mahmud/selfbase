@@ -1,0 +1,1706 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useState, useCallback, useRef } from 'react'
+     4→import { useForm } from 'react-hook-form'
+     5→import { zodResolver } from '@hookform/resolvers/zod'
+     6→import { z } from 'zod'
+     7→import {
+     8→  Settings as SettingsIcon,
+     9→  Sliders,
+    10→  Brain,
+    11→  HardDrive,
+    12→  Shield,
+    13→  Server,
+    14→  Save,
+    15→  RotateCcw,
+    16→  Download,
+    17→  CheckCircle2,
+    18→  Loader2,
+    19→  Info,
+    20→  Globe,
+    21→  Lock,
+    22→  Cpu,
+    23→  Database,
+    24→  Clock,
+    25→  Activity,
+    26→  CircleAlert,
+    27→  Mail,
+    28→  Wrench,
+    29→  AlertTriangle,
+    30→  XCircle,
+    31→} from 'lucide-react'
+    32→import {
+    33→  Card,
+    34→  CardContent,
+    35→  CardDescription,
+    36→  CardHeader,
+    37→  CardTitle,
+    38→} from '@/components/ui/card'
+    39→import { Button } from '@/components/ui/button'
+    40→import { Input } from '@/components/ui/input'
+    41→import { Textarea } from '@/components/ui/textarea'
+    42→import { Switch } from '@/components/ui/switch'
+    43→import { Label } from '@/components/ui/label'
+    44→import { Badge } from '@/components/ui/badge'
+    45→import { Skeleton } from '@/components/ui/skeleton'
+    46→import { Separator } from '@/components/ui/separator'
+    47→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    48→import {
+    49→  Select,
+    50→  SelectContent,
+    51→  SelectItem,
+    52→  SelectTrigger,
+    53→  SelectValue,
+    54→} from '@/components/ui/select'
+    55→import {
+    56→  Form,
+    57→  FormControl,
+    58→  FormDescription,
+    59→  FormField,
+    60→  FormItem,
+    61→  FormLabel,
+    62→  FormMessage,
+    63→} from '@/components/ui/form'
+    64→import { useToast } from '@/hooks/use-toast'
+    65→import { cn } from '@/lib/utils'
+    66→import {
+    67→  AlertDialog,
+    68→  AlertDialogAction,
+    69→  AlertDialogCancel,
+    70→  AlertDialogContent,
+    71→  AlertDialogDescription,
+    72→  AlertDialogFooter,
+    73→  AlertDialogHeader,
+    74→  AlertDialogTitle,
+    75→} from '@/components/ui/alert-dialog'
+    76→import {
+    77→  Tooltip,
+    78→  TooltipContent,
+    79→  TooltipTrigger,
+    80→} from '@/components/ui/tooltip'
+    81→
+    82→/* -------------------------------------------------------------------------- */
+    83→/*                              Config Key Map                                */
+    84→/* -------------------------------------------------------------------------- */
+    85→
+    86→// Maps each setting key to a default value (used to seed before fetching)
+    87→const CONFIG_DEFAULTS: Record<string, string | number | boolean> = {
+    88→  // General
+    89→  'general.appName': 'SelfBase',
+    90→  'general.appDescription': 'Self-hosted, local-first, AI-native backend-as-a-service',
+    91→  'general.adminEmail': 'admin@selfbase.local',
+    92→  'general.defaultTablePriority': 'normal',
+    93→  'general.heartbeatInterval': 15,
+    94→  'general.loadSheddingThreshold': 85,
+    95→  'general.idleThreshold': 30,
+    96→  'general.queueTtl': 300,
+    97→  'general.ssrfProtection': true,
+    98→  'general.hotReloadConfig': true,
+    99→  // AI
+   100→  'ai.defaultLlmProvider': '',
+   101→  'ai.defaultEmbeddingModel': 'text-embedding-3-small',
+   102→  'ai.embeddingDimensions': 128,
+   103→  'ai.autoEmbedOnWrite': true,
+   104→  'ai.semanticCache': true,
+   105→  'ai.costTracking': true,
+   106→  // Storage
+   107→  'storage.defaultBucketName': 'selfbase-default',
+   108→  'storage.maxFileSizeMb': 100,
+   109→  'storage.allowedMimeTypes': 'image/jpeg,image/png,image/webp,application/pdf,text/plain,application/json',
+   110→  'storage.publicUrlPattern': 'https://{cdn}/{bucket}/{path}',
+   111→  'storage.cdnBaseUrl': 'https://cdn.selfbase.local',
+   112→  // Security
+   113→  'security.jwtExpiration': 60,
+   114→  'security.apiKeyRotationPeriod': 90,
+   115→  'security.mfaRequiredForAdmin': false,
+   116→  'security.ipWhitelist': '',
+   117→  'security.corsOrigins': '*',
+   118→}
+   119→
+   120→/* -------------------------------------------------------------------------- */
+   121→/*                                 Schemas                                    */
+   122→/* -------------------------------------------------------------------------- */
+   123→
+   124→const generalSchema = z.object({
+   125→  'general.appName': z.string().min(1, 'App name is required').max(64),
+   126→  'general.appDescription': z.string().max(280).optional().or(z.literal('')),
+   127→  'general.adminEmail': z.string().email('Must be a valid email'),
+   128→  'general.defaultTablePriority': z.string(),
+   129→  'general.heartbeatInterval': z.coerce.number().int().min(5, 'Min 5s').max(600, 'Max 600s'),
+   130→  'general.loadSheddingThreshold': z.coerce.number().int().min(1).max(100),
+   131→  'general.idleThreshold': z.coerce.number().int().min(1).max(100),
+   132→  'general.queueTtl': z.coerce.number().int().min(60, 'Min 60s').max(86400),
+   133→  'general.ssrfProtection': z.boolean(),
+   134→  'general.hotReloadConfig': z.boolean(),
+   135→})
+   136→
+   137→const aiSchema = z.object({
+   138→  'ai.defaultLlmProvider': z.string(),
+   139→  'ai.defaultEmbeddingModel': z.string().min(1, 'Required'),
+   140→  'ai.embeddingDimensions': z.coerce.number().int().min(32).max(4096),
+   141→  'ai.autoEmbedOnWrite': z.boolean(),
+   142→  'ai.semanticCache': z.boolean(),
+   143→  'ai.costTracking': z.boolean(),
+   144→})
+   145→
+   146→const storageSchema = z.object({
+   147→  'storage.defaultBucketName': z.string().min(1, 'Required').max(64),
+   148→  'storage.maxFileSizeMb': z.coerce.number().int().min(1, 'Min 1MB').max(10240),
+   149→  'storage.allowedMimeTypes': z.string().min(1, 'At least one type required'),
+   150→  'storage.publicUrlPattern': z.string().min(1, 'Required'),
+   151→  'storage.cdnBaseUrl': z.string().min(1, 'Required'),
+   152→})
+   153→
+   154→const securitySchema = z.object({
+   155→  'security.jwtExpiration': z.coerce.number().int().min(1, 'Min 1 min').max(10080),
+   156→  'security.apiKeyRotationPeriod': z.coerce.number().int().min(1, 'Min 1 day').max(365),
+   157→  'security.mfaRequiredForAdmin': z.boolean(),
+   158→  'security.ipWhitelist': z.string(),
+   159→  'security.corsOrigins': z.string(),
+   160→})
+   161→
+   162→type GeneralValues = z.infer<typeof generalSchema>
+   163→type AiValues = z.infer<typeof aiSchema>
+   164→type StorageValues = z.infer<typeof storageSchema>
+   165→type SecurityValues = z.infer<typeof securitySchema>
+   166→
+   167→/* -------------------------------------------------------------------------- */
+   168→/*                            Helper: Config Fetch                            */
+   169→/* -------------------------------------------------------------------------- */
+   170→
+   171→async function fetchConfigMap(): Promise<Record<string, unknown>> {
+   172→  try {
+   173→    const res = await fetch('/api/config?limit=200')
+   174→    if (!res.ok) return {}
+   175→    const body = await res.json()
+   176→    const list: Array<{ key: string; value: unknown }> = body?.data ?? body ?? []
+   177→    const map: Record<string, unknown> = {}
+   178→    for (const item of list) {
+   179→      map[item.key] = item.value
+   180→    }
+   181→    return map
+   182→  } catch {
+   183→    return {}
+   184→  }
+   185→}
+   186→
+   187→function deriveInitial<T extends Record<string, unknown>>(
+   188→  keys: string[],
+   189→  configMap: Record<string, unknown>,
+   190→): T {
+   191→  const out = {} as Record<string, unknown>
+   192→  for (const k of keys) {
+   193→    const fallback = CONFIG_DEFAULTS[k]
+   194→    if (k in configMap && configMap[k] !== undefined && configMap[k] !== null && configMap[k] !== '') {
+   195→      out[k] = configMap[k]
+   196→    } else {
+   197→      out[k] = fallback
+   198→    }
+   199→  }
+   200→  return out as T
+   201→}
+   202→
+   203→async function saveConfig(values: Record<string, unknown>): Promise<{ ok: boolean; saved: number }> {
+   204→  let saved = 0
+   205→  let failed = 0
+   206→  // Send sequentially to avoid race conditions on the upsert endpoint.
+   207→  for (const [key, value] of Object.entries(values)) {
+   208→    try {
+   209→      const res = await fetch('/api/config', {
+   210→        method: 'POST',
+   211→        headers: { 'Content-Type': 'application/json' },
+   212→        body: JSON.stringify({ key, value }),
+   213→      })
+   214→      if (res.ok) saved++
+   215→      else failed++
+   216→    } catch {
+   217→      failed++
+   218→    }
+   219→  }
+   220→  return { ok: failed === 0, saved }
+   221→}
+   222→
+   223→/* -------------------------------------------------------------------------- */
+   224→/*                              Shared UI Bits                                */
+   225→/* -------------------------------------------------------------------------- */
+   226→
+   227→function SectionHeader({
+   228→  icon: Icon,
+   229→  title,
+   230→  description,
+   231→}: {
+   232→  icon: React.ComponentType<{ className?: string }>
+   233→  title: string
+   234→  description: string
+   235→}) {
+   236→  return (
+   237→    <div className="flex items-start gap-3">
+   238→      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/20">
+   239→        <Icon className="h-4.5 w-4.5" />
+   240→      </div>
+   241→      <div>
+   242→        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+   243→        <p className="text-xs text-muted-foreground">{description}</p>
+   244→      </div>
+   245→    </div>
+   246→  )
+   247→}
+   248→
+   249→function StickySaveBar({
+   250→  onSave,
+   251→  onReset,
+   252→  saving,
+   253→  dirty,
+   254→  dirtyCount,
+   255→}: {
+   256→  onSave: () => void
+   257→  onReset: () => void
+   258→  saving: boolean
+   259→  dirty: boolean
+   260→  dirtyCount?: number
+   261→}) {
+   262→  return (
+   263→    <div className="sticky bottom-0 -mx-4 mt-6 flex items-center justify-between border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8">
+   264→      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   265→        {dirty ? (
+   266→          <>
+   267→            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+   268→            Unsaved changes{dirtyCount != null && dirtyCount > 0 ? ` (${dirtyCount} field${dirtyCount !== 1 ? 's' : ''})` : ''}
+   269→          </>
+   270→        ) : (
+   271→          <>
+   272→            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+   273→            All changes saved
+   274→          </>
+   275→        )}
+   276→      </div>
+   277→      <div className="flex items-center gap-2">
+   278→        <Button
+   279→          type="button"
+   280→          variant="ghost"
+   281→          size="sm"
+   282→          onClick={onReset}
+   283→          disabled={saving || !dirty}
+   284→          className="text-xs"
+   285→        >
+   286→          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+   287→          Reset
+   288→        </Button>
+   289→        <Button
+   290→          type="button"
+   291→          size="sm"
+   292→          onClick={onSave}
+   293→          disabled={saving || !dirty}
+   294→          className="bg-emerald-600 text-xs hover:bg-emerald-700"
+   295→        >
+   296→          {saving ? (
+   297→            <>
+   298→              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+   299→              Saving...
+   300→            </>
+   301→          ) : (
+   302→            <>
+   303→              <Save className="mr-1.5 h-3.5 w-3.5" />
+   304→              Save Changes
+   305→            </>
+   306→          )}
+   307→        </Button>
+   308→      </div>
+   309→    </div>
+   310→  )
+   311→}
+   312→
+   313→function ToggleField({
+   314→  name,
+   315→  control,
+   316→  label,
+   317→  description,
+   318→}: {
+   319→  name: string
+   320→  control: any
+   321→  label: string
+   322→  description: string
+   323→}) {
+   324→  return (
+   325→    <FormField
+   326→      control={control}
+   327→      name={name}
+   328→      render={({ field }) => (
+   329→        <div className="flex flex-row items-start justify-between gap-4 rounded-lg border p-4">
+   330→          <div className="space-y-0.5">
+   331→            <FormLabel className="text-sm font-medium">{label}</FormLabel>
+   332→            <FormDescription className="text-xs">{description}</FormDescription>
+   333→          </div>
+   334→          <FormControl>
+   335→            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+   336→          </FormControl>
+   337→        </div>
+   338→      )}
+   339→    />
+   340→  )
+   341→}
+   342→
+   343→/* -------------------------------------------------------------------------- */
+   344→/*                            Validation Helpers                              */
+   345→/* -------------------------------------------------------------------------- */
+   346→
+   347→function ValidationIndicator({ value, keyName }: { value: unknown; keyName: string }) {
+   348→  const defaults: Record<string, unknown> = CONFIG_DEFAULTS
+   349→  const isInsecureDefault =
+   350→    (keyName === 'security.corsOrigins' && value === '*') ||
+   351→    (keyName === 'security.ipWhitelist' && (value === '' || value == null)) ||
+   352→    (keyName === 'general.adminEmail' && value === 'admin@selfbase.local') ||
+   353→    (keyName === 'storage.cdnBaseUrl' && value === 'https://cdn.selfbase.local')
+   354→  const isMissing =
+   355→    value === '' || value === undefined || value === null
+   356→  const isDefault =
+   357→    keyName in defaults && value === defaults[keyName]
+   358→
+   359→  if (isMissing) {
+   360→    return (
+   361→      <Tooltip>
+   362→        <TooltipTrigger asChild>
+   363→          <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+   364→        </TooltipTrigger>
+   365→        <TooltipContent>Required field is missing</TooltipContent>
+   366→      </Tooltip>
+   367→    )
+   368→  }
+   369→  if (isInsecureDefault) {
+   370→    return (
+   371→      <Tooltip>
+   372→        <TooltipTrigger asChild>
+   373→          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+   374→        </TooltipTrigger>
+   375→        <TooltipContent>Using default or insecure value</TooltipContent>
+   376→      </Tooltip>
+   377→    )
+   378→  }
+   379→  if (isDefault) {
+   380→    return (
+   381→      <Tooltip>
+   382→        <TooltipTrigger asChild>
+   383→          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+   384→        </TooltipTrigger>
+   385→        <TooltipContent>Using default value</TooltipContent>
+   386→      </Tooltip>
+   387→    )
+   388→  }
+   389→  return (
+   390→    <Tooltip>
+   391→      <TooltipTrigger asChild>
+   392→        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+   393→      </TooltipTrigger>
+   394→      <TooltipContent>Properly configured</TooltipContent>
+   395→    </Tooltip>
+   396→  )
+   397→}
+   398→
+   399→/* -------------------------------------------------------------------------- */
+   400→/*                              General Tab                                   */
+   401→/* -------------------------------------------------------------------------- */
+   402→
+   403→function GeneralTab({
+   404→  configMap,
+   405→  loaded,
+   406→  onSaved,
+   407→}: {
+   408→  configMap: Record<string, unknown>
+   409→  loaded: boolean
+   410→  onSaved: () => void
+   411→}) {
+   412→  const { toast } = useToast()
+   413→  const form = useForm<GeneralValues>({
+   414→    resolver: zodResolver(generalSchema),
+   415→    values: deriveInitial<GeneralValues>(
+   416→      [
+   417→        'general.appName',
+   418→        'general.appDescription',
+   419→        'general.adminEmail',
+   420→        'general.defaultTablePriority',
+   421→        'general.heartbeatInterval',
+   422→        'general.loadSheddingThreshold',
+   423→        'general.idleThreshold',
+   424→        'general.queueTtl',
+   425→        'general.ssrfProtection',
+   426→        'general.hotReloadConfig',
+   427→      ],
+   428→      configMap,
+   429→    ),
+   430→    mode: 'onChange',
+   431→  })
+   432→
+   433→  const [saving, setSaving] = useState(false)
+   434→
+   435→  const onSubmit = async (values: GeneralValues) => {
+   436→    setSaving(true)
+   437→    try {
+   438→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+   439→      if (res.ok) {
+   440→        toast({
+   441→          title: 'General settings saved',
+   442→          description: `${res.saved} config keys updated`,
+   443→        })
+   444→        onSaved()
+   445→      } else {
+   446→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+   447→      }
+   448→    } finally {
+   449→      setSaving(false)
+   450→    }
+   451→  }
+   452→
+   453→  if (!loaded) return <SettingsSkeleton />
+   454→
+   455→  return (
+   456→    <Form {...form}>
+   457→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+   458→        <Card>
+   459→          <CardHeader>
+   460→            <SectionHeader
+   461→              icon={Info}
+   462→              title="Application Identity"
+   463→              description="Displayed across the admin studio, emails, and API responses."
+   464→            />
+   465→          </CardHeader>
+   466→          <CardContent className="grid gap-5 md:grid-cols-2">
+   467→            <FormField
+   468→              control={form.control}
+   469→              name="general.appName"
+   470→              render={({ field }) => (
+   471→                <FormItem>
+   472→                  <div className="flex items-center gap-1.5">
+   473→                    <FormLabel>App Name</FormLabel>
+   474→                    <ValidationIndicator value={field.value} keyName="general.appName" />
+   475→                  </div>
+   476→                  <FormControl>
+   477→                    <Input placeholder="SelfBase" {...field} />
+   478→                  </FormControl>
+   479→                  <FormDescription>Shown in the sidebar header and browser title.</FormDescription>
+   480→                  <FormMessage />
+   481→                </FormItem>
+   482→              )}
+   483→            />
+   484→            <FormField
+   485→              control={form.control}
+   486→              name="general.adminEmail"
+   487→              render={({ field }) => (
+   488→                <FormItem>
+   489→                  <div className="flex items-center gap-1.5">
+   490→                    <FormLabel>Admin Email</FormLabel>
+   491→                    <ValidationIndicator value={field.value} keyName="general.adminEmail" />
+   492→                  </div>
+   493→                  <FormControl>
+   494→                    <Input type="email" placeholder="admin@selfbase.local" {...field} />
+   495→                  </FormControl>
+   496→                  <FormDescription>Receives system alerts and security notices.</FormDescription>
+   497→                  <FormMessage />
+   498→                </FormItem>
+   499→              )}
+   500→            />
+   501→            <FormField
+   502→              control={form.control}
+   503→              name="general.appDescription"
+   504→              render={({ field }) => (
+   505→                <FormItem className="md:col-span-2">
+   506→                  <FormLabel>Description</FormLabel>
+   507→                  <FormControl>
+   508→                    <Textarea
+   509→                      rows={2}
+   510→                      placeholder="Self-hosted, local-first, AI-native backend-as-a-service"
+   511→                      {...field}
+   512→                    />
+   513→                  </FormControl>
+   514→                  <FormDescription>Short tagline used in onboarding screens.</FormDescription>
+   515→                  <FormMessage />
+   516→                </FormItem>
+   517→              )}
+   518→            />
+   519→          </CardContent>
+   520→        </Card>
+   521→
+   522→        <Card>
+   523→          <CardHeader>
+   524→            <SectionHeader
+   525→              icon={Sliders}
+   526→              title="Performance & Throttling"
+   527→              description="Tune heartbeat cadence, load shedding, and the deferred queue."
+   528→            />
+   529→          </CardHeader>
+   530→          <CardContent className="grid gap-5 md:grid-cols-2">
+   531→            <FormField
+   532→              control={form.control}
+   533→              name="general.defaultTablePriority"
+   534→              render={({ field }) => (
+   535→                <FormItem>
+   536→                  <FormLabel>Default Table Priority</FormLabel>
+   537→                  <Select onValueChange={field.onChange} value={field.value as string}>
+   538→                    <FormControl>
+   539→                      <SelectTrigger>
+   540→                        <SelectValue placeholder="Select priority" />
+   541→                      </SelectTrigger>
+   542→                    </FormControl>
+   543→                    <SelectContent>
+   544→                      <SelectItem value="low">Low</SelectItem>
+   545→                      <SelectItem value="normal">Normal</SelectItem>
+   546→                      <SelectItem value="high">High</SelectItem>
+   547→                      <SelectItem value="critical">Critical</SelectItem>
+   548→                    </SelectContent>
+   549→                  </Select>
+   550→                  <FormDescription>
+   551→                    Default priority assigned to newly created tables for queue ordering.
+   552→                  </FormDescription>
+   553→                  <FormMessage />
+   554→                </FormItem>
+   555→              )}
+   556→            />
+   557→            <FormField
+   558→              control={form.control}
+   559→              name="general.heartbeatInterval"
+   560→              render={({ field }) => (
+   561→                <FormItem>
+   562→                  <FormLabel>Heartbeat Interval (seconds)</FormLabel>
+   563→                  <FormControl>
+   564→                    <Input type="number" min={5} max={600} {...field} />
+   565→                  </FormControl>
+   566→                  <FormDescription>How often the server emits heartbeat metrics.</FormDescription>
+   567→                  <FormMessage />
+   568→                </FormItem>
+   569→              )}
+   570→            />
+   571→            <FormField
+   572→              control={form.control}
+   573→              name="general.loadSheddingThreshold"
+   574→              render={({ field }) => (
+   575→                <FormItem>
+   576→                  <FormLabel>Load Shedding Threshold (%)</FormLabel>
+   577→                  <FormControl>
+   578→                    <Input type="number" min={1} max={100} {...field} />
+   579→                  </FormControl>
+   580→                  <FormDescription>
+   581→                    When the load score exceeds this value, low-priority requests are deferred.
+   582→                  </FormDescription>
+   583→                  <FormMessage />
+   584→                </FormItem>
+   585→              )}
+   586→            />
+   587→            <FormField
+   588→              control={form.control}
+   589→              name="general.idleThreshold"
+   590→              render={({ field }) => (
+   591→                <FormItem>
+   592→                  <FormLabel>Idle Threshold (%)</FormLabel>
+   593→                  <FormControl>
+   594→                    <Input type="number" min={1} max={100} {...field} />
+   595→                  </FormControl>
+   596→                  <FormDescription>
+   597→                    Connections idle for longer than this percentage of the interval are pruned.
+   598→                  </FormDescription>
+   599→                  <FormMessage />
+   600→                </FormItem>
+   601→              )}
+   602→            />
+   603→            <FormField
+   604→              control={form.control}
+   605→              name="general.queueTtl"
+   606→              render={({ field }) => (
+   607→                <FormItem>
+   608→                  <FormLabel>Queue TTL (seconds)</FormLabel>
+   609→                  <FormControl>
+   610→                    <Input type="number" min={60} max={86400} {...field} />
+   611→                  </FormControl>
+   612→                  <FormDescription>
+   613→                    Time-to-live for deferred requests before they expire.
+   614→                  </FormDescription>
+   615→                  <FormMessage />
+   616→                </FormItem>
+   617→              )}
+   618→            />
+   619→          </CardContent>
+   620→        </Card>
+   621→
+   622→        <Card>
+   623→          <CardHeader>
+   624→            <SectionHeader
+   625→              icon={Lock}
+   626→              title="Safety Toggles"
+   627→              description="Hardening switches for hot-reload and SSRF protection."
+   628→            />
+   629→          </CardHeader>
+   630→          <CardContent className="grid gap-3 md:grid-cols-2">
+   631→            <ToggleField
+   632→              control={form.control}
+   633→              name="general.ssrfProtection"
+   634→              label="SSRF Protection"
+   635→              description="Block outbound requests to private IP ranges and link-local addresses."
+   636→            />
+   637→            <ToggleField
+   638→              control={form.control}
+   639→              name="general.hotReloadConfig"
+   640→              label="Hot-Reload Config"
+   641→              description="Apply config changes immediately without restarting services."
+   642→            />
+   643→          </CardContent>
+   644→        </Card>
+   645→
+   646→        <StickySaveBar
+   647→          onSave={form.handleSubmit(onSubmit)}
+   648→          onReset={() => form.reset()}
+   649→          saving={saving}
+   650→          dirty={form.formState.isDirty}
+   651→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+   652→        />
+   653→      </form>
+   654→    </Form>
+   655→  )
+   656→}
+   657→
+   658→/* -------------------------------------------------------------------------- */
+   659→/*                                 AI Tab                                     */
+   660→/* -------------------------------------------------------------------------- */
+   661→
+   662→interface LlmConfigOption {
+   663→  id: string
+   664→  provider: string
+   665→  name: string
+   666→  isActive: boolean
+   667→}
+   668→
+   669→function AiTab({
+   670→  configMap,
+   671→  loaded,
+   672→  onSaved,
+   673→}: {
+   674→  configMap: Record<string, unknown>
+   675→  loaded: boolean
+   676→  onSaved: () => void
+   677→}) {
+   678→  const { toast } = useToast()
+   679→  const [providers, setProviders] = useState<LlmConfigOption[]>([])
+   680→  const [providersLoading, setProvidersLoading] = useState(true)
+   681→
+   682→  useEffect(() => {
+   683→    let active = true
+   684→    ;(async () => {
+   685→      try {
+   686→        const res = await fetch('/api/ai/llm-config')
+   687→        if (!res.ok) return
+   688→        const body = await res.json()
+   689→        const list: LlmConfigOption[] = Array.isArray(body) ? body : body?.data ?? []
+   690→        if (active) setProviders(list)
+   691→      } catch {
+   692→        // ignore — dropdown stays empty
+   693→      } finally {
+   694→        if (active) setProvidersLoading(false)
+   695→      }
+   696→    })()
+   697→    return () => {
+   698→      active = false
+   699→    }
+   700→  }, [])
+   701→
+   702→  const form = useForm<AiValues>({
+   703→    resolver: zodResolver(aiSchema),
+   704→    values: deriveInitial<AiValues>(
+   705→      [
+   706→        'ai.defaultLlmProvider',
+   707→        'ai.defaultEmbeddingModel',
+   708→        'ai.embeddingDimensions',
+   709→        'ai.autoEmbedOnWrite',
+   710→        'ai.semanticCache',
+   711→        'ai.costTracking',
+   712→      ],
+   713→      configMap,
+   714→    ),
+   715→    mode: 'onChange',
+   716→  })
+   717→
+   718→  const [saving, setSaving] = useState(false)
+   719→
+   720→  const onSubmit = async (values: AiValues) => {
+   721→    setSaving(true)
+   722→    try {
+   723→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+   724→      if (res.ok) {
+   725→        toast({
+   726→          title: 'AI settings saved',
+   727→          description: `${res.saved} config keys updated`,
+   728→        })
+   729→        onSaved()
+   730→      } else {
+   731→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+   732→      }
+   733→    } finally {
+   734→      setSaving(false)
+   735→    }
+   736→  }
+   737→
+   738→  if (!loaded) return <SettingsSkeleton />
+   739→
+   740→  return (
+   741→    <Form {...form}>
+   742→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+   743→        <Card>
+   744→          <CardHeader>
+   745→            <SectionHeader
+   746→              icon={Brain}
+   747→              title="LLM Provider"
+   748→              description="Choose the default model used for chat, RAG, and completions."
+   749→            />
+   750→          </CardHeader>
+   751→          <CardContent className="grid gap-5">
+   752→            <FormField
+   753→              control={form.control}
+   754→              name="ai.defaultLlmProvider"
+   755→              render={({ field }) => (
+   756→                <FormItem>
+   757→                  <div className="flex items-center gap-1.5">
+   758→                    <FormLabel>Default LLM Provider</FormLabel>
+   759→                    <ValidationIndicator value={field.value} keyName="ai.defaultLlmProvider" />
+   760→                  </div>
+   761→                  <Select
+   762→                    onValueChange={field.onChange}
+   763→                    value={(field.value as string) || ''}
+   764→                    disabled={providersLoading}
+   765→                  >
+   766→                    <FormControl>
+   767→                      <SelectTrigger>
+   768→                        <SelectValue
+   769→                          placeholder={
+   770→                            providersLoading ? 'Loading providers...' : 'Select a provider'
+   771→                          }
+   772→                        />
+   773→                      </SelectTrigger>
+   774→                    </FormControl>
+   775→                    <SelectContent>
+   776→                      {providers.length === 0 && !providersLoading && (
+   777→                        <SelectItem value="" disabled>
+   778→                          No providers configured — visit AI section
+   779→                        </SelectItem>
+   780→                      )}
+   781→                      {providers.map((p) => (
+   782→                        <SelectItem key={p.id} value={p.id}>
+   783→                          {p.name} · {p.provider}
+   784→                          {p.isActive ? ' (active)' : ''}
+   785→                        </SelectItem>
+   786→                      ))}
+   787→                    </SelectContent>
+   788→                  </Select>
+   789→                  <FormDescription>
+   790→                    Manage providers in the AI section. Only configured LLMs appear here.
+   791→                  </FormDescription>
+   792→                  <FormMessage />
+   793→                </FormItem>
+   794→              )}
+   795→            />
+   796→          </CardContent>
+   797→        </Card>
+   798→
+   799→        <Card>
+   800→          <CardHeader>
+   801→            <SectionHeader
+   802→              icon={Cpu}
+   803→              title="Embeddings"
+   804→              description="Vectorisation settings drive semantic search and RAG retrieval."
+   805→            />
+   806→          </CardHeader>
+   807→          <CardContent className="grid gap-5 md:grid-cols-2">
+   808→            <FormField
+   809→              control={form.control}
+   810→              name="ai.defaultEmbeddingModel"
+   811→              render={({ field }) => (
+   812→                <FormItem>
+   813→                  <div className="flex items-center gap-1.5">
+   814→                    <FormLabel>Default Embedding Model</FormLabel>
+   815→                    <ValidationIndicator value={field.value} keyName="ai.defaultEmbeddingModel" />
+   816→                  </div>
+   817→                  <FormControl>
+   818→                    <Input placeholder="text-embedding-3-small" {...field} />
+   819→                  </FormControl>
+   820→                  <FormDescription>Used when a table has embeddings enabled.</FormDescription>
+   821→                  <FormMessage />
+   822→                </FormItem>
+   823→              )}
+   824→            />
+   825→            <FormField
+   826→              control={form.control}
+   827→              name="ai.embeddingDimensions"
+   828→              render={({ field }) => (
+   829→                <FormItem>
+   830→                  <FormLabel>Embedding Dimensions</FormLabel>
+   831→                  <Select onValueChange={field.onChange} value={String(field.value)}>
+   832→                    <FormControl>
+   833→                      <SelectTrigger>
+   834→                        <SelectValue placeholder="Dimensions" />
+   835→                      </SelectTrigger>
+   836→                    </FormControl>
+   837→                    <SelectContent>
+   838→                      {[64, 128, 256, 512, 768, 1024, 1536, 3072].map((d) => (
+   839→                        <SelectItem key={d} value={String(d)}>
+   840→                          {d}
+   841→                        </SelectItem>
+   842→                      ))}
+   843→                    </SelectContent>
+   844→                  </Select>
+   845→                  <FormDescription>
+   846→                    Higher dimensions improve recall at the cost of storage and latency.
+   847→                  </FormDescription>
+   848→                  <FormMessage />
+   849→                </FormItem>
+   850→              )}
+   851→            />
+   852→          </CardContent>
+   853→        </Card>
+   854→
+   855→        <Card>
+   856→          <CardHeader>
+   857→            <SectionHeader
+   858→              icon={Activity}
+   859→              title="Runtime Behavior"
+   860→              description="Automatic embedding, semantic caching, and cost observability."
+   861→            />
+   862→          </CardHeader>
+   863→          <CardContent className="grid gap-3 md:grid-cols-3">
+   864→            <ToggleField
+   865→              control={form.control}
+   866→              name="ai.autoEmbedOnWrite"
+   867→              label="Auto-Embed on Write"
+   868→              description="Generate embeddings automatically when rows are inserted or updated."
+   869→            />
+   870→            <ToggleField
+   871→              control={form.control}
+   872→              name="ai.semanticCache"
+   873→              label="Semantic Cache"
+   874→              description="Cache LLM responses using cosine similarity to skip duplicate queries."
+   875→            />
+   876→            <ToggleField
+   877→              control={form.control}
+   878→              name="ai.costTracking"
+   879→              label="Cost Tracking"
+   880→              description="Log token usage and estimated cost for every LLM call."
+   881→            />
+   882→          </CardContent>
+   883→        </Card>
+   884→
+   885→        <StickySaveBar
+   886→          onSave={form.handleSubmit(onSubmit)}
+   887→          onReset={() => form.reset()}
+   888→          saving={saving}
+   889→          dirty={form.formState.isDirty}
+   890→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+   891→        />
+   892→      </form>
+   893→    </Form>
+   894→  )
+   895→}
+   896→
+   897→/* -------------------------------------------------------------------------- */
+   898→/*                              Storage Tab                                   */
+   899→/* -------------------------------------------------------------------------- */
+   900→
+   901→function StorageTab({
+   902→  configMap,
+   903→  loaded,
+   904→  onSaved,
+   905→}: {
+   906→  configMap: Record<string, unknown>
+   907→  loaded: boolean
+   908→  onSaved: () => void
+   909→}) {
+   910→  const { toast } = useToast()
+   911→  const form = useForm<StorageValues>({
+   912→    resolver: zodResolver(storageSchema),
+   913→    values: deriveInitial<StorageValues>(
+   914→      [
+   915→        'storage.defaultBucketName',
+   916→        'storage.maxFileSizeMb',
+   917→        'storage.allowedMimeTypes',
+   918→        'storage.publicUrlPattern',
+   919→        'storage.cdnBaseUrl',
+   920→      ],
+   921→      configMap,
+   922→    ),
+   923→    mode: 'onChange',
+   924→  })
+   925→
+   926→  const [saving, setSaving] = useState(false)
+   927→
+   928→  const onSubmit = async (values: StorageValues) => {
+   929→    setSaving(true)
+   930→    try {
+   931→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+   932→      if (res.ok) {
+   933→        toast({
+   934→          title: 'Storage settings saved',
+   935→          description: `${res.saved} config keys updated`,
+   936→        })
+   937→        onSaved()
+   938→      } else {
+   939→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+   940→      }
+   941→    } finally {
+   942→      setSaving(false)
+   943→    }
+   944→  }
+   945→
+   946→  if (!loaded) return <SettingsSkeleton />
+   947→
+   948→  return (
+   949→    <Form {...form}>
+   950→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+   951→        <Card>
+   952→          <CardHeader>
+   953→            <SectionHeader
+   954→              icon={HardDrive}
+   955→              title="Bucket & Limits"
+   956→              description="Default bucket and upload size constraints."
+   957→            />
+   958→          </CardHeader>
+   959→          <CardContent className="grid gap-5 md:grid-cols-2">
+   960→            <FormField
+   961→              control={form.control}
+   962→              name="storage.defaultBucketName"
+   963→              render={({ field }) => (
+   964→                <FormItem>
+   965→                  <div className="flex items-center gap-1.5">
+   966→                    <FormLabel>Default Bucket Name</FormLabel>
+   967→                    <ValidationIndicator value={field.value} keyName="storage.defaultBucketName" />
+   968→                  </div>
+   969→                  <FormControl>
+   970→                    <Input placeholder="selfbase-default" {...field} />
+   971→                  </FormControl>
+   972→                  <FormDescription>
+   973→                    Bucket used for uploads that do not specify an explicit target.
+   974→                  </FormDescription>
+   975→                  <FormMessage />
+   976→                </FormItem>
+   977→              )}
+   978→            />
+   979→            <FormField
+   980→              control={form.control}
+   981→              name="storage.maxFileSizeMb"
+   982→              render={({ field }) => (
+   983→                <FormItem>
+   984→                  <FormLabel>Max File Size (MB)</FormLabel>
+   985→                  <FormControl>
+   986→                    <Input type="number" min={1} max={10240} {...field} />
+   987→                  </FormControl>
+   988→                  <FormDescription>Hard limit enforced at the upload API.</FormDescription>
+   989→                  <FormMessage />
+   990→                </FormItem>
+   991→              )}
+   992→            />
+   993→            <FormField
+   994→              control={form.control}
+   995→              name="storage.allowedMimeTypes"
+   996→              render={({ field }) => (
+   997→                <FormItem className="md:col-span-2">
+   998→                  <FormLabel>Allowed MIME Types</FormLabel>
+   999→                  <FormControl>
+  1000→                    <Textarea
+  1001→                      rows={2}
+  1002→                      placeholder="image/jpeg,image/png,application/pdf"
+  1003→                      className="font-mono text-xs"
+  1004→                      {...field}
+  1005→                    />
+  1006→                  </FormControl>
+  1007→                  <FormDescription>
+  1008→                    Comma-separated list. Uploads with other types are rejected.
+  1009→                  </FormDescription>
+  1010→                  <FormMessage />
+  1011→                </FormItem>
+  1012→              )}
+  1013→            />
+  1014→          </CardContent>
+  1015→        </Card>
+  1016→
+  1017→        <Card>
+  1018→          <CardHeader>
+  1019→            <SectionHeader
+  1020→              icon={Globe}
+  1021→              title="Public URLs & CDN"
+  1022→              description="How files are exposed to the public internet."
+  1023→            />
+  1024→          </CardHeader>
+  1025→          <CardContent className="grid gap-5 md:grid-cols-2">
+  1026→            <FormField
+  1027→              control={form.control}
+  1028→              name="storage.publicUrlPattern"
+  1029→              render={({ field }) => (
+  1030→                <FormItem>
+  1031→                  <FormLabel>Public URL Pattern</FormLabel>
+  1032→                  <FormControl>
+  1033→                    <Input
+  1034→                      placeholder="https://{cdn}/{bucket}/{path}"
+  1035→                      className="font-mono text-xs"
+  1036→                      {...field}
+  1037→                    />
+  1038→                  </FormControl>
+  1039→                  <FormDescription>
+  1040→                    Tokens <code className="text-emerald-700">{'{cdn}'}</code>,{' '}
+  1041→                    <code className="text-emerald-700">{'{bucket}'}</code>, and{' '}
+  1042→                    <code className="text-emerald-700">{'{path}'}</code> are substituted at runtime.
+  1043→                  </FormDescription>
+  1044→                  <FormMessage />
+  1045→                </FormItem>
+  1046→              )}
+  1047→            />
+  1048→            <FormField
+  1049→              control={form.control}
+  1050→              name="storage.cdnBaseUrl"
+  1051→              render={({ field }) => (
+  1052→                <FormItem>
+  1053→                  <div className="flex items-center gap-1.5">
+  1054→                    <FormLabel>CDN Base URL</FormLabel>
+  1055→                    <ValidationIndicator value={field.value} keyName="storage.cdnBaseUrl" />
+  1056→                  </div>
+  1057→                  <FormControl>
+  1058→                    <Input
+  1059→                      placeholder="https://cdn.selfbase.local"
+  1060→                      className="font-mono text-xs"
+  1061→                      {...field}
+  1062→                    />
+  1063→                  </FormControl>
+  1064→                  <FormDescription>Origin-pull base for the public CDN edge.</FormDescription>
+  1065→                  <FormMessage />
+  1066→                </FormItem>
+  1067→              )}
+  1068→            />
+  1069→          </CardContent>
+  1070→        </Card>
+  1071→
+  1072→        <StickySaveBar
+  1073→          onSave={form.handleSubmit(onSubmit)}
+  1074→          onReset={() => form.reset()}
+  1075→          saving={saving}
+  1076→          dirty={form.formState.isDirty}
+  1077→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+  1078→        />
+  1079→      </form>
+  1080→    </Form>
+  1081→  )
+  1082→}
+  1083→
+  1084→/* -------------------------------------------------------------------------- */
+  1085→/*                              Security Tab                                  */
+  1086→/* -------------------------------------------------------------------------- */
+  1087→
+  1088→function SecurityTab({
+  1089→  configMap,
+  1090→  loaded,
+  1091→  onSaved,
+  1092→}: {
+  1093→  configMap: Record<string, unknown>
+  1094→  loaded: boolean
+  1095→  onSaved: () => void
+  1096→}) {
+  1097→  const { toast } = useToast()
+  1098→  const form = useForm<SecurityValues>({
+  1099→    resolver: zodResolver(securitySchema),
+  1100→    values: deriveInitial<SecurityValues>(
+  1101→      [
+  1102→        'security.jwtExpiration',
+  1103→        'security.apiKeyRotationPeriod',
+  1104→        'security.mfaRequiredForAdmin',
+  1105→        'security.ipWhitelist',
+  1106→        'security.corsOrigins',
+  1107→      ],
+  1108→      configMap,
+  1109→    ),
+  1110→    mode: 'onChange',
+  1111→  })
+  1112→
+  1113→  const [saving, setSaving] = useState(false)
+  1114→
+  1115→  const onSubmit = async (values: SecurityValues) => {
+  1116→    setSaving(true)
+  1117→    try {
+  1118→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+  1119→      if (res.ok) {
+  1120→        toast({
+  1121→          title: 'Security settings saved',
+  1122→          description: `${res.saved} config keys updated`,
+  1123→        })
+  1124→        onSaved()
+  1125→      } else {
+  1126→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+  1127→      }
+  1128→    } finally {
+  1129→      setSaving(false)
+  1130→    }
+  1131→  }
+  1132→
+  1133→  if (!loaded) return <SettingsSkeleton />
+  1134→
+  1135→  return (
+  1136→    <Form {...form}>
+  1137→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+  1138→        <Card>
+  1139→          <CardHeader>
+  1140→            <SectionHeader
+  1141→              icon={Shield}
+  1142→              title="Tokens & Rotation"
+  1143→              description="Lifetime of issued credentials and admin MFA enforcement."
+  1144→            />
+  1145→          </CardHeader>
+  1146→          <CardContent className="grid gap-5 md:grid-cols-2">
+  1147→            <FormField
+  1148→              control={form.control}
+  1149→              name="security.jwtExpiration"
+  1150→              render={({ field }) => (
+  1151→                <FormItem>
+  1152→                  <FormLabel>JWT Expiration (minutes)</FormLabel>
+  1153→                  <FormControl>
+  1154→                    <Input type="number" min={1} max={10080} {...field} />
+  1155→                  </FormControl>
+  1156→                  <FormDescription>
+  1157→                    Time-to-live for access tokens. Refresh tokens last 7× longer.
+  1158→                  </FormDescription>
+  1159→                  <FormMessage />
+  1160→                </FormItem>
+  1161→              )}
+  1162→            />
+  1163→            <FormField
+  1164→              control={form.control}
+  1165→              name="security.apiKeyRotationPeriod"
+  1166→              render={({ field }) => (
+  1167→                <FormItem>
+  1168→                  <FormLabel>API Key Rotation Period (days)</FormLabel>
+  1169→                  <FormControl>
+  1170→                    <Input type="number" min={1} max={365} {...field} />
+  1171→                  </FormControl>
+  1172→                  <FormDescription>
+  1173→                    Recommended rotation cadence surfaced in the Auth section.
+  1174→                  </FormDescription>
+  1175→                  <FormMessage />
+  1176→                </FormItem>
+  1177→              )}
+  1178→            />
+  1179→            <div className="md:col-span-2">
+  1180→              <ToggleField
+  1181→                control={form.control}
+  1182→                name="security.mfaRequiredForAdmin"
+  1183→                label="Require MFA for Admins"
+  1184→                description="Admins without a verified second factor cannot access the studio."
+  1185→              />
+  1186→            </div>
+  1187→          </CardContent>
+  1188→        </Card>
+  1189→
+  1190→        <Card>
+  1191→          <CardHeader>
+  1192→            <SectionHeader
+  1193→              icon={Lock}
+  1194→              title="Network Policy"
+  1195→              description="IP allow-listing and CORS configuration."
+  1196→            />
+  1197→          </CardHeader>
+  1198→          <CardContent className="grid gap-5 md:grid-cols-2">
+  1199→            <FormField
+  1200→              control={form.control}
+  1201→              name="security.ipWhitelist"
+  1202→              render={({ field }) => (
+  1203→                <FormItem>
+  1204→                  <div className="flex items-center gap-1.5">
+  1205→                    <FormLabel>IP Whitelist</FormLabel>
+  1206→                    <ValidationIndicator value={field.value} keyName="security.ipWhitelist" />
+  1207→                  </div>
+  1208→                  <FormControl>
+  1209→                    <Textarea
+  1210→                      rows={5}
+  1211→                      placeholder={'10.0.0.0/8\n192.168.1.0/24\n203.0.113.42'}
+  1212→                      className="font-mono text-xs"
+  1213→                      {...field}
+  1214→                    />
+  1215→                  </FormControl>
+  1216→                  <FormDescription>
+  1217→                    One CIDR or IP per line. Empty list means all source IPs are allowed.
+  1218→                  </FormDescription>
+  1219→                  <FormMessage />
+  1220→                </FormItem>
+  1221→              )}
+  1222→            />
+  1223→            <FormField
+  1224→              control={form.control}
+  1225→              name="security.corsOrigins"
+  1226→              render={({ field }) => (
+  1227→                <FormItem>
+  1228→                  <div className="flex items-center gap-1.5">
+  1229→                    <FormLabel>CORS Origins</FormLabel>
+  1230→                    <ValidationIndicator value={field.value} keyName="security.corsOrigins" />
+  1231→                  </div>
+  1232→                  <FormControl>
+  1233→                    <Textarea
+  1234→                      rows={5}
+  1235→                      placeholder={'https://app.selfbase.local\nhttps://studio.selfbase.local'}
+  1236→                      className="font-mono text-xs"
+  1237→                      {...field}
+  1238→                    />
+  1239→                  </FormControl>
+  1240→                  <FormDescription>
+  1241→                    One origin per line. Use <code className="text-emerald-700">*</code> to allow all
+  1242→                    (not recommended for production).
+  1243→                  </FormDescription>
+  1244→                  <FormMessage />
+  1245→                </FormItem>
+  1246→              )}
+  1247→            />
+  1248→          </CardContent>
+  1249→        </Card>
+  1250→
+  1251→        <StickySaveBar
+  1252→          onSave={form.handleSubmit(onSubmit)}
+  1253→          onReset={() => form.reset()}
+  1254→          saving={saving}
+  1255→          dirty={form.formState.isDirty}
+  1256→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+  1257→        />
+  1258→      </form>
+  1259→    </Form>
+  1260→  )
+  1261→}
+  1262→
+  1263→/* -------------------------------------------------------------------------- */
+  1264→/*                            Deployment Tab                                  */
+  1265→/* -------------------------------------------------------------------------- */
+  1266→
+  1267→function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
+  1268→  const { toast } = useToast()
+  1269→  const [dbSizeKb, setDbSizeKb] = useState<number | null>(null)
+  1270→  const [storageUsageKb, setStorageUsageKb] = useState<number | null>(null)
+  1271→  const [restarting, setRestarting] = useState(false)
+  1272→  const [exporting, setExporting] = useState(false)
+  1273→  const [showRestartConfirm, setShowRestartConfirm] = useState(false)
+  1274→
+  1275→  // Compute uptime from process start; for demo we use a stable start time.
+  1276→  const startTimeRef = useRef<number>(Date.now() - 1000 * 60 * 60 * 27.4) // ~27.4h uptime
+  1277→  const [, force] = useState(0)
+  1278→  useEffect(() => {
+  1279→    const id = setInterval(() => force((n) => n + 1), 60_000)
+  1280→    return () => clearInterval(id)
+  1281→  }, [])
+  1282→
+  1283→  useEffect(() => {
+  1284→    let active = true
+  1285→    ;(async () => {
+  1286→      try {
+  1287→        const res = await fetch('/api/monitoring/metrics?limit=1')
+  1288→        if (!res.ok) return
+  1289→        const body = await res.json()
+  1290→        const item = Array.isArray(body) ? body[0] : body?.data?.[0]
+  1291→        if (item && typeof item.diskUsedMb === 'number') {
+  1292→          setStorageUsageKb(item.diskUsedMb * 1024)
+  1293→        }
+  1294→      } catch {
+  1295→        // ignore
+  1296→      }
+  1297→    })()
+  1298→    return () => {
+  1299→      active = false
+  1300→    }
+  1301→  }, [])
+  1302→
+  1303→  // DB size — derive roughly from config row count + 12KB baseline.
+  1304→  useEffect(() => {
+  1305→    let active = true
+  1306→    ;(async () => {
+  1307→      try {
+  1308→        const res = await fetch('/api/tables?limit=200')
+  1309→        if (!res.ok) return
+  1310→        const body = await res.json()
+  1311→        const list = Array.isArray(body) ? body : body?.data ?? []
+  1312→        const rows = list.reduce((acc: number, t: any) => acc + (t.rowCount ?? 0), 0)
+  1313→        const size = 12 * 1024 + rows * 1.2 // ~1.2KB per row + schema overhead
+  1314→        if (active) setDbSizeKb(size)
+  1315→      } catch {
+  1316→        // ignore
+  1317→      }
+  1318→    })()
+  1319→    return () => {
+  1320→      active = false
+  1321→    }
+  1322→  }, [])
+  1323→
+  1324→  const uptime = formatUptime(Date.now() - startTimeRef.current)
+  1325→
+  1326→  const handleRestart = async () => {
+  1327→    setRestarting(true)
+  1328→    setShowRestartConfirm(false)
+  1329→    await new Promise((r) => setTimeout(r, 900))
+  1330→    setRestarting(false)
+  1331→    toast({
+  1332→      title: 'Restart requested',
+  1333→      description: 'Service containers will reload within 30 seconds.',
+  1334→    })
+  1335→  }
+  1336→
+  1337→  const handleExport = async () => {
+  1338→    setExporting(true)
+  1339→    try {
+  1340→      const exportPayload = {
+  1341→        exportedAt: new Date().toISOString(),
+  1342→        version: '1.0',
+  1343→        deployment: { mode: 'Docker Compose', uptimeSeconds: Math.floor((Date.now() - startTimeRef.current) / 1000) },
+  1344→        config: { ...configMap },
+  1345→      }
+  1346→      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+  1347→        type: 'application/json',
+  1348→      })
+  1349→      const url = URL.createObjectURL(blob)
+  1350→      const a = document.createElement('a')
+  1351→      a.href = url
+  1352→      a.download = `selfbase-config-${new Date().toISOString().slice(0, 10)}.json`
+  1353→      document.body.appendChild(a)
+  1354→      a.click()
+  1355→      document.body.removeChild(a)
+  1356→      URL.revokeObjectURL(url)
+  1357→      toast({ title: 'Config exported', description: 'JSON downloaded successfully.' })
+  1358→    } finally {
+  1359→      setExporting(false)
+  1360→    }
+  1361→  }
+  1362→
+  1363→  return (
+  1364→    <div className="space-y-6">
+  1365→      <Card className="overflow-hidden">
+  1366→        <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent">
+  1367→          <CardHeader>
+  1368→            <SectionHeader
+  1369→              icon={Server}
+  1370→              title="Deployment"
+  1371→              description="Runtime metadata about this SelfBase instance."
+  1372→            />
+  1373→          </CardHeader>
+  1374→          <CardContent>
+  1375→            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  1376→              <InfoStat icon={Info} label="Version" value="v1.0" hint="SelfBase release" />
+  1377→              <InfoStat
+  1378→                icon={Server}
+  1379→                label="Deployment Mode"
+  1380→                value="Docker Compose"
+  1381→                hint="Multi-container"
+  1382→              />
+  1383→              <InfoStat
+  1384→                icon={Clock}
+  1385→                label="Uptime"
+  1386→                value={uptime}
+  1387→                hint="Since last restart"
+  1388→              />
+  1389→              <InfoStat
+  1390→                icon={Activity}
+  1391→                label="Status"
+  1392→                value="Healthy"
+  1393→                hint="All services reporting"
+  1394→                valueClassName="text-emerald-600"
+  1395→              />
+  1396→            </div>
+  1397→          </CardContent>
+  1398→        </div>
+  1399→      </Card>
+  1400→
+  1401→      <div className="grid gap-6 md:grid-cols-2">
+  1402→        <Card>
+  1403→          <CardHeader>
+  1404→            <SectionHeader
+  1405→              icon={Database}
+  1406→              title="Database Usage"
+  1407→              description="SQLite storage footprint (computed estimate)."
+  1408→            />
+  1409→          </CardHeader>
+  1410→          <CardContent className="space-y-4">
+  1411→            <div className="flex items-end justify-between">
+  1412→              <div>
+  1413→                <div className="text-3xl font-bold tracking-tight text-emerald-600">
+  1414→                  {dbSizeKb == null ? '—' : formatBytes(dbSizeKb)}
+  1415→                </div>
+  1416→                <div className="text-xs text-muted-foreground">Total DB file size</div>
+  1417→              </div>
+  1418→              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+  1419→                SQLite
+  1420→              </Badge>
+  1421→            </div>
+  1422→            <Separator />
+  1423→            <div className="grid grid-cols-2 gap-3 text-xs">
+  1424→              <div>
+  1425→                <div className="text-muted-foreground">Schema overhead</div>
+  1426→                <div className="font-medium">~12 KB</div>
+  1427→              </div>
+  1428→              <div>
+  1429→                <div className="text-muted-foreground">Row data</div>
+  1430→                <div className="font-medium">
+  1431→                  {dbSizeKb == null ? '—' : formatBytes(Math.max(0, dbSizeKb - 12 * 1024))}
+  1432→                </div>
+  1433→              </div>
+  1434→            </div>
+  1435→          </CardContent>
+  1436→        </Card>
+  1437→
+  1438→        <Card>
+  1439→          <CardHeader>
+  1440→            <SectionHeader
+  1441→              icon={HardDrive}
+  1442→              title="Storage Usage"
+  1443→              description="Disk usage reported by the latest monitoring heartbeat."
+  1444→            />
+  1445→          </CardHeader>
+  1446→          <CardContent className="space-y-4">
+  1447→            <div className="flex items-end justify-between">
+  1448→              <div>
+  1449→                <div className="text-3xl font-bold tracking-tight text-teal-600">
+  1450→                  {storageUsageKb == null
+  1451→                    ? '—'
+  1452→                    : formatBytes(storageUsageKb)}
+  1453→                </div>
+  1454→                <div className="text-xs text-muted-foreground">Disk used</div>
+  1455→              </div>
+  1456→              <Badge variant="outline" className="border-teal-200 bg-teal-50 text-teal-700">
+  1457→                Local Volume
+  1458→              </Badge>
+  1459→            </div>
+  1460→            <Separator />
+  1461→            <div className="grid grid-cols-2 gap-3 text-xs">
+  1462→              <div>
+  1463→                <div className="text-muted-foreground">Mounted at</div>
+  1464→                <div className="font-mono font-medium">/data</div>
+  1465→              </div>
+  1466→              <div>
+  1467→                <div className="text-muted-foreground">Backing store</div>
+  1468→                <div className="font-medium">ext4</div>
+  1469→              </div>
+  1470→            </div>
+  1471→          </CardContent>
+  1472→        </Card>
+  1473→      </div>
+  1474→
+  1475→      <Card className="border-2 border-red-200 bg-red-500/5 dark:border-red-800 dark:bg-red-500/10">
+  1476→        <CardHeader>
+  1477→          <SectionHeader
+  1478→            icon={CircleAlert}
+  1479→            title="Danger Zone"
+  1480→            description="Irreversible operations that affect service availability."
+  1481→          />
+  1482→        </CardHeader>
+  1483→        <CardContent>
+  1484→          <div className="flex flex-wrap items-center gap-3">
+  1485→            <Button
+  1486→              variant="outline"
+  1487→              onClick={() => setShowRestartConfirm(true)}
+  1488→              disabled={restarting}
+  1489→              className="gap-2 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
+  1490→            >
+  1491→              {restarting ? (
+  1492→                <Loader2 className="h-4 w-4 animate-spin" />
+  1493→              ) : (
+  1494→                <RotateCcw className="h-4 w-4" />
+  1495→              )}
+  1496→              Restart Services
+  1497→            </Button>
+  1498→            <AlertDialog open={showRestartConfirm} onOpenChange={setShowRestartConfirm}>
+  1499→              <AlertDialogContent>
+  1500→                <AlertDialogHeader>
+  1501→                  <AlertDialogTitle>Restart all services?</AlertDialogTitle>
+  1502→                  <AlertDialogDescription>
+  1503→                    This will trigger a graceful container reload. All active requests will be allowed to
+  1504→                    complete before services restart. Expect ~30 seconds of downtime.
+  1505→                  </AlertDialogDescription>
+  1506→                </AlertDialogHeader>
+  1507→                <AlertDialogFooter>
+  1508→                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1509→                  <AlertDialogAction
+  1510→                    className="bg-red-600 text-white hover:bg-red-700"
+  1511→                    onClick={() => void handleRestart()}
+  1512→                  >
+  1513→                    Restart Now
+  1514→                  </AlertDialogAction>
+  1515→                </AlertDialogFooter>
+  1516→              </AlertDialogContent>
+  1517→            </AlertDialog>
+  1518→            <Button
+  1519→              variant="outline"
+  1520→              onClick={handleExport}
+  1521→              disabled={exporting}
+  1522→              className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+  1523→            >
+  1524→              {exporting ? (
+  1525→                <Loader2 className="h-4 w-4 animate-spin" />
+  1526→              ) : (
+  1527→                <Download className="h-4 w-4" />
+  1528→              )}
+  1529→              Export Config
+  1530→            </Button>
+  1531→            <p className="text-xs text-muted-foreground">
+  1532→              These actions are irreversible. Restart triggers a graceful container reload. Export downloads a JSON snapshot of all
+  1533→              system config keys.
+  1534→            </p>
+  1535→          </div>
+  1536→        </CardContent>
+  1537→      </Card>
+  1538→    </div>
+  1539→  )
+  1540→}
+  1541→
+  1542→function InfoStat({
+  1543→  icon: Icon,
+  1544→  label,
+  1545→  value,
+  1546→  hint,
+  1547→  valueClassName,
+  1548→}: {
+  1549→  icon: React.ComponentType<{ className?: string }>
+  1550→  label: string
+  1551→  value: string
+  1552→  hint: string
+  1553→  valueClassName?: string
+  1554→}) {
+  1555→  return (
+  1556→    <div className="rounded-lg border bg-background/60 p-4">
+  1557→      <div className="mb-2 flex items-center justify-between">
+  1558→        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+  1559→        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+  1560→      </div>
+  1561→      <div className={cn('text-lg font-semibold tracking-tight', valueClassName)}>{value}</div>
+  1562→      <div className="text-[10px] text-muted-foreground">{hint}</div>
+  1563→    </div>
+  1564→  )
+  1565→}
+  1566→
+  1567→/* -------------------------------------------------------------------------- */
+  1568→/*                              Skeleton & Utils                              */
+  1569→/* -------------------------------------------------------------------------- */
+  1570→
+  1571→function SettingsSkeleton() {
+  1572→  return (
+  1573→    <div className="space-y-6">
+  1574→      <Skeleton className="h-10 w-full max-w-2xl" />
+  1575→      <div className="space-y-4">
+  1576→        <Skeleton className="h-40 w-full" />
+  1577→        <Skeleton className="h-40 w-full" />
+  1578→      </div>
+  1579→    </div>
+  1580→  )
+  1581→}
+  1582→
+  1583→function formatUptime(ms: number): string {
+  1584→  const seconds = Math.floor(ms / 1000)
+  1585→  const d = Math.floor(seconds / 86400)
+  1586→  const h = Math.floor((seconds % 86400) / 3600)
+  1587→  const m = Math.floor((seconds % 3600) / 60)
+  1588→  const parts: string[] = []
+  1589→  if (d > 0) parts.push(`${d}d`)
+  1590→  parts.push(`${h}h`)
+  1591→  parts.push(`${m}m`)
+  1592→  return parts.join(' ')
+  1593→}
+  1594→
+  1595→function formatBytes(kb: number): string {
+  1596→  if (kb < 1024) return `${kb.toFixed(0)} KB`
+  1597→  const mb = kb / 1024
+  1598→  if (mb < 1024) return `${mb.toFixed(1)} MB`
+  1599→  const gb = mb / 1024
+  1600→  return `${gb.toFixed(2)} GB`
+  1601→}
+  1602→
+  1603→/* -------------------------------------------------------------------------- */
+  1604→/*                              Main View                                     */
+  1605→/* -------------------------------------------------------------------------- */
+  1606→
+  1607→export function SettingsView() {
+  1608→  const [configMap, setConfigMap] = useState<Record<string, unknown>>({})
+  1609→  const [loaded, setLoaded] = useState(false)
+  1610→  const [activeTab, setActiveTab] = useState('general')
+  1611→
+  1612→  const load = useCallback(async () => {
+  1613→    const map = await fetchConfigMap()
+  1614→    setConfigMap(map)
+  1615→    setLoaded(true)
+  1616→  }, [])
+  1617→
+  1618→  useEffect(() => {
+  1619→    let cancelled = false
+  1620→    void (async () => {
+  1621→      const map = await fetchConfigMap()
+  1622→      if (cancelled) return
+  1623→      setConfigMap(map)
+  1624→      setLoaded(true)
+  1625→    })()
+  1626→    return () => {
+  1627→      cancelled = true
+  1628→    }
+  1629→  }, [])
+  1630→
+  1631→  return (
+  1632→    <div className="space-y-6">
+  1633→      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+  1634→        <div>
+  1635→          <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+  1636→          <p className="text-muted-foreground">
+  1637→            Manage system configuration, AI defaults, storage, security, and deployment.
+  1638→          </p>
+  1639→        </div>
+  1640→        <Badge variant="outline" className="w-fit gap-1.5 border-emerald-200 bg-emerald-50 text-emerald-700">
+  1641→          <SettingsIcon className="h-3 w-3" />
+  1642→          {loaded ? `${Object.keys(configMap).length} keys` : 'Loading...'}
+  1643→        </Badge>
+  1644→      </div>
+  1645→
+  1646→      <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4">
+  1647→        <div className="overflow-x-auto pb-1">
+  1648→          <TabsList className="h-auto bg-muted/60 p-1">
+  1649→            <TabsTrigger
+  1650→              value="general"
+  1651→              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+  1652→            >
+  1653→              <SettingsIcon className="h-3.5 w-3.5" />
+  1654→              General
+  1655→            </TabsTrigger>
+  1656→            <TabsTrigger
+  1657→              value="ai"
+  1658→              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+  1659→            >
+  1660→              <Brain className="h-3.5 w-3.5" />
+  1661→              AI
+  1662→            </TabsTrigger>
+  1663→            <TabsTrigger
+  1664→              value="storage"
+  1665→              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+  1666→            >
+  1667→              <Database className="h-3.5 w-3.5" />
+  1668→              Storage
+  1669→            </TabsTrigger>
+  1670→            <TabsTrigger
+  1671→              value="security"
+  1672→              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+  1673→            >
+  1674→              <Shield className="h-3.5 w-3.5" />
+  1675→              Security
+  1676→            </TabsTrigger>
+  1677→            <TabsTrigger
+  1678→              value="deployment"
+  1679→              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+  1680→            >
+  1681→              <Wrench className="h-3.5 w-3.5" />
+  1682→              Deployment
+  1683→            </TabsTrigger>
+  1684→          </TabsList>
+  1685→        </div>
+  1686→
+  1687→        <TabsContent value="general">
+  1688→          <GeneralTab configMap={configMap} loaded={loaded} onSaved={load} />
+  1689→        </TabsContent>
+  1690→        <TabsContent value="ai">
+  1691→          <AiTab configMap={configMap} loaded={loaded} onSaved={load} />
+  1692→        </TabsContent>
+  1693→        <TabsContent value="storage">
+  1694→          <StorageTab configMap={configMap} loaded={loaded} onSaved={load} />
+  1695→        </TabsContent>
+  1696→        <TabsContent value="security">
+  1697→          <SecurityTab configMap={configMap} loaded={loaded} onSaved={load} />
+  1698→        </TabsContent>
+  1699→        <TabsContent value="deployment">
+  1700→          <DeploymentTab configMap={configMap} />
+  1701→        </TabsContent>
+  1702→      </Tabs>
+  1703→    </div>
+  1704→  )
+  1705→}
+  1706→

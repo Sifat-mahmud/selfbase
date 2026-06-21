@@ -67,6 +67,7 @@ import { RealtimeIndicator } from '@/components/admin/realtime-indicator'
 import { NotificationsBell } from '@/components/admin/notifications-bell'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { KeyboardShortcuts } from '@/components/admin/keyboard-shortcuts'
+import { OnboardingTour } from '@/components/admin/onboarding-tour'
 
 const navItems: { section: AdminSection; label: string; icon: React.ComponentType<{ className?: string }>; color: string }[] = [
   { section: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'text-emerald-500' },
@@ -199,6 +200,7 @@ export default function AdminStudio() {
   const { activeSection, setActiveSection } = useAdminStore()
   const [commandOpen, setCommandOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [onboardingDone, setOnboardingDone] = useState(false)
   const [searchResults, setSearchResults] = useState<SearchResults>(EMPTY_SEARCH_RESULTS)
   const [dataLoaded, setDataLoaded] = useState(false)
   // Ref guard prevents duplicate in-flight fetches when the palette reopens quickly
@@ -579,6 +581,16 @@ export default function AdminStudio() {
 
       {/* Keyboard Shortcuts Dialog */}
       <KeyboardShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      {/* Onboarding Tour */}
+      {!onboardingDone && (
+        <OnboardingTour
+          onComplete={(navigateTo) => {
+            setOnboardingDone(true)
+            if (navigateTo) setActiveSection(navigateTo)
+          }}
+        />
+      )}
     </SidebarProvider>
   )
 }

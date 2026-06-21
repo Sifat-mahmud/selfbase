@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Settings as SettingsIcon,
   Sliders,
@@ -28,6 +29,12 @@ import {
   Wrench,
   AlertTriangle,
   XCircle,
+  Webhook,
+  Copy,
+  Pencil,
+  Trash2,
+  Zap,
+  Plus,
 } from 'lucide-react'
 import {
   Card,
@@ -78,6 +85,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 /* -------------------------------------------------------------------------- */
 /*                              Config Key Map                                */
@@ -1261,6 +1285,609 @@ function SecurityTab({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                              Webhooks Tab                                  */
+/* -------------------------------------------------------------------------- */
+
+const WEBHOOK_EVENTS = [
+  'pipeline.success',
+  'pipeline.failed',
+  'scraper.complete',
+  'alert.triggered',
+  'function.error',
+] as const
+
+type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
+
+interface WebhookItem {
+  id: string
+  url: string
+  events: WebhookEvent[]
+  secretKey: string
+  description: string
+  isActive: boolean
+  lastTriggered: string | null
+  createdAt: string
+}
+
+function generateSecretKey(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  const segments: string[] = []
+  for (let s = 0; s < 4; s++) {
+    let seg = ''
+    for (let i = 0; i < 8; i++) {
+      seg += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    segments.push(seg)
+  }
+  return `whk_${segments.join('_')}`
+}
+
+function WebhooksTab() {
+  const { toast } = useToast()
+  const [webhooks, setWebhooks] = useState<WebhookItem[]>([
+    {
+      id: 'wh-1',
+      url: 'https://hooks.example.com/pipeline-notify',
+      events: ['pipeline.success', 'pipeline.failed'],
+      secretKey: 'whk_aBcDeFgH_jKlMnOpQ_rStUvWxY_zAbCdEfG',
+      description: 'Pipeline status notifications',
+      isActive: true,
+      lastTriggered: new Date(Date.now() - 3600000).toISOString(),
+      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+    },
+    {
+      id: 'wh-2',
+      url: 'https://api.myapp.com/webhooks/scraper-done',
+      events: ['scraper.complete'],
+      secretKey: 'whk_XyZaBcDe_fGhIjKlM_nOpQrStU_vWxYzAbC',
+      description: 'Trigger post-scraper processing',
+      isActive: true,
+      lastTriggered: new Date(Date.now() - 7200000).toISOString(),
+      createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),
+    },
+    {
+      id: 'wh-3',
+      url: 'https://alerts.example.com/function-errors',
+      events: ['function.error', 'alert.triggered'],
+      secretKey: 'whk_MnOpQrSt_UvWxYzAb_CdEfGhIj_KlMnOpQr',
+      description: '',
+      isActive: false,
+      lastTriggered: null,
+      createdAt: new Date(Date.now() - 86400000).toISOString(),
+    },
+  ])
+
+  const [showAddDialog, setShowAddDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editingWebhook, setEditingWebhook] = useState<WebhookItem | null>(null)
+  const [testingId, setTestingId] = useState<string | null>(null)
+  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; ms: number }>>({})
+
+  // Add form state
+  const [addUrl, setAddUrl] = useState('')
+  const [addEvents, setAddEvents] = useState<WebhookEvent[]>([])
+  const [addDescription, setAddDescription] = useState('')
+  const [addActive, setAddActive] = useState(true)
+  const [addSecret, setAddSecret] = useState('')
+  const [addUrlError, setAddUrlError] = useState('')
+
+  // Edit form state
+  const [editUrl, setEditUrl] = useState('')
+  const [editEvents, setEditEvents] = useState<WebhookEvent[]>([])
+  const [editDescription, setEditDescription] = useState('')
+  const [editActive, setEditActive] = useState(true)
+  const [editUrlError, setEditUrlError] = useState('')
+
+  const resetAddForm = () => {
+    setAddUrl('')
+    setAddEvents([])
+    setAddDescription('')
+    setAddActive(true)
+    setAddSecret('')
+    setAddUrlError('')
+  }
+
+  const openAddDialog = () => {
+    resetAddForm()
+    setAddSecret(generateSecretKey())
+    setShowAddDialog(true)
+  }
+
+  const validateUrl = (url: string): string => {
+    if (!url) return 'URL is required'
+    if (!url.startsWith('https://')) return 'URL must start with https://'
+    try {
+      new URL(url)
+      return ''
+    } catch {
+      return 'Invalid URL format'
+    }
+  }
+
+  const handleAddWebhook = () => {
+    const error = validateUrl(addUrl)
+    if (error) {
+      setAddUrlError(error)
+      return
+    }
+    if (addEvents.length === 0) {
+      toast({ title: 'Select at least one event', variant: 'destructive' })
+      return
+    }
+
+    const newWebhook: WebhookItem = {
+      id: `wh-${Date.now()}`,
+      url: addUrl,
+      events: addEvents,
+      secretKey: addSecret,
+      description: addDescription,
+      isActive: addActive,
+      lastTriggered: null,
+      createdAt: new Date().toISOString(),
+    }
+    setWebhooks((prev) => [newWebhook, ...prev])
+    setShowAddDialog(false)
+    toast({ title: 'Webhook created', description: `Listening for ${addEvents.join(', ')}` })
+  }
+
+  const openEditDialog = (wh: WebhookItem) => {
+    setEditingWebhook(wh)
+    setEditUrl(wh.url)
+    setEditEvents([...wh.events])
+    setEditDescription(wh.description)
+    setEditActive(wh.isActive)
+    setEditUrlError('')
+    setShowEditDialog(true)
+  }
+
+  const handleEditWebhook = () => {
+    if (!editingWebhook) return
+    const error = validateUrl(editUrl)
+    if (error) {
+      setEditUrlError(error)
+      return
+    }
+    if (editEvents.length === 0) {
+      toast({ title: 'Select at least one event', variant: 'destructive' })
+      return
+    }
+    setWebhooks((prev) =>
+      prev.map((wh) =>
+        wh.id === editingWebhook.id
+          ? { ...wh, url: editUrl, events: editEvents, description: editDescription, isActive: editActive }
+          : wh,
+      ),
+    )
+    setShowEditDialog(false)
+    toast({ title: 'Webhook updated' })
+  }
+
+  const handleDelete = (id: string) => {
+    setWebhooks((prev) => prev.filter((wh) => wh.id !== id))
+    toast({ title: 'Webhook deleted' })
+  }
+
+  const handleTest = async (wh: WebhookItem) => {
+    setTestingId(wh.id)
+    setTestResults((prev) => {
+      const next = { ...prev }
+      delete next[wh.id]
+      return next
+    })
+
+    // Simulate sending a test payload
+    const start = Date.now()
+    await new Promise((r) => setTimeout(r, 800 + Math.random() * 700))
+    const elapsed = Date.now() - start
+    const ok = Math.random() > 0.2 // 80% success rate for demo
+
+    setTestResults((prev) => ({ ...prev, [wh.id]: { ok, ms: elapsed } }))
+    setTestingId(null)
+
+    toast({
+      title: ok ? 'Test successful' : 'Test failed',
+      description: ok
+        ? `${wh.url} responded in ${elapsed}ms`
+        : `${wh.url} returned an error after ${elapsed}ms`,
+      variant: ok ? 'default' : 'destructive',
+    })
+  }
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text).then(
+      () => toast({ title: `${label} copied` }),
+      () => toast({ title: 'Failed to copy', variant: 'destructive' }),
+    )
+  }
+
+  const toggleEvent = (
+    event: WebhookEvent,
+    current: WebhookEvent[],
+    setter: React.Dispatch<React.SetStateAction<WebhookEvent[]>>,
+  ) => {
+    setter(current.includes(event) ? current.filter((e) => e !== event) : [...current, event])
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Webhooks</h2>
+          <p className="text-sm text-muted-foreground">
+            Configure outgoing webhooks to receive real-time event notifications.
+          </p>
+        </div>
+        <Button
+          onClick={openAddDialog}
+          size="sm"
+          className="gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700 active:scale-[0.97] transition-transform"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add Webhook
+        </Button>
+      </div>
+
+      {/* Webhook List Table */}
+      {webhooks.length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center gap-2 py-10">
+            <div className="rounded-full bg-emerald-500/10 p-3 text-emerald-600">
+              <Webhook className="h-6 w-6" />
+            </div>
+            <p className="text-sm font-medium">No webhooks configured</p>
+            <p className="text-xs text-muted-foreground">Add a webhook to receive event notifications.</p>
+            <Button
+              onClick={openAddDialog}
+              variant="outline"
+              size="sm"
+              className="mt-2 gap-1.5 active:scale-[0.97] transition-transform"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add Webhook
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[280px]">URL</TableHead>
+                    <TableHead>Events</TableHead>
+                    <TableHead className="w-[100px]">Status</TableHead>
+                    <TableHead className="w-[140px]">Last Triggered</TableHead>
+                    <TableHead className="w-[140px] text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {webhooks.map((wh) => (
+                    <TableRow key={wh.id}>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <code className="max-w-[200px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                            {wh.url.length > 40 ? `${wh.url.slice(0, 40)}…` : wh.url}
+                          </code>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6"
+                                onClick={() => copyToClipboard(wh.url, 'URL')}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Copy URL</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {wh.events.map((ev) => (
+                            <Badge
+                              key={ev}
+                              variant="outline"
+                              className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400"
+                            >
+                              {ev}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            wh.isActive
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400'
+                              : 'border-muted bg-muted/50 text-muted-foreground'
+                          }
+                        >
+                          <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${wh.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground'}`} />
+                          {wh.isActive ? 'Active' : 'Disabled'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {wh.lastTriggered ? formatWebhookTime(wh.lastTriggered) : 'Never'}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => openEditDialog(wh)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Edit</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                disabled={testingId === wh.id}
+                                onClick={() => void handleTest(wh)}
+                              >
+                                {testingId === wh.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : testResults[wh.id]?.ok ? (
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                                ) : testResults[wh.id] && !testResults[wh.id].ok ? (
+                                  <XCircle className="h-3 w-3 text-red-500" />
+                                ) : (
+                                  <Zap className="h-3 w-3" />
+                                )}
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {testingId === wh.id
+                                ? 'Sending test...'
+                                : testResults[wh.id]
+                                  ? `${testResults[wh.id].ok ? 'Success' : 'Failed'} · ${testResults[wh.id].ms}ms`
+                                  : 'Test webhook'}
+                            </TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-red-500 hover:text-red-700"
+                                onClick={() => handleDelete(wh.id)}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Delete</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add Webhook Dialog */}
+      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Webhook className="h-4.5 w-4.5 text-emerald-600" />
+              Add Webhook
+            </DialogTitle>
+            <DialogDescription>
+              Create a new webhook endpoint to receive event notifications.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* URL */}
+            <div className="space-y-1.5">
+              <Label htmlFor="wh-url" className="text-sm font-medium">
+                Endpoint URL
+              </Label>
+              <Input
+                id="wh-url"
+                placeholder="https://example.com/webhook"
+                value={addUrl}
+                onChange={(e) => {
+                  setAddUrl(e.target.value)
+                  setAddUrlError('')
+                }}
+                className={addUrlError ? 'border-red-500' : ''}
+              />
+              {addUrlError && <p className="text-xs text-red-500">{addUrlError}</p>}
+              <p className="text-[11px] text-muted-foreground">Must start with https://</p>
+            </div>
+
+            {/* Events */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Events</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {WEBHOOK_EVENTS.map((event) => (
+                  <label
+                    key={event}
+                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={addEvents.includes(event)}
+                      onCheckedChange={() => toggleEvent(event, addEvents, setAddEvents)}
+                    />
+                    <span className="font-mono text-xs">{event}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Secret Key */}
+            <div className="space-y-1.5">
+              <Label className="text-sm font-medium">Secret Key</Label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-muted px-3 py-2 font-mono text-xs break-all">
+                  {addSecret}
+                </code>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => copyToClipboard(addSecret, 'Secret key')}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">Used to verify webhook payloads. Auto-generated.</p>
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label htmlFor="wh-desc" className="text-sm font-medium">
+                Description <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="wh-desc"
+                placeholder="What is this webhook for?"
+                value={addDescription}
+                onChange={(e) => setAddDescription(e.target.value)}
+              />
+            </div>
+
+            {/* Active toggle */}
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <div className="text-sm font-medium">Active</div>
+                <div className="text-xs text-muted-foreground">Enable this webhook immediately</div>
+              </div>
+              <Switch checked={addActive} onCheckedChange={setAddActive} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowAddDialog(false)}
+              className="active:scale-[0.97] transition-transform"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddWebhook}
+              className="bg-emerald-600 hover:bg-emerald-700 active:scale-[0.97] transition-transform"
+            >
+              <Webhook className="mr-1.5 h-3.5 w-3.5" />
+              Create Webhook
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Webhook Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-4.5 w-4.5 text-emerald-600" />
+              Edit Webhook
+            </DialogTitle>
+            <DialogDescription>
+              Update the webhook endpoint configuration.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-wh-url" className="text-sm font-medium">
+                Endpoint URL
+              </Label>
+              <Input
+                id="edit-wh-url"
+                value={editUrl}
+                onChange={(e) => {
+                  setEditUrl(e.target.value)
+                  setEditUrlError('')
+                }}
+                className={editUrlError ? 'border-red-500' : ''}
+              />
+              {editUrlError && <p className="text-xs text-red-500">{editUrlError}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Events</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {WEBHOOK_EVENTS.map((event) => (
+                  <label
+                    key={event}
+                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={editEvents.includes(event)}
+                      onCheckedChange={() => toggleEvent(event, editEvents, setEditEvents)}
+                    />
+                    <span className="font-mono text-xs">{event}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-wh-desc" className="text-sm font-medium">
+                Description <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input
+                id="edit-wh-desc"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <div className="text-sm font-medium">Active</div>
+                <div className="text-xs text-muted-foreground">Enable this webhook</div>
+              </div>
+              <Switch checked={editActive} onCheckedChange={setEditActive} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowEditDialog(false)}
+              className="active:scale-[0.97] transition-transform"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleEditWebhook}
+              className="bg-emerald-600 hover:bg-emerald-700 active:scale-[0.97] transition-transform"
+            >
+              <Save className="mr-1.5 h-3.5 w-3.5" />
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+function formatWebhookTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'Just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
+/* -------------------------------------------------------------------------- */
 /*                            Deployment Tab                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -1675,6 +2302,13 @@ export function SettingsView() {
               Security
             </TabsTrigger>
             <TabsTrigger
+              value="webhooks"
+              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+            >
+              <Webhook className="h-3.5 w-3.5" />
+              Webhooks
+            </TabsTrigger>
+            <TabsTrigger
               value="deployment"
               className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
@@ -1684,21 +2318,21 @@ export function SettingsView() {
           </TabsList>
         </div>
 
-        <TabsContent value="general">
-          <GeneralTab configMap={configMap} loaded={loaded} onSaved={load} />
-        </TabsContent>
-        <TabsContent value="ai">
-          <AiTab configMap={configMap} loaded={loaded} onSaved={load} />
-        </TabsContent>
-        <TabsContent value="storage">
-          <StorageTab configMap={configMap} loaded={loaded} onSaved={load} />
-        </TabsContent>
-        <TabsContent value="security">
-          <SecurityTab configMap={configMap} loaded={loaded} onSaved={load} />
-        </TabsContent>
-        <TabsContent value="deployment">
-          <DeploymentTab configMap={configMap} />
-        </TabsContent>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.15 }}
+          >
+            {activeTab === 'general' && <GeneralTab configMap={configMap} loaded={loaded} onSaved={load} />}
+            {activeTab === 'ai' && <AiTab configMap={configMap} loaded={loaded} onSaved={load} />}
+            {activeTab === 'storage' && <StorageTab configMap={configMap} loaded={loaded} onSaved={load} />}
+            {activeTab === 'security' && <SecurityTab configMap={configMap} loaded={loaded} onSaved={load} />}
+            {activeTab === 'webhooks' && <WebhooksTab />}
+            {activeTab === 'deployment' && <DeploymentTab configMap={configMap} />}
+          </motion.div>
+        </AnimatePresence>
       </Tabs>
     </div>
   )

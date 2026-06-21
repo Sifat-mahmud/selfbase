@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+     4→import { motion, useReducedMotion, type Variants } from 'framer-motion'
+     5→import {
+     6→  Activity,
+     7→  Database,
+     8→  Users,
+     9→  Zap,
+    10→  ArrowUpRight,
+    11→  ArrowDownRight,
+    12→  Minus,
+    13→  Server,
+    14→  Clock,
+    15→  TrendingUp,
+    16→  AlertTriangle,
+    17→  CheckCircle2,
+    18→  GitBranch,
+    19→  Code2,
+    20→  Brain,
+    21→  Globe,
+    22→  Shield,
+    23→  HardDrive,
+    24→  RefreshCw,
+    25→  Cpu,
+    26→  MemoryStick,
+    27→  ChevronRight,
+    28→  Sparkles,
+    29→  Layers,
+    30→  CircleDot,
+    31→} from 'lucide-react'
+    32→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    33→import { Badge } from '@/components/ui/badge'
+    34→import { Button } from '@/components/ui/button'
+    35→import { Progress } from '@/components/ui/progress'
+    36→import { useAdminStore, type AdminSection } from '@/stores/admin-store'
+    37→import {
+    38→  AreaChart,
+    39→  Area,
+    40→  XAxis,
+    41→  YAxis,
+    42→  CartesianGrid,
+    43→  Tooltip,
+    44→  ResponsiveContainer,
+    45→  LineChart,
+    46→  Line,
+    47→} from 'recharts'
+    48→
+    49→// =====================================================================
+    50→// TYPES — typed contracts for every API response we consume
+    51→// =====================================================================
+    52→
+    53→interface LoadData {
+    54→  loadScore: number
+    55→  loadLevel: 'low' | 'moderate' | 'high' | 'critical'
+    56→  cpu: { total: number; scraper: number; api: number; functions: number }
+    57→  memory: { usedMb: number; totalMb: number; percent: number }
+    58→  connections: number
+    59→  requestsPerSecond: number
+    60→  activeJobs: { pipelines: number; scrapers: number }
+    61→  recentErrors: { pipelines: number; scrapers: number; sources: number; total: number }
+    62→  lastHeartbeat: string | null
+    63→}
+    64→
+    65→interface UptimeData {
+    66→  range?: { from: string; to: string }
+    67→  totalMs?: number
+    68→  uptimeMs?: number
+    69→  downtimeMs?: number
+    70→  uptimePercent: number
+    71→  downtimePeriods?: Array<{ start: string; end: string; durationMs: number }>
+    72→  heartbeatCount: number
+    73→}
+    74→
+    75→interface Heartbeat {
+    76→  id: string
+    77→  recordedAt: string
+    78→  cpuTotal: number
+    79→  cpuScraper: number
+    80→  cpuApi: number
+    81→  cpuFunctions: number
+    82→  ramUsedMb: number
+    83→  diskUsedMb: number
+    84→  activeConnections: number
+    85→  reqPerSec: number
+    86→  intervalSec: number
+    87→  loadScore: number
+    88→}
+    89→
+    90→interface SbTable {
+    91→  id: string
+    92→  name: string
+    93→  displayName?: string | null
+    94→  rowCount: number
+    95→  [key: string]: unknown
+    96→}
+    97→
+    98→interface PipelineSource {
+    99→  id: string
+   100→  name: string
+   101→  isActive: boolean
+   102→  [key: string]: unknown
+   103→}
+   104→
+   105→interface SbFunction {
+   106→  id: string
+   107→  name: string
+   108→  isActive: boolean
+   109→  [key: string]: unknown
+   110→}
+   111→
+   112→interface QueueStats {
+   113→  status: string
+   114→  count: number
+   115→}
+   116→
+   117→interface QueueData {
+   118→  requests: unknown[]
+   119→  stats: QueueStats[]
+   120→  pagination?: { total: number }
+   121→}
+   122→
+   123→interface SourceError {
+   124→  id: string
+   125→  sourceId?: string | null
+   126→  tableId?: string | null
+   127→  tableName?: string | null
+   128→  errorType: string
+   129→  message: string
+   130→  occurredAt: string
+   131→}
+   132→
+   133→interface PipelineRun {
+   134→  id: string
+   135→  sourceId: string
+   136→  status: string
+   137→  startedAt: string
+   138→  completedAt?: string | null
+   139→  durationMs?: number | null
+   140→  rowsFetched: number
+   141→  rowsWritten: number
+   142→  rowsFailed: number
+   143→  isManual: boolean
+   144→  source?: { id: string; name: string; sourceType: string; url: string }
+   145→}
+   146→
+   147→interface FunctionRunItem {
+   148→  id: string
+   149→  functionId: string
+   150→  status: string
+   151→  triggeredBy?: string | null
+   152→  durationMs?: number | null
+   153→  memoryUsedMb?: number | null
+   154→  startedAt: string
+   155→  completedAt?: string | null
+   156→  func?: { id: string; name: string; triggerType: string }
+   157→}
+   158→
+   159→interface DashboardData {
+   160→  load: LoadData | null
+   161→  uptime: UptimeData | null
+   162→  heartbeats: Heartbeat[]
+   163→  tables: SbTable[]
+   164→  pipelines: PipelineSource[]
+   165→  functions: SbFunction[]
+   166→  queue: QueueData | null
+   167→  logs: SourceError[]
+   168→  pipelineRuns: PipelineRun[]
+   169→  functionRuns: FunctionRunItem[]
+   170→}
+   171→
+   172→// =====================================================================
+   173→// HELPERS
+   174→// =====================================================================
+   175→
+   176→/** Unwrap `{ success, data }` envelope; fall back to raw payload. */
+   177→async function fetchJson<T>(url: string): Promise<T | null> {
+   178→  try {
+   179→    const res = await fetch(url, { cache: 'no-store' })
+   180→    if (!res.ok) return null
+   181→    const json = await res.json()
+   182→    if (json && typeof json === 'object' && 'success' in json && 'data' in json) {
+   183→      return (json as { data: T }).data as T
+   184→    }
+   185→    return json as T
+   186→  } catch {
+   187→    return null
+   188→  }
+   189→}
+   190→
+   191→/** Normalize an API response that may be wrapped or have pagination into an array. */
+   192→function normalizeArray<T>(raw: T | null): T[] {
+   193→  if (!raw) return []
+   194→  if (Array.isArray(raw)) return raw
+   195→  if (typeof raw === 'object' && raw !== null) {
+   196→    const obj = raw as Record<string, unknown>
+   197→    // Handle { data: [...] } envelope
+   198→    if (Array.isArray(obj.data)) return obj.data as T[]
+   199→    // Handle { runs: [...] } envelope (functions/runs)
+   200→    if (Array.isArray(obj.runs)) return obj.runs as T[]
+   201→  }
+   202→  return []
+   203→}
+   204→
+   205→function formatNumber(n: number, mode: 'compact' | 'full' = 'compact'): string {
+   206→  if (!Number.isFinite(n)) return '0'
+   207→  if (mode === 'full') return n.toLocaleString()
+   208→  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+   209→  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+   210→  return n.toLocaleString()
+   211→}
+   212→
+   213→function formatRelativeTime(dateStr: string): string {
+   214→  const now = Date.now()
+   215→  const then = new Date(dateStr).getTime()
+   216→  const diff = Math.max(0, now - then)
+   217→  const sec = Math.floor(diff / 1000)
+   218→  if (sec < 60) return `${sec}s ago`
+   219→  const min = Math.floor(sec / 60)
+   220→  if (min < 60) return `${min}m ago`
+   221→  const hr = Math.floor(min / 60)
+   222→  if (hr < 24) return `${hr}h ago`
+   223→  const day = Math.floor(hr / 24)
+   224→  if (day < 30) return `${day}d ago`
+   225→  const mo = Math.floor(day / 30)
+   226→  if (mo < 12) return `${mo}mo ago`
+   227→  return `${Math.floor(mo / 12)}y ago`
+   228→}
+   229→
+   230→function formatDuration(ms: number): string {
+   231→  if (!Number.isFinite(ms) || ms <= 0) return '0m'
+   232→  const sec = Math.floor(ms / 1000)
+   233→  const days = Math.floor(sec / 86400)
+   234→  const hours = Math.floor((sec % 86400) / 3600)
+   235→  const mins = Math.floor((sec % 3600) / 60)
+   236→  if (days > 0) return `${days}d ${hours}h ${mins}m`
+   237→  if (hours > 0) return `${hours}h ${mins}m`
+   238→  return `${mins}m`
+   239→}
+   240→
+   241→/** Map a 0-100 usage value to a traffic-light color bucket. */
+   242→function progressBucket(pct: number): 'emerald' | 'amber' | 'red' {
+   243→  if (pct >= 75) return 'red'
+   244→  if (pct >= 50) return 'amber'
+   245→  return 'emerald'
+   246→}
+   247→
+   248→const PROGRESS_STYLES: Record<'emerald' | 'amber' | 'red', { bar: string; text: string; bg: string }> = {
+   249→  emerald: {
+   250→    bar: 'bg-emerald-500',
+   251→    text: 'text-emerald-600',
+   252→    bg: 'bg-emerald-500/10',
+   253→  },
+   254→  amber: {
+   255→    bar: 'bg-amber-500',
+   256→    text: 'text-amber-600',
+   257→    bg: 'bg-amber-500/10',
+   258→  },
+   259→  red: {
+   260→    bar: 'bg-red-500',
+   261→    text: 'text-red-600',
+   262→    bg: 'bg-red-500/10',
+   263→  },
+   264→}
+   265→
+   266→// =====================================================================
+   267→// ANIMATED COUNTER
+   268→// =====================================================================
+   269→
+   270→function AnimatedNumber({
+   271→  value,
+   272→  format = 'plain',
+   273→  duration = 800,
+   274→  className,
+   275→}: {
+   276→  value: number
+   277→  format?: 'plain' | 'compact' | 'percent'
+   278→  duration?: number
+   279→  className?: string
+   280→}) {
+   281→  const reduce = useReducedMotion()
+   282→  const [display, setDisplay] = useState(value)
+   283→  const rafRef = useRef<number | null>(null)
+   284→
+   285→  useEffect(() => {
+   286→    if (reduce) return // reduced-motion users see raw value, no state writes
+   287→    const start = display
+   288→    const delta = value - start
+   289→    if (delta === 0) return
+   290→    const startTs = performance.now()
+   291→    const tick = (now: number) => {
+   292→      const t = Math.min(1, (now - startTs) / duration)
+   293→      const eased = 1 - Math.pow(1 - t, 3)
+   294→      setDisplay(start + delta * eased)
+   295→      if (t < 1) {
+   296→        rafRef.current = requestAnimationFrame(tick)
+   297→      } else {
+   298→        setDisplay(value)
+   299→      }
+   300→    }
+   301→    rafRef.current = requestAnimationFrame(tick)
+   302→    return () => {
+   303→      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+   304→    }
+   305→  }, [value, duration, reduce])
+   306→
+   307→  const shown = reduce ? value : display
+   308→  if (format === 'compact') {
+   309→    return <span className={className}>{formatNumber(Math.round(shown))}</span>
+   310→  }
+   311→  if (format === 'percent') {
+   312→    return <span className={className}>{shown.toFixed(1)}%</span>
+   313→  }
+   314→  return <span className={className}>{Math.round(shown).toLocaleString()}</span>
+   315→}
+   316→
+   317→// =====================================================================
+   318→// SPARKLINE — tiny inline SVG chart used inside KPI / Resource cards.
+   319→// Lightweight (no chart lib) with gradient fill + animated path draw.
+   320→// =====================================================================
+   321→
+   322→/** Build a smooth Catmull-Rom (cardinal) spline through the given points. */
+   323→function buildSplinePath(points: Array<{ x: number; y: number }>, tension = 0.18): string {
+   324→  if (points.length < 2) return ''
+   325→  let d = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
+   326→  for (let i = 0; i < points.length - 1; i++) {
+   327→    const p0 = points[i === 0 ? 0 : i - 1]
+   328→    const p1 = points[i]
+   329→    const p2 = points[i + 1]
+   330→    const p3 = points[i + 2 < points.length ? i + 2 : points.length - 1]
+   331→    const cp1x = p1.x + (p2.x - p0.x) * tension
+   332→    const cp1y = p1.y + (p2.y - p0.y) * tension
+   333→    const cp2x = p2.x - (p3.x - p1.x) * tension
+   334→    const cp2y = p2.y - (p3.y - p1.y) * tension
+   335→    d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+   336→  }
+   337→  return d
+   338→}
+   339→
+   340→function Sparkline({
+   341→  data,
+   342→  color,
+   343→  height = 36,
+   344→}: {
+   345→  data: number[]
+   346→  color: string
+   347→  height?: number
+   348→}) {
+   349→  const reduce = useReducedMotion()
+   350→  if (!data || data.length < 2) {
+   351→    return <div style={{ height }} className="w-full" aria-hidden />
+   352→  }
+   353→
+   354→  const width = 120 // viewBox width (scales to container via preserveAspectRatio)
+   355→  const pad = 3
+   356→  const innerW = width - pad * 2
+   357→  const innerH = height - pad * 2
+   358→  const min = Math.min(...data)
+   359→  const max = Math.max(...data)
+   360→  const range = max - min || 1
+   361→  const stepX = innerW / (data.length - 1)
+   362→
+   363→  const points = data.map((v, i) => ({
+   364→    x: pad + i * stepX,
+   365→    y: pad + innerH * (1 - (v - min) / range),
+   366→  }))
+   367→
+   368→  const linePath = buildSplinePath(points)
+   369→  const fillPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${height} L ${points[0].x.toFixed(2)} ${height} Z`
+   370→  const last = points[points.length - 1]
+   371→  const gradId = `spark-fill-${color.replace('#', '')}`
+   372→  const clipId = `spark-clip-${color.replace('#', '')}`
+   373→
+   374→  return (
+   375→    <svg
+   376→      viewBox={`0 0 ${width} ${height}`}
+   377→      width="100%"
+   378→      height={height}
+   379→      preserveAspectRatio="none"
+   380→      className="block overflow-visible"
+   381→      aria-hidden
+   382→    >
+   383→      <defs>
+   384→        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+   385→          <stop offset="0%" stopColor={color} stopOpacity={0.45} />
+   386→          <stop offset="100%" stopColor={color} stopOpacity={0} />
+   387→        </linearGradient>
+   388→        <clipPath id={clipId}>
+   389→          <rect x="0" y="0" width={width} height={height} />
+   390→        </clipPath>
+   391→      </defs>
+   392→      <g clipPath={`url(#${clipId})`}>
+   393→        <motion.path
+   394→          d={fillPath}
+   395→          fill={`url(#${gradId})`}
+   396→          initial={{ opacity: 0 }}
+   397→          animate={{ opacity: 1 }}
+   398→          transition={{ duration: 0.6, ease: 'easeOut' }}
+   399→        />
+   400→        <motion.path
+   401→          d={linePath}
+   402→          fill="none"
+   403→          stroke={color}
+   404→          strokeWidth={1.5}
+   405→          strokeLinecap="round"
+   406→          strokeLinejoin="round"
+   407→          vectorEffect="non-scaling-stroke"
+   408→          initial={reduce ? false : { pathLength: 0 }}
+   409→          animate={{ pathLength: 1 }}
+   410→          transition={{ duration: 0.8, ease: 'easeOut' }}
+   411→        />
+   412→        {/* Last-point pulse dot */}
+   413→        <motion.circle
+   414→          cx={last.x}
+   415→          cy={last.y}
+   416→          r={2}
+   417→          fill={color}
+   418→          initial={reduce ? false : { scale: 0, opacity: 0 }}
+   419→          animate={{ scale: 1, opacity: 1 }}
+   420→          transition={{ duration: 0.3, delay: reduce ? 0 : 0.55 }}
+   421→          style={{ transformOrigin: `${last.x}px ${last.y}px` }}
+   422→        />
+   423→      </g>
+   424→    </svg>
+   425→  )
+   426→}
+   427→
+   428→// =====================================================================
+   429→// MINI SPARKLINE — tiny recharts-based inline chart for KPI card headers
+   430→// =====================================================================
+   431→
+   432→function MiniSparkline({
+   433→  data,
+   434→  color,
+   435→  width = 60,
+   436→  height = 30,
+   437→}: {
+   438→  data: number[]
+   439→  color: string
+   440→  width?: number
+   441→  height?: number
+   442→}) {
+   443→  if (!data || data.length < 2) return null
+   444→
+   445→  const chartData = data.map((v, i) => ({ i, v }))
+   446→  const gradId = `mini-grad-${color.replace('#', '')}`
+   447→
+   448→  return (
+   449→    <div style={{ width, height }} className="shrink-0">
+   450→      <ResponsiveContainer width="100%" height="100%">
+   451→        <AreaChart data={chartData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
+   452→          <defs>
+   453→            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+   454→              <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+   455→              <stop offset="100%" stopColor={color} stopOpacity={0} />
+   456→            </linearGradient>
+   457→          </defs>
+   458→          <Area
+   459→            type="monotone"
+   460→            dataKey="v"
+   461→            stroke={color}
+   462→            strokeWidth={1.5}
+   463→            fill={`url(#${gradId})`}
+   464→            dot={false}
+   465→            isAnimationActive={false}
+   466→          />
+   467→        </AreaChart>
+   468→      </ResponsiveContainer>
+   469→    </div>
+   470→  )
+   471→}
+   472→
+   473→// =====================================================================
+   474→// CHANGE PILL — up/down/neutral indicator
+   475→// =====================================================================
+   476→
+   477→function ChangePill({
+   478→  direction,
+   479→  label,
+   480→  invertColor = false,
+   481→}: {
+   482→  direction: 'up' | 'down' | 'neutral'
+   483→  label: string
+   484→  invertColor?: boolean
+   485→}) {
+   486→  // invertColor = true means "up is bad" (e.g. error rate)
+   487→  const good = direction === 'up' ? !invertColor : direction === 'down' ? invertColor : null
+   488→  const isNeutral = direction === 'neutral'
+   489→  const colorClass = isNeutral
+   490→    ? 'text-muted-foreground bg-muted/60'
+   491→    : good
+   492→      ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/10'
+   493→      : 'text-red-700 dark:text-red-400 bg-red-500/10'
+   494→  const Icon = direction === 'up' ? ArrowUpRight : direction === 'down' ? ArrowDownRight : Minus
+   495→  return (
+   496→    <span
+   497→      className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium transition-colors ${colorClass}`}
+   498→    >
+   499→      <Icon className="h-3 w-3" />
+   500→      {label}
+   501→    </span>
+   502→  )
+   503→}
+   504→
+   505→// =====================================================================
+   506→// MAIN DASHBOARD
+   507→// =====================================================================
+   508→
+   509→const REFRESH_INTERVAL_MS = 30_000
+   510→
+   511→export function DashboardView() {
+   512→  const [data, setData] = useState<DashboardData>({
+   513→    load: null,
+   514→    uptime: null,
+   515→    heartbeats: [],
+   516→    tables: [],
+   517→    pipelines: [],
+   518→    functions: [],
+   519→    queue: null,
+   520→    logs: [],
+   521→    pipelineRuns: [],
+   522→    functionRuns: [],
+   523→  })
+   524→  const [loading, setLoading] = useState(true)
+   525→  const [refreshing, setRefreshing] = useState(false)
+   526→  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+   527→
+   528→  const fetchAll = useCallback(async () => {
+   529→    const [load, uptime, heartbeats, tables, pipelines, functions, queue, logs, pipelineRuns, functionRuns] =
+   530→      await Promise.all([
+   531→        fetchJson<LoadData>('/api/monitoring/load'),
+   532→        fetchJson<UptimeData>('/api/monitoring/uptime'),
+   533→        fetchJson<Heartbeat[]>('/api/monitoring/heartbeat?limit=60'),
+   534→        fetchJson<SbTable[]>('/api/tables'),
+   535→        fetchJson<PipelineSource[]>('/api/pipelines?isActive=true'),
+   536→        fetchJson<SbFunction[]>('/api/functions'),
+   537→        fetchJson<QueueData>('/api/queue'),
+   538→        fetchJson<SourceError[]>('/api/logs?limit=8'),
+   539→        fetchJson<PipelineRun[]>('/api/pipelines/runs?limit=5'),
+   540→        fetchJson<FunctionRunItem[]>('/api/functions/runs?limit=5'),
+   541→      ])
+   542→
+   543→    setData({
+   544→      load: load ?? null,
+   545→      uptime: uptime ?? null,
+   546→      heartbeats: heartbeats ?? [],
+   547→      tables: tables ?? [],
+   548→      pipelines: pipelines ?? [],
+   549→      functions: functions ?? [],
+   550→      queue: queue ?? null,
+   551→      logs: logs ?? [],
+   552→      pipelineRuns: normalizeArray(pipelineRuns) ?? [],
+   553→      functionRuns: normalizeArray(functionRuns) ?? [],
+   554→    })
+   555→    setLastUpdated(new Date())
+   556→  }, [])
+   557→
+   558→  useEffect(() => {
+   559→    let cancelled = false
+   560→    const run = async () => {
+   561→      await fetchAll()
+   562→      if (!cancelled) setLoading(false)
+   563→    }
+   564→    run()
+   565→    const id = setInterval(() => {
+   566→      fetchAll()
+   567→    }, REFRESH_INTERVAL_MS)
+   568→    return () => {
+   569→      cancelled = true
+   570→      clearInterval(id)
+   571→    }
+   572→  }, [fetchAll])
+   573→
+   574→  const handleRefresh = useCallback(() => {
+   575→    setRefreshing(true)
+   576→    fetchAll().finally(() => setRefreshing(false))
+   577→  }, [fetchAll])
+   578→
+   579→  if (loading) {
+   580→    return <DashboardSkeleton />
+   581→  }
+   582→
+   583→  return <DashboardContent data={data} lastUpdated={lastUpdated} onRefresh={handleRefresh} refreshing={refreshing} />
+   584→}
+   585→
+   586→// =====================================================================
+   587→// DASHBOARD CONTENT
+   588→// =====================================================================
+   589→
+   590→function DashboardContent({
+   591→  data,
+   592→  lastUpdated,
+   593→  onRefresh,
+   594→  refreshing,
+   595→}: {
+   596→  data: DashboardData
+   597→  lastUpdated: Date | null
+   598→  onRefresh: () => void
+   599→  refreshing: boolean
+   600→}) {
+   601→  const reduce = useReducedMotion()
+   602→
+   603→  // ---- computed values -------------------------------------------------
+   604→  const computed = useMemo(() => {
+   605→    const load = data.load
+   606→    const loadScore = load?.loadScore ?? 0
+   607→    const cpuTotal = load?.cpu.total ?? 0
+   608→    const cpuScraper = load?.cpu.scraper ?? 0
+   609→    const cpuApi = load?.cpu.api ?? 0
+   610→    const cpuFunctions = load?.cpu.functions ?? 0
+   611→    const ramPercent = load?.memory.percent ?? 0
+   612→    const ramUsedMb = load?.memory.usedMb ?? 0
+   613→    const ramTotalMb = load?.memory.totalMb ?? 0
+   614→    const connections = load?.connections ?? 0
+   615→    const reqPerSec = load?.requestsPerSecond ?? 0
+   616→    const activePipelines = data.pipelines.length
+   617→    const activeFunctions = data.functions.filter((f) => f.isActive).length
+   618→
+   619→    const totalTables = data.tables.length
+   620→    const totalRows = data.tables.reduce((sum, t) => sum + (t.rowCount ?? 0), 0)
+   621→    const recentErrorsTotal = load?.recentErrors.total ?? 0
+   622→
+   623→    // error rate: errors in last hour vs estimated requests in last hour
+   624→    const estimatedHourlyRequests = reqPerSec * 3600
+   625→    const errorRate =
+   626→      estimatedHourlyRequests > 0
+   627→        ? Math.min((recentErrorsTotal / estimatedHourlyRequests) * 100, 100)
+   628→        : recentErrorsTotal > 0
+   629→          ? 100
+   630→          : 0
+   631→
+   632→    // uptime
+   633→    const uptimePercent = data.uptime?.uptimePercent ?? 100
+   634→    const heartbeatCount = data.uptime?.heartbeatCount ?? 0
+   635→
+   636→    // uptime duration — oldest heartbeat to now
+   637→    const oldestHeartbeat = data.heartbeats.length > 0
+   638→      ? data.heartbeats[data.heartbeats.length - 1]
+   639→      : null
+   640→    const uptimeDurationMs = oldestHeartbeat
+   641→      ? Date.now() - new Date(oldestHeartbeat.recordedAt).getTime()
+   642→      : 0
+   643→    const uptimeDuration = formatDuration(uptimeDurationMs)
+   644→
+   645→    // queue totals
+   646→    const queueStats = data.queue?.stats ?? []
+   647→    const queuedCount = queueStats.find((s) => s.status === 'queued')?.count ?? 0
+   648→    const processingCount = queueStats.find((s) => s.status === 'processing')?.count ?? 0
+   649→    const queueTotal = queueStats.reduce((sum, s) => sum + (s.count ?? 0), 0)
+   650→
+   651→    // direction (latest vs previous heartbeat)
+   652→    const hb = data.heartbeats
+   653→    const latest = hb[0] ?? null
+   654→    const prev = hb[1] ?? null
+   655→    const dir = (curr?: number | null, p?: number | null): 'up' | 'down' | 'neutral' => {
+   656→      if (curr == null || p == null || curr === p) return 'neutral'
+   657→      return curr > p ? 'up' : 'down'
+   658→    }
+   659→    const connectionsDir = dir(latest?.activeConnections, prev?.activeConnections)
+   660→    const reqDir = dir(latest?.reqPerSec, prev?.reqPerSec)
+   661→    const loadDir = dir(latest?.loadScore, prev?.loadScore)
+   662→    const cpuDir = dir(latest?.cpuTotal, prev?.cpuTotal)
+   663→
+   664→    // server health from load level
+   665→    // Only consider uptime a concern if there are enough heartbeats to make
+   666→    // the measurement meaningful (at least 60 = 1 hour of 1-min intervals)
+   667→    const uptimeIsConcern = uptimePercent < 95 && heartbeatCount > 60
+   668→    const health: 'healthy' | 'degraded' | 'down' =
+   669→      loadScore >= 85
+   670→        ? 'down'
+   671→        : loadScore >= 60 || uptimeIsConcern
+   672→          ? 'degraded'
+   673→          : 'healthy'
+   674→
+   675→    // sparkline series (oldest → newest)
+   676→    const sparkConnections = hb.slice().reverse().map((h) => h.activeConnections)
+   677→    const sparkReq = hb.slice().reverse().map((h) => h.reqPerSec)
+   678→    const sparkLoad = hb.slice().reverse().map((h) => h.loadScore)
+   679→    const sparkCpu = hb.slice().reverse().map((h) => h.cpuTotal)
+   680→    const sparkRam = hb.slice().reverse().map((h) => h.ramUsedMb)
+   681→
+   682→    return {
+   683→      loadScore,
+   684→      loadLevel: load?.loadLevel ?? 'low',
+   685→      cpuTotal,
+   686→      cpuScraper,
+   687→      cpuApi,
+   688→      cpuFunctions,
+   689→      ramPercent,
+   690→      ramUsedMb,
+   691→      ramTotalMb,
+   692→      connections,
+   693→      reqPerSec,
+   694→      activePipelines,
+   695→      activeFunctions,
+   696→      activeScrapers: load?.activeJobs.scrapers ?? 0,
+   697→      activePipelineRuns: load?.activeJobs.pipelines ?? 0,
+   698→      totalTables,
+   699→      totalRows,
+   700→      recentErrorsTotal,
+   701→      errorRate,
+   702→      uptimePercent,
+   703→      heartbeatCount,
+   704→      uptimeDuration,
+   705→      queuedCount,
+   706→      processingCount,
+   707→      queueTotal,
+   708→      connectionsDir,
+   709→      reqDir,
+   710→      loadDir,
+   711→      cpuDir,
+   712→      health,
+   713→      sparkConnections,
+   714→      sparkReq,
+   715→      sparkLoad,
+   716→      sparkCpu,
+   717→      sparkRam,
+   718→    }
+   719→  }, [data])
+   720→
+   721→  // chart data — reverse so oldest is first
+   722→  const chartData = useMemo(() => {
+   723→    return data.heartbeats
+   724→      .slice()
+   725→      .reverse()
+   726→      .map((h) => ({
+   727→        time: new Date(h.recordedAt).toLocaleTimeString('en-US', {
+   728→          hour: '2-digit',
+   729→          minute: '2-digit',
+   730→        }),
+   731→        cpu: h.cpuTotal,
+   732→        ram: Math.round((h.ramUsedMb / (data.load?.memory.totalMb || 4096)) * 100),
+   733→        reqPerSec: h.reqPerSec,
+   734→        loadScore: Math.round(h.loadScore),
+   735→        connections: h.activeConnections,
+   736→      }))
+   737→  }, [data.heartbeats, data.load])
+   738→
+   739→  // framer-motion variants
+   740→  const containerVariants: Variants = {
+   741→    hidden: { opacity: 0 },
+   742→    visible: {
+   743→      opacity: 1,
+   744→      transition: { staggerChildren: reduce ? 0 : 0.06, delayChildren: reduce ? 0 : 0.05 },
+   745→    },
+   746→  }
+   747→  const itemVariants: Variants = {
+   748→    hidden: { opacity: 0, y: 12 },
+   749→    visible: {
+   750→      opacity: 1,
+   751→      y: 0,
+   752→      transition: { duration: 0.4, ease: 'easeOut' },
+   753→    },
+   754→  }
+   755→
+   756→  const healthLabel =
+   757→    computed.health === 'healthy'
+   758→      ? 'All Systems Operational'
+   759→      : computed.health === 'degraded'
+   760→        ? 'Degraded Performance'
+   761→        : 'Critical Load'
+   762→
+   763→  return (
+   764→    <motion.div
+   765→      variants={containerVariants}
+   766→      initial="hidden"
+   767→      animate="visible"
+   768→      className="space-y-6"
+   769→    >
+   770→      {/* ====================== HERO HEADER ====================== */}
+   771→      <motion.div variants={itemVariants}>
+   772→        <HeroHeader
+   773→          health={computed.health}
+   774→          healthLabel={healthLabel}
+   775→          loadScore={computed.loadScore}
+   776→          loadLevel={computed.loadLevel}
+   777→          uptimePercent={computed.uptimePercent}
+   778→          uptimeDuration={computed.uptimeDuration}
+   779→          lastUpdated={lastUpdated}
+   780→          onRefresh={onRefresh}
+   781→          refreshing={refreshing}
+   782→        />
+   783→      </motion.div>
+   784→
+   785→      {/* ====================== KPI CARDS ====================== */}
+   786→      <motion.div
+   787→        variants={itemVariants}
+   788→        className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+   789→      >
+   790→        <KPICard
+   791→          title="Active Connections"
+   792→          value={computed.connections}
+   793→          icon={<Users className="h-4 w-4" />}
+   794→          spark={computed.sparkConnections}
+   795→          sparkColor="#10b981"
+   796→          direction={computed.connectionsDir}
+   797→          changeLabel={
+   798→            computed.connectionsDir === 'neutral'
+   799→              ? 'stable'
+   800→              : computed.connectionsDir === 'up'
+   801→                ? `+${Math.abs((data.heartbeats[0]?.activeConnections ?? 0) - (data.heartbeats[1]?.activeConnections ?? 0))}`
+   802→                : `-${Math.abs((data.heartbeats[0]?.activeConnections ?? 0) - (data.heartbeats[1]?.activeConnections ?? 0))}`
+   803→          }
+   804→          description="vs last heartbeat"
+   805→        />
+   806→        <KPICard
+   807→          title="Total Tables"
+   808→          value={computed.totalTables}
+   809→          valueFormat="plain"
+   810→          icon={<Database className="h-4 w-4" />}
+   811→          sub={`${formatNumber(computed.totalRows)} rows stored`}
+   812→          sparkColor="#14b8a6"
+   813→          spark={computed.sparkLoad}
+   814→        />
+   815→        <KPICard
+   816→          title="Requests / sec"
+   817→          value={computed.reqPerSec}
+   818→          icon={<Zap className="h-4 w-4" />}
+   819→          spark={computed.sparkReq}
+   820→          sparkColor="#0d9488"
+   821→          direction={computed.reqDir}
+   822→          changeLabel={
+   823→            computed.reqDir === 'neutral'
+   824→              ? 'stable'
+   825→              : `${computed.reqDir === 'up' ? '+' : '-'}${Math.abs(
+   826→                  (data.heartbeats[0]?.reqPerSec ?? 0) - (data.heartbeats[1]?.reqPerSec ?? 0),
+   827→                )}`
+   828→          }
+   829→          description="vs last heartbeat"
+   830→        />
+   831→        <KPICard
+   832→          title="Error Rate"
+   833→          value={computed.errorRate}
+   834→          valueFormat="percent"
+   835→          icon={<AlertTriangle className="h-4 w-4" />}
+   836→          spark={computed.sparkLoad}
+   837→          sparkColor="#f43f5e"
+   838→          direction={computed.loadDir}
+   839→          invertColor
+   840→          changeLabel={`${computed.recentErrorsTotal} errs / hr`}
+   841→          description="last hour"
+   842→        />
+   843→      </motion.div>
+   844→
+   845→      {/* ====================== RESOURCE CARDS ====================== */}
+   846→      <motion.div
+   847→        variants={itemVariants}
+   848→        className="grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+   849→      >
+   850→        <ResourceCard
+   851→          title="Load Score"
+   852→          icon={<TrendingUp className="h-4 w-4" />}
+   853→          value={computed.loadScore}
+   854→          max={100}
+   855→          displayValue={`${computed.loadScore}/100`}
+   856→          bucket={progressBucket(computed.loadScore)}
+   857→          description={loadLevelLabel(computed.loadLevel)}
+   858→          spark={computed.sparkLoad}
+   859→          sparkColor="#10b981"
+   860→        />
+   861→        <ResourceCard
+   862→          title="CPU Usage"
+   863→          icon={<Cpu className="h-4 w-4" />}
+   864→          value={computed.cpuTotal}
+   865→          max={100}
+   866→          displayValue={`${computed.cpuTotal}%`}
+   867→          bucket={progressBucket(computed.cpuTotal)}
+   868→          description={`API ${computed.cpuApi}% · Scraper ${computed.cpuScraper}% · Funcs ${computed.cpuFunctions}%`}
+   869→          spark={computed.sparkCpu}
+   870→          sparkColor="#14b8a6"
+   871→        />
+   872→        <ResourceCard
+   873→          title="RAM Usage"
+   874→          icon={<MemoryStick className="h-4 w-4" />}
+   875→          value={computed.ramPercent}
+   876→          max={100}
+   877→          displayValue={`${computed.ramPercent}%`}
+   878→          bucket={progressBucket(computed.ramPercent)}
+   879→          description={`${formatNumber(computed.ramUsedMb)} MB / ${formatNumber(computed.ramTotalMb, 'full')} MB`}
+   880→          spark={computed.sparkRam}
+   881→          sparkColor="#0d9488"
+   882→        />
+   883→        <ResourceCard
+   884→          title="Active Jobs"
+   885→          icon={<Layers className="h-4 w-4" />}
+   886→          value={computed.activePipelineRuns + computed.activeScrapers}
+   887→          max={20}
+   888→          displayValue={`${computed.activePipelineRuns + computed.activeScrapers}`}
+   889→          bucket={computed.activePipelineRuns + computed.activeScrapers >= 15 ? 'red' : computed.activePipelineRuns + computed.activeScrapers >= 8 ? 'amber' : 'emerald'}
+   890→          description={`${computed.activePipelineRuns} pipelines · ${computed.activeScrapers} scrapers running`}
+   891→        />
+   892→      </motion.div>
+   893→
+   894→      {/* ====================== CHARTS ROW 1 ====================== */}
+   895→      <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-2">
+   896→        <ChartCard
+   897→          title="CPU & RAM Trend"
+   898→          subtitle={`${chartData.length} heartbeats · realtime`}
+   899→          icon={<Activity className="h-4 w-4" />}
+   900→        >
+   901→          <div className="h-[280px]">
+   902→            <ResponsiveContainer width="100%" height="100%">
+   903→              <AreaChart data={chartData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+   904→                <defs>
+   905→                  <linearGradient id="cpuArea" x1="0" y1="0" x2="0" y2="1">
+   906→                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+   907→                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+   908→                  </linearGradient>
+   909→                  <linearGradient id="ramArea" x1="0" y1="0" x2="0" y2="1">
+   910→                    <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.4} />
+   911→                    <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+   912→                  </linearGradient>
+   913→                </defs>
+   914→                <CartesianGrid strokeDasharray="4 4" className="stroke-muted/25" vertical={false} />
+   915→                <XAxis
+   916→                  dataKey="time"
+   917→                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+   918→                  tickLine={false}
+   919→                  axisLine={false}
+   920→                  minTickGap={32}
+   921→                />
+   922→                <YAxis
+   923→                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+   924→                  tickLine={false}
+   925→                  axisLine={false}
+   926→                  domain={[0, 100]}
+   927→                  width={36}
+   928→                />
+   929→                <Tooltip
+   930→                  cursor={{ stroke: 'var(--border)', strokeWidth: 1, strokeDasharray: '4 4' }}
+   931→                  contentStyle={{
+   932→                    backgroundColor: 'var(--popover)',
+   933→                    border: '1px solid var(--border)',
+   934→                    borderRadius: '12px',
+   935→                    fontSize: '12px',
+   936→                    padding: '8px 10px',
+   937→                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+   938→                    color: 'var(--popover-foreground)',
+   939→                  }}
+   940→                  labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600, marginBottom: 4 }}
+   941→                  itemStyle={{ color: 'var(--popover-foreground)' }}
+   942→                />
+   943→                <Area
+   944→                  type="monotone"
+   945→                  dataKey="cpu"
+   946→                  stroke="#10b981"
+   947→                  strokeWidth={2}
+   948→                  fill="url(#cpuArea)"
+   949→                  name="CPU %"
+   950→                  activeDot={{ r: 4, fill: '#10b981', stroke: 'var(--popover)', strokeWidth: 1.5 }}
+   951→                />
+   952→                <Area
+   953→                  type="monotone"
+   954→                  dataKey="ram"
+   955→                  stroke="#14b8a6"
+   956→                  strokeWidth={2}
+   957→                  fill="url(#ramArea)"
+   958→                  name="RAM %"
+   959→                  activeDot={{ r: 4, fill: '#14b8a6', stroke: 'var(--popover)', strokeWidth: 1.5 }}
+   960→                />
+   961→              </AreaChart>
+   962→            </ResponsiveContainer>
+   963→          </div>
+   964→        </ChartCard>
+   965→
+   966→        <ChartCard
+   967→          title="Requests / sec"
+   968→          subtitle="Throughput from heartbeats"
+   969→          icon={<Zap className="h-4 w-4" />}
+   970→        >
+   971→          <div className="h-[280px]">
+   972→            <ResponsiveContainer width="100%" height="100%">
+   973→              <LineChart data={chartData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+   974→                <CartesianGrid strokeDasharray="4 4" className="stroke-muted/25" vertical={false} />
+   975→                <XAxis
+   976→                  dataKey="time"
+   977→                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+   978→                  tickLine={false}
+   979→                  axisLine={false}
+   980→                  minTickGap={32}
+   981→                />
+   982→                <YAxis tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }} tickLine={false} axisLine={false} width={36} />
+   983→                <Tooltip
+   984→                  cursor={{ stroke: 'var(--border)', strokeWidth: 1, strokeDasharray: '4 4' }}
+   985→                  contentStyle={{
+   986→                    backgroundColor: 'var(--popover)',
+   987→                    border: '1px solid var(--border)',
+   988→                    borderRadius: '12px',
+   989→                    fontSize: '12px',
+   990→                    padding: '8px 10px',
+   991→                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+   992→                    color: 'var(--popover-foreground)',
+   993→                  }}
+   994→                  labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600, marginBottom: 4 }}
+   995→                  itemStyle={{ color: 'var(--popover-foreground)' }}
+   996→                />
+   997→                <Line
+   998→                  type="monotone"
+   999→                  dataKey="reqPerSec"
+  1000→                  stroke="#0d9488"
+  1001→                  strokeWidth={2.5}
+  1002→                  strokeLinecap="round"
+  1003→                  dot={false}
+  1004→                  activeDot={{ r: 5, fill: '#0d9488', stroke: 'var(--popover)', strokeWidth: 1.5 }}
+  1005→                  name="Req/sec"
+  1006→                />
+  1007→              </LineChart>
+  1008→            </ResponsiveContainer>
+  1009→          </div>
+  1010→        </ChartCard>
+  1011→      </motion.div>
+  1012→
+  1013→      {/* ====================== CHARTS ROW 2 (load score full width) ====================== */}
+  1014→      <motion.div variants={itemVariants}>
+  1015→        <ChartCard
+  1016→          title="Load Score History"
+  1017→          subtitle="Weighted system load (CPU · RAM · Connections · Reqs)"
+  1018→          icon={<TrendingUp className="h-4 w-4" />}
+  1019→        >
+  1020→          <div className="h-[220px]">
+  1021→            <ResponsiveContainer width="100%" height="100%">
+  1022→              <AreaChart data={chartData} margin={{ top: 10, right: 12, left: -12, bottom: 0 }}>
+  1023→                <defs>
+  1024→                  <linearGradient id="loadArea" x1="0" y1="0" x2="0" y2="1">
+  1025→                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.45} />
+  1026→                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+  1027→                  </linearGradient>
+  1028→                </defs>
+  1029→                <CartesianGrid strokeDasharray="4 4" className="stroke-muted/25" vertical={false} />
+  1030→                <XAxis
+  1031→                  dataKey="time"
+  1032→                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+  1033→                  tickLine={false}
+  1034→                  axisLine={false}
+  1035→                  minTickGap={32}
+  1036→                />
+  1037→                <YAxis
+  1038→                  tick={{ fontSize: 10, fill: 'var(--muted-foreground)' }}
+  1039→                  tickLine={false}
+  1040→                  axisLine={false}
+  1041→                  domain={[0, 100]}
+  1042→                  width={36}
+  1043→                />
+  1044→                <Tooltip
+  1045→                  cursor={{ stroke: 'var(--border)', strokeWidth: 1, strokeDasharray: '4 4' }}
+  1046→                  contentStyle={{
+  1047→                    backgroundColor: 'var(--popover)',
+  1048→                    border: '1px solid var(--border)',
+  1049→                    borderRadius: '12px',
+  1050→                    fontSize: '12px',
+  1051→                    padding: '8px 10px',
+  1052→                    boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+  1053→                    color: 'var(--popover-foreground)',
+  1054→                  }}
+  1055→                  labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600, marginBottom: 4 }}
+  1056→                  itemStyle={{ color: 'var(--popover-foreground)' }}
+  1057→                />
+  1058→                <Area
+  1059→                  type="monotone"
+  1060→                  dataKey="loadScore"
+  1061→                  stroke="#10b981"
+  1062→                  strokeWidth={2.5}
+  1063→                  fill="url(#loadArea)"
+  1064→                  name="Load Score"
+  1065→                  activeDot={{ r: 5, fill: '#10b981', stroke: 'var(--popover)', strokeWidth: 1.5 }}
+  1066→                />
+  1067→              </AreaChart>
+  1068→            </ResponsiveContainer>
+  1069→          </div>
+  1070→        </ChartCard>
+  1071→      </motion.div>
+  1072→
+  1073→      {/* ====================== STATUS + ACTIVITY ROW ====================== */}
+  1074→      <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-3">
+  1075→        <ServiceStatusCard
+  1076→          activePipelines={computed.activePipelines}
+  1077→          activeFunctions={computed.activeFunctions}
+  1078→          activeScrapers={computed.activeScrapers}
+  1079→          activePipelineRuns={computed.activePipelineRuns}
+  1080→          queuedCount={computed.queuedCount}
+  1081→          processingCount={computed.processingCount}
+  1082→          queueTotal={computed.queueTotal}
+  1083→          health={computed.health}
+  1084→          heartbeatCount={computed.heartbeatCount}
+  1085→          cpuTotal={computed.cpuTotal}
+  1086→          ramPercent={computed.ramPercent}
+  1087→          cpuApi={computed.cpuApi}
+  1088→          cpuScraper={computed.cpuScraper}
+  1089→          cpuFunctions={computed.cpuFunctions}
+  1090→        />
+  1091→
+  1092→        <UnifiedActivityCard
+  1093→          pipelineRuns={data.pipelineRuns}
+  1094→          functionRuns={data.functionRuns}
+  1095→          logs={data.logs}
+  1096→        />
+  1097→      </motion.div>
+  1098→
+  1099→      {/* ====================== QUICK ACTIONS + API REFERENCE ====================== */}
+  1100→      <motion.div variants={itemVariants} className="grid gap-4 lg:grid-cols-2">
+  1101→        <QuickActionsCard />
+  1102→        <ApiReferenceCard />
+  1103→      </motion.div>
+  1104→    </motion.div>
+  1105→  )
+  1106→}
+  1107→
+  1108→// =====================================================================
+  1109→// HERO HEADER
+  1110→// =====================================================================
+  1111→
+  1112→function HeroHeader({
+  1113→  health,
+  1114→  healthLabel,
+  1115→  loadScore,
+  1116→  loadLevel,
+  1117→  uptimePercent,
+  1118→  uptimeDuration,
+  1119→  lastUpdated,
+  1120→  onRefresh,
+  1121→  refreshing,
+  1122→}: {
+  1123→  health: 'healthy' | 'degraded' | 'down'
+  1124→  healthLabel: string
+  1125→  loadScore: number
+  1126→  loadLevel: string
+  1127→  uptimePercent: number
+  1128→  uptimeDuration: string
+  1129→  lastUpdated: Date | null
+  1130→  onRefresh: () => void
+  1131→  refreshing: boolean
+  1132→}) {
+  1133→  const dotColor =
+  1134→    health === 'healthy'
+  1135→      ? 'bg-emerald-300'
+  1136→      : health === 'degraded'
+  1137→        ? 'bg-amber-300'
+  1138→        : 'bg-red-300'
+  1139→  const ringColor =
+  1140→    health === 'healthy'
+  1141→      ? 'bg-emerald-400/40'
+  1142→      : health === 'degraded'
+  1143→        ? 'bg-amber-400/40'
+  1144→        : 'bg-red-400/40'
+  1145→  const reduce = useReducedMotion()
+  1146→
+  1147→  // Subtle floating animation for the background blobs
+  1148→  const floatTransition = {
+  1149→    duration: 6,
+  1150→    repeat: Infinity,
+  1151→    ease: 'easeInOut' as const,
+  1152→  }
+  1153→
+  1154→  return (
+  1155→    <div className="bg-animated-gradient relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500 via-teal-500 to-emerald-600 p-6 text-white shadow-lg shadow-emerald-500/10">
+  1156→      {/* decorative floating blobs */}
+  1157→      <motion.div
+  1158→        aria-hidden
+  1159→        className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-3xl"
+  1160→        animate={reduce ? undefined : { y: [0, 14, 0], x: [0, -8, 0] }}
+  1161→        transition={floatTransition}
+  1162→      />
+  1163→      <motion.div
+  1164→        aria-hidden
+  1165→        className="pointer-events-none absolute -bottom-20 left-1/3 h-40 w-40 rounded-full bg-teal-300/20 blur-3xl"
+  1166→        animate={reduce ? undefined : { y: [0, -12, 0], x: [0, 10, 0] }}
+  1167→        transition={{ ...floatTransition, duration: 7.5, delay: 0.5 }}
+  1168→      />
+  1169→      {/* subtle grid pattern overlay */}
+  1170→      <div
+  1171→        aria-hidden
+  1172→        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+  1173→        style={{
+  1174→          backgroundImage:
+  1175→            'linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)',
+  1176→          backgroundSize: '32px 32px',
+  1177→        }}
+  1178→      />
+  1179→
+  1180→      <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+  1181→        <div className="space-y-2">
+  1182→          <div className="flex items-center gap-2">
+  1183→            <div className="relative flex h-2.5 w-2.5 items-center justify-center">
+  1184→              <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${ringColor} opacity-75`} />
+  1185→              <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${dotColor}`} />
+  1186→            </div>
+  1187→            <span className="text-xs font-medium uppercase tracking-wider text-emerald-50/90">
+  1188→              SelfBase Admin Studio
+  1189→            </span>
+  1190→          </div>
+  1191→          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
+  1192→            Dashboard Overview
+  1193→          </h1>
+  1194→          <p className="max-w-xl text-sm text-emerald-50/80">
+  1195→            Real-time server health, resource utilization, and pipeline activity for your
+  1196→            self-hosted, AI-native backend.
+  1197→          </p>
+  1198→        </div>
+  1199→
+  1200→        <div className="flex flex-wrap items-center gap-3">
+  1201→          <motion.div
+  1202→            className={
+  1203→              'rounded-xl border px-4 py-2 backdrop-blur-sm transition-colors ' +
+  1204→              (health === 'healthy'
+  1205→                ? 'border-emerald-200/40 bg-white/15'
+  1206→                : health === 'degraded'
+  1207→                  ? 'border-amber-200/40 bg-white/15'
+  1208→                  : 'border-red-200/40 bg-white/15')
+  1209→            }
+  1210→            animate={
+  1211→              reduce || health !== 'healthy'
+  1212→                ? undefined
+  1213→                : { boxShadow: [
+  1214→                    '0 0 0 0 rgba(255,255,255,0.0)',
+  1215→                    '0 0 0 4px rgba(255,255,255,0.12)',
+  1216→                    '0 0 0 0 rgba(255,255,255,0.0)',
+  1217→                  ] }
+  1218→            }
+  1219→            transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+  1220→          >
+  1221→            <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-50/70">
+  1222→              Status
+  1223→            </div>
+  1224→            <div className="mt-0.5 flex items-center gap-1.5 text-sm font-semibold">
+  1225→              <Sparkles className="h-3.5 w-3.5" />
+  1226→              {healthLabel}
+  1227→            </div>
+  1228→          </motion.div>
+  1229→          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm transition-colors hover:bg-white/15">
+  1230→            <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-50/70">
+  1231→              Uptime
+  1232→            </div>
+  1233→            <div className="mt-0.5 text-sm font-semibold">
+  1234→              {uptimePercent.toFixed(1)}% · {uptimeDuration}
+  1235→            </div>
+  1236→          </div>
+  1237→          <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 backdrop-blur-sm transition-colors hover:bg-white/15">
+  1238→            <div className="text-[10px] font-medium uppercase tracking-wider text-emerald-50/70">
+  1239→              Load
+  1240→            </div>
+  1241→            <div className="mt-0.5 text-sm font-semibold capitalize">
+  1242→              {loadScore}/100 · {loadLevel}
+  1243→            </div>
+  1244→          </div>
+  1245→          <Button
+  1246→            size="sm"
+  1247→            variant="secondary"
+  1248→            onClick={onRefresh}
+  1249→            disabled={refreshing}
+  1250→            className="border-white/20 bg-white/15 text-white transition-colors hover:bg-white/25 hover:text-white"
+  1251→          >
+  1252→            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+  1253→            <span className="hidden sm:inline">Refresh</span>
+  1254→          </Button>
+  1255→        </div>
+  1256→      </div>
+  1257→
+  1258→      {lastUpdated && (
+  1259→        <div className="relative mt-4 flex items-center gap-1.5 text-xs text-emerald-50/60">
+  1260→          <Clock className="h-3 w-3" />
+  1261→          Last updated {formatRelativeTime(lastUpdated.toISOString())} · auto-refresh every 30s
+  1262→        </div>
+  1263→      )}
+  1264→    </div>
+  1265→  )
+  1266→}
+  1267→
+  1268→// =====================================================================
+  1269→// KPI CARD
+  1270→// =====================================================================
+  1271→
+  1272→function KPICard({
+  1273→  title,
+  1274→  value,
+  1275→  valueFormat = 'plain',
+  1276→  icon,
+  1277→  spark,
+  1278→  sparkColor,
+  1279→  direction,
+  1280→  changeLabel,
+  1281→  description,
+  1282→  sub,
+  1283→  invertColor = false,
+  1284→}: {
+  1285→  title: string
+  1286→  value: number
+  1287→  valueFormat?: 'plain' | 'compact' | 'percent'
+  1288→  icon: React.ReactNode
+  1289→  spark?: number[]
+  1290→  sparkColor?: string
+  1291→  direction?: 'up' | 'down' | 'neutral'
+  1292→  changeLabel?: string
+  1293→  description?: string
+  1294→  sub?: string
+  1295→  invertColor?: boolean
+  1296→}) {
+  1297→  return (
+  1298→    <motion.div
+  1299→      whileHover={{ y: -4 }}
+  1300→      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+  1301→      className="group h-full"
+  1302→    >
+  1303→      <Card className="relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg hover:shadow-emerald-500/10">
+  1304→        {/* animated gradient top-border (sweeps in on hover) */}
+  1305→        <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+  1306→        {/* glassmorphism hover gradient */}
+  1307→        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+  1308→        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+  1309→          <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+  1310→            {title}
+  1311→          </CardTitle>
+  1312→          <div className="flex items-center gap-1.5">
+  1313→            {spark && spark.length > 1 && (
+  1314→              <MiniSparkline data={spark.slice(-12)} color={sparkColor ?? '#10b981'} />
+  1315→            )}
+  1316→            <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">{icon}</div>
+  1317→          </div>
+  1318→        </CardHeader>
+  1319→        <CardContent className="relative">
+  1320→          <div className="text-3xl font-bold tracking-tight">
+  1321→            <AnimatedNumber value={value} format={valueFormat} />
+  1322→          </div>
+  1323→          <div className="mt-1 flex items-center gap-1.5 text-xs">
+  1324→            {direction && changeLabel && (
+  1325→              <ChangePill direction={direction} label={changeLabel} invertColor={invertColor} />
+  1326→            )}
+  1327→            {description && <span className="text-muted-foreground">{description}</span>}
+  1328→            {sub && <span className="text-muted-foreground">{sub}</span>}
+  1329→          </div>
+  1330→          {spark && spark.length > 1 && (
+  1331→            <div className="mt-3 -mb-1">
+  1332→              <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={36} />
+  1333→            </div>
+  1334→          )}
+  1335→        </CardContent>
+  1336→      </Card>
+  1337→    </motion.div>
+  1338→  )
+  1339→}
+  1340→
+  1341→// =====================================================================
+  1342→// RESOURCE CARD (with colored progress bar)
+  1343→// =====================================================================
+  1344→
+  1345→function ResourceCard({
+  1346→  title,
+  1347→  icon,
+  1348→  value,
+  1349→  max,
+  1350→  displayValue,
+  1351→  bucket,
+  1352→  description,
+  1353→  spark,
+  1354→  sparkColor,
+  1355→}: {
+  1356→  title: string
+  1357→  icon: React.ReactNode
+  1358→  value: number
+  1359→  max: number
+  1360→  displayValue: string
+  1361→  bucket: 'emerald' | 'amber' | 'red'
+  1362→  description: string
+  1363→  spark?: number[]
+  1364→  sparkColor?: string
+  1365→}) {
+  1366→  const styles = PROGRESS_STYLES[bucket]
+  1367→  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
+  1368→  // bucket-specific gradient for the top accent border
+  1369→  const topGradient =
+  1370→    bucket === 'red'
+  1371→      ? 'from-red-400 via-rose-400 to-red-500'
+  1372→      : bucket === 'amber'
+  1373→        ? 'from-amber-400 via-orange-400 to-amber-500'
+  1374→        : 'from-emerald-400 via-teal-400 to-emerald-500'
+  1375→
+  1376→  return (
+  1377→    <motion.div
+  1378→      whileHover={{ y: -4 }}
+  1379→      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+  1380→      className="group h-full"
+  1381→    >
+  1382→      <Card className="relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg hover:shadow-emerald-500/10">
+  1383→        {/* animated gradient top-border (sweeps in on hover) */}
+  1384→        <div className={`absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r ${topGradient} transition-transform duration-300 ease-out group-hover:scale-x-100`} />
+  1385→        {/* glassmorphism hover gradient */}
+  1386→        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-transparent to-teal-500/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+  1387→        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+  1388→          <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+  1389→            {title}
+  1390→          </CardTitle>
+  1391→          <div className={`rounded-md p-1.5 ${styles.bg} ${styles.text} transition-colors`}>{icon}</div>
+  1392→        </CardHeader>
+  1393→        <CardContent className="relative">
+  1394→          <div className="flex items-baseline justify-between">
+  1395→            <div className={`text-3xl font-bold tracking-tight ${styles.text}`}>{displayValue}</div>
+  1396→          </div>
+  1397→          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+  1398→            <motion.div
+  1399→              className={`h-full ${styles.bar} rounded-full`}
+  1400→              initial={{ width: 0 }}
+  1401→              animate={{ width: `${pct}%` }}
+  1402→              transition={{ duration: 0.7, ease: 'easeOut' }}
+  1403→            />
+  1404→          </div>
+  1405→          <p className="mt-2 truncate text-xs text-muted-foreground">{description}</p>
+  1406→          {spark && spark.length > 1 && (
+  1407→            <div className="mt-2 -mb-1">
+  1408→              <Sparkline data={spark} color={sparkColor ?? '#10b981'} height={28} />
+  1409→            </div>
+  1410→          )}
+  1411→        </CardContent>
+  1412→      </Card>
+  1413→    </motion.div>
+  1414→  )
+  1415→}
+  1416→
+  1417→// =====================================================================
+  1418→// CHART CARD wrapper
+  1419→// =====================================================================
+  1420→
+  1421→function ChartCard({
+  1422→  title,
+  1423→  subtitle,
+  1424→  icon,
+  1425→  children,
+  1426→}: {
+  1427→  title: string
+  1428→  subtitle: string
+  1429→  icon: React.ReactNode
+  1430→  children: React.ReactNode
+  1431→}) {
+  1432→  return (
+  1433→    <Card className="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+  1434→      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+  1435→      <CardHeader>
+  1436→        <div className="flex items-center justify-between">
+  1437→          <div>
+  1438→            <CardTitle className="flex items-center gap-2 text-base">
+  1439→              <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">{icon}</span>
+  1440→              {title}
+  1441→            </CardTitle>
+  1442→            <CardDescription className="mt-1">{subtitle}</CardDescription>
+  1443→          </div>
+  1444→        </div>
+  1445→      </CardHeader>
+  1446→      <CardContent>{children}</CardContent>
+  1447→    </Card>
+  1448→  )
+  1449→}
+  1450→
+  1451→// =====================================================================
+  1452→// SERVICE STATUS CARD
+  1453→// =====================================================================
+  1454→
+  1455→function ServiceStatusCard({
+  1456→  activePipelines,
+  1457→  activeFunctions,
+  1458→  activeScrapers,
+  1459→  activePipelineRuns,
+  1460→  queuedCount,
+  1461→  processingCount,
+  1462→  queueTotal,
+  1463→  health,
+  1464→  heartbeatCount,
+  1465→  cpuTotal,
+  1466→  ramPercent,
+  1467→  cpuApi,
+  1468→  cpuScraper,
+  1469→  cpuFunctions,
+  1470→}: {
+  1471→  activePipelines: number
+  1472→  activeFunctions: number
+  1473→  activeScrapers: number
+  1474→  activePipelineRuns: number
+  1475→  queuedCount: number
+  1476→  processingCount: number
+  1477→  queueTotal: number
+  1478→  health: 'healthy' | 'degraded' | 'down'
+  1479→  heartbeatCount: number
+  1480→  cpuTotal: number
+  1481→  ramPercent: number
+  1482→  cpuApi: number
+  1483→  cpuScraper: number
+  1484→  cpuFunctions: number
+  1485→}) {
+  1486→  type SvcStatus = 'healthy' | 'warning' | 'critical' | 'idle'
+  1487→  const dotFor = (active: boolean, hasIssue = false): SvcStatus =>
+  1488→    hasIssue ? 'warning' : active ? 'healthy' : 'idle'
+  1489→
+  1490→  // Card-level glow: only "healthy" gets the soft emerald glow ring.
+  1491→  const cardGlow =
+  1492→    health === 'healthy'
+  1493→      ? 'glow-emerald'
+  1494→      : health === 'degraded'
+  1495→        ? 'shadow-[0_0_0_1px_oklch(0.75_0.18_70/0.25),0_0_18px_2px_oklch(0.75_0.18_70/0.12)]'
+  1496→        : 'shadow-[0_0_0_1px_oklch(0.6_0.22_22/0.25),0_0_18px_2px_oklch(0.6_0.22_22/0.12)]'
+  1497→
+  1498→  const headerTint =
+  1499→    health === 'healthy'
+  1500→      ? 'text-emerald-600'
+  1501→      : health === 'degraded'
+  1502→        ? 'text-amber-600'
+  1503→        : 'text-red-600'
+  1504→
+  1505→  const services = [
+  1506→    { status: health === 'healthy' ? 'healthy' : health === 'degraded' ? 'warning' : 'critical' as SvcStatus, label: 'API Server', value: health === 'healthy' ? 'Running' : health === 'degraded' ? 'Degraded' : 'Down', memPercent: cpuApi },
+  1507→    { status: dotFor(activePipelineRuns > 0), label: 'Pipeline Engine', value: `${activePipelines} configured · ${activePipelineRuns} running`, memPercent: cpuScraper },
+  1508→    { status: dotFor(activeScrapers > 0), label: 'Web Scraper', value: `${activeScrapers} running`, memPercent: cpuScraper },
+  1509→    { status: dotFor(activeFunctions > 0), label: 'Functions Runtime', value: `${activeFunctions} active`, memPercent: cpuFunctions },
+  1510→    { status: dotFor(queueTotal === 0, queueTotal > 0 && processingCount > 0), label: 'Priority Queue', value: `${queuedCount} queued · ${processingCount} processing`, memPercent: cpuApi },
+  1511→    { status: dotFor(heartbeatCount > 0), label: 'Heartbeat Monitor', value: `${heartbeatCount} beats (24h)`, memPercent: cpuTotal },
+  1512→    { status: 'healthy' as SvcStatus, label: 'Storage Layer', value: 'OK', memPercent: ramPercent },
+  1513→    { status: 'healthy' as SvcStatus, label: 'AI / LLM Gateway', value: 'Ready', memPercent: 0 },
+  1514→  ]
+  1515→
+  1516→  const dotColor: Record<SvcStatus, string> = {
+  1517→    healthy: 'bg-emerald-500',
+  1518→    warning: 'bg-amber-500',
+  1519→    critical: 'bg-red-500',
+  1520→    idle: 'bg-muted-foreground/40',
+  1521→  }
+  1522→
+  1523→  return (
+  1524→    <motion.div
+  1525→      whileHover={{ y: -2 }}
+  1526→      transition={{ type: 'spring', stiffness: 320, damping: 24 }}
+  1527→      className="h-full"
+  1528→    >
+  1529→      <Card className={`group relative h-full overflow-hidden transition-shadow duration-300 hover:shadow-lg ${cardGlow}`}>
+  1530→        {/* top accent border that brightens on hover */}
+  1531→        <div
+  1532→          className={
+  1533→            'absolute inset-x-0 top-0 h-[2px] origin-left scale-x-100 transition-transform duration-300 ' +
+  1534→            (health === 'healthy'
+  1535→              ? 'bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500'
+  1536→              : health === 'degraded'
+  1537→                ? 'bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500'
+  1538→                : 'bg-gradient-to-r from-red-400 via-rose-400 to-red-500')
+  1539→          }
+  1540→        />
+  1541→        <CardHeader>
+  1542→          <CardTitle className="flex items-center gap-2 text-base">
+  1543→            <span className={`rounded-md bg-muted/60 p-1 ${headerTint}`}>
+  1544→              <Server className="h-4 w-4" />
+  1545→            </span>
+  1546→            Service Status
+  1547→          </CardTitle>
+  1548→          <CardDescription>Active services &amp; resource usage</CardDescription>
+  1549→        </CardHeader>
+  1550→        <CardContent>
+  1551→          <div className="grid grid-cols-2 gap-2">
+  1552→            {services.map((svc) => (
+  1553→              <div
+  1554→                key={svc.label}
+  1555→                className="group/svc rounded-lg border bg-card p-2.5 transition-colors hover:bg-muted/40"
+  1556→              >
+  1557→                <div className="flex items-center gap-1.5">
+  1558→                  <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor[svc.status]}`} />
+  1559→                  <span className="text-xs font-medium truncate">{svc.label}</span>
+  1560→                </div>
+  1561→                <p className="mt-1 truncate text-[10px] text-muted-foreground">{svc.value}</p>
+  1562→                {svc.memPercent > 0 && (
+  1563→                  <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+  1564→                    <motion.div
+  1565→                      className={`h-full rounded-full ${progressBucket(svc.memPercent) === 'red' ? 'bg-red-500' : progressBucket(svc.memPercent) === 'amber' ? 'bg-amber-500' : 'bg-emerald-500'}`}
+  1566→                      initial={{ width: 0 }}
+  1567→                      animate={{ width: `${Math.min(100, svc.memPercent)}%` }}
+  1568→                      transition={{ duration: 0.6, ease: 'easeOut' }}
+  1569→                    />
+  1570→                  </div>
+  1571→                )}
+  1572→              </div>
+  1573→            ))}
+  1574→          </div>
+  1575→        </CardContent>
+  1576→      </Card>
+  1577→    </motion.div>
+  1578→  )
+  1579→}
+  1580→
+  1581→// =====================================================================
+  1582→// UNIFIED ACTIVITY CARD — combined timeline from multiple sources
+  1583→// =====================================================================
+  1584→
+  1585→type TimelineKind = 'pipeline' | 'function' | 'error'
+  1586→
+  1587→interface TimelineEntry {
+  1588→  id: string
+  1589→  kind: TimelineKind
+  1590→  title: string
+  1591→  description: string
+  1592→  timestamp: string
+  1593→  status: string
+  1594→}
+  1595→
+  1596→function UnifiedActivityCard({
+  1597→  pipelineRuns,
+  1598→  functionRuns,
+  1599→  logs,
+  1600→}: {
+  1601→  pipelineRuns: PipelineRun[]
+  1602→  functionRuns: FunctionRunItem[]
+  1603→  logs: SourceError[]
+  1604→}) {
+  1605→  const entries: TimelineEntry[] = useMemo(() => {
+  1606→    const items: TimelineEntry[] = []
+  1607→
+  1608→    for (const run of pipelineRuns) {
+  1609→      items.push({
+  1610→        id: `pipeline-${run.id}`,
+  1611→        kind: 'pipeline',
+  1612→        title: run.source?.name ?? `Pipeline ${run.sourceId.slice(0, 8)}`,
+  1613→        description: `${run.rowsWritten} rows written · ${run.rowsFetched} fetched`,
+  1614→        timestamp: run.startedAt,
+  1615→        status: run.status,
+  1616→      })
+  1617→    }
+  1618→
+  1619→    for (const run of functionRuns) {
+  1620→      items.push({
+  1621→        id: `function-${run.id}`,
+  1622→        kind: 'function',
+  1623→        title: run.func?.name ?? `Function ${run.functionId.slice(0, 8)}`,
+  1624→        description: run.durationMs != null ? `${run.durationMs}ms` : 'Running...',
+  1625→        timestamp: run.startedAt,
+  1626→        status: run.status,
+  1627→      })
+  1628→    }
+  1629→
+  1630→    for (const log of logs.slice(0, 3)) {
+  1631→      items.push({
+  1632→        id: `error-${log.id}`,
+  1633→        kind: 'error',
+  1634→        title: log.message.length > 60 ? `${log.message.slice(0, 60)}...` : log.message,
+  1635→        description: log.tableName ?? log.errorType,
+  1636→        timestamp: log.occurredAt,
+  1637→        status: 'failed',
+  1638→      })
+  1639→    }
+  1640→
+  1641→    return items.sort(
+  1642→      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  1643→    )
+  1644→  }, [pipelineRuns, functionRuns, logs])
+  1645→
+  1646→  const totalCount = pipelineRuns.length + functionRuns.length + logs.length
+  1647→
+  1648→  const kindIcon: Record<TimelineKind, React.ReactNode> = {
+  1649→    pipeline: <GitBranch className="h-3.5 w-3.5" />,
+  1650→    function: <Code2 className="h-3.5 w-3.5" />,
+  1651→    error: <AlertTriangle className="h-3.5 w-3.5" />,
+  1652→  }
+  1653→
+  1654→  const kindColor: Record<TimelineKind, string> = {
+  1655→    pipeline: 'bg-teal-500/10 text-teal-600',
+  1656→    function: 'bg-purple-500/10 text-purple-600',
+  1657→    error: 'bg-red-500/10 text-red-600',
+  1658→  }
+  1659→
+  1660→  const statusBadge: Record<string, string> = {
+  1661→    success: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  1662→    failed: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  1663→    running: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  1664→    pending: 'bg-muted text-muted-foreground',
+  1665→    timeout: 'bg-rose-500/10 text-rose-700 dark:text-rose-400',
+  1666→  }
+  1667→
+  1668→  return (
+  1669→    <Card className="lg:col-span-2 group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+  1670→      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+  1671→      <CardHeader>
+  1672→        <div className="flex items-center justify-between">
+  1673→          <div>
+  1674→            <CardTitle className="text-base">Recent Activity</CardTitle>
+  1675→            <CardDescription>Pipeline runs, function invocations & errors</CardDescription>
+  1676→          </div>
+  1677→          <Badge variant="outline" className="text-xs">
+  1678→            {totalCount} events
+  1679→          </Badge>
+  1680→        </div>
+  1681→      </CardHeader>
+  1682→      <CardContent>
+  1683→        {entries.length === 0 ? (
+  1684→          <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+  1685→            <div className="rounded-full bg-emerald-500/10 p-2.5 text-emerald-600">
+  1686→              <CheckCircle2 className="h-5 w-5" />
+  1687→            </div>
+  1688→            <p className="text-sm font-medium">No recent activity</p>
+  1689→            <p className="text-xs text-muted-foreground">Everything is quiet right now.</p>
+  1690→          </div>
+  1691→        ) : (
+  1692→          <div className="scrollbar-thin max-h-[420px] overflow-y-auto pr-2">
+  1693→            {entries.map((entry, idx) => (
+  1694→              <div key={entry.id} className="flex gap-3">
+  1695→                {/* Timeline rail */}
+  1696→                <div className="flex flex-col items-center">
+  1697→                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${kindColor[entry.kind]}`}>
+  1698→                    {kindIcon[entry.kind]}
+  1699→                  </div>
+  1700→                  {idx < entries.length - 1 && (
+  1701→                    <div className="w-px flex-1 bg-border" />
+  1702→                  )}
+  1703→                </div>
+  1704→                {/* Content */}
+  1705→                <div className={`min-w-0 flex-1 pb-4 ${idx === entries.length - 1 ? '' : ''}`}>
+  1706→                  <div className="flex items-start justify-between gap-2">
+  1707→                    <div className="min-w-0 flex-1">
+  1708→                      <p className="text-sm font-medium leading-tight truncate">{entry.title}</p>
+  1709→                      <p className="mt-0.5 text-xs text-muted-foreground truncate">{entry.description}</p>
+  1710→                    </div>
+  1711→                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge[entry.status] ?? statusBadge.pending}`}>
+  1712→                      {entry.status}
+  1713→                    </span>
+  1714→                  </div>
+  1715→                  <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+  1716→                    <Clock className="h-2.5 w-2.5" />
+  1717→                    {formatRelativeTime(entry.timestamp)}
+  1718→                  </div>
+  1719→                </div>
+  1720→              </div>
+  1721→            ))}
+  1722→          </div>
+  1723→        )}
+  1724→      </CardContent>
+  1725→    </Card>
+  1726→  )
+  1727→}
+  1728→
+  1729→// =====================================================================
+  1730→// QUICK ACTIONS CARD
+  1731→// =====================================================================
+  1732→
+  1733→const QUICK_ACTIONS: Array<{
+  1734→  section: AdminSection
+  1735→  label: string
+  1736→  description: string
+  1737→  icon: React.ReactNode
+  1738→}> = [
+  1739→  {
+  1740→    section: 'tables',
+  1741→    label: 'New Table',
+  1742→    description: 'Define a collection',
+  1743→    icon: <Database className="h-4 w-4" />,
+  1744→  },
+  1745→  {
+  1746→    section: 'pipeline',
+  1747→    label: 'New Pipeline',
+  1748→    description: 'Ingest a source',
+  1749→    icon: <GitBranch className="h-4 w-4" />,
+  1750→  },
+  1751→  {
+  1752→    section: 'scraper',
+  1753→    label: 'Web Scraper',
+  1754→    description: 'Configure sitemap',
+  1755→    icon: <Globe className="h-4 w-4" />,
+  1756→  },
+  1757→  {
+  1758→    section: 'functions',
+  1759→    label: 'Deploy Function',
+  1760→    description: 'Serverless runtime',
+  1761→    icon: <Code2 className="h-4 w-4" />,
+  1762→  },
+  1763→  {
+  1764→    section: 'ai',
+  1765→    label: 'Open AI / RAG',
+  1766→    description: 'Chat with your data',
+  1767→    icon: <Brain className="h-4 w-4" />,
+  1768→  },
+  1769→  {
+  1770→    section: 'logs',
+  1771→    label: 'View Logs',
+  1772→    description: 'Errors & events',
+  1773→    icon: <Shield className="h-4 w-4" />,
+  1774→  },
+  1775→]
+  1776→
+  1777→function QuickActionsCard() {
+  1778→  const setActiveSection = useAdminStore((s) => s.setActiveSection)
+  1779→  return (
+  1780→    <Card className="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+  1781→      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+  1782→      <CardHeader>
+  1783→        <CardTitle className="flex items-center gap-2 text-base">
+  1784→          <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600">
+  1785→            <Sparkles className="h-4 w-4" />
+  1786→          </span>
+  1787→          Quick Actions
+  1788→        </CardTitle>
+  1789→        <CardDescription>Jump to common workflows</CardDescription>
+  1790→      </CardHeader>
+  1791→      <CardContent>
+  1792→        <div className="grid grid-cols-2 gap-2.5">
+  1793→          {QUICK_ACTIONS.map((a) => (
+  1794→            <motion.button
+  1795→              key={a.section}
+  1796→              onClick={() => setActiveSection(a.section)}
+  1797→              whileHover={{ y: -2, scale: 1.01 }}
+  1798→              whileTap={{ scale: 0.98 }}
+  1799→              transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+  1800→              className="group/action flex items-start gap-3 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/5 hover:shadow-md hover:shadow-emerald-500/5"
+  1801→            >
+  1802→              <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover/action:bg-emerald-500/20 group-hover/action:scale-110">
+  1803→                {a.icon}
+  1804→              </div>
+  1805→              <div className="min-w-0 flex-1">
+  1806→                <div className="flex items-center justify-between">
+  1807→                  <span className="text-sm font-medium">{a.label}</span>
+  1808→                  <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-hover/action:translate-x-0.5" />
+  1809→                </div>
+  1810→                <p className="text-[11px] text-muted-foreground">{a.description}</p>
+  1811→              </div>
+  1812→            </motion.button>
+  1813→          ))}
+  1814→        </div>
+  1815→      </CardContent>
+  1816→    </Card>
+  1817→  )
+  1818→}
+  1819→
+  1820→// =====================================================================
+  1821→// API QUICK REFERENCE CARD
+  1822→// =====================================================================
+  1823→
+  1824→const SDK_EXAMPLES: Array<{ label: string; code: Array<{ t: 'fn' | 'method' | 'str' | 'num' | 'punc' | 'kw' | 'comment' | 'plain'; v: string }> }> = [
+  1825→  {
+  1826→    label: 'Query a collection',
+  1827→    code: [
+  1828→      { t: 'fn', v: 'selfbase' },
+  1829→      { t: 'punc', v: '.' },
+  1830→      { t: 'method', v: 'collection' },
+  1831→      { t: 'punc', v: '(' },
+  1832→      { t: 'str', v: '"stocks"' },
+  1833→      { t: 'punc', v: ')' },
+  1834→      { t: 'punc', v: '.' },
+  1835→      { t: 'method', v: 'get' },
+  1836→      { t: 'punc', v: '()' },
+  1837→    ],
+  1838→  },
+  1839→  {
+  1840→    label: 'Insert a row',
+  1841→    code: [
+  1842→      { t: 'fn', v: 'selfbase' },
+  1843→      { t: 'punc', v: '.' },
+  1844→      { t: 'method', v: 'collection' },
+  1845→      { t: 'punc', v: '(' },
+  1846→      { t: 'str', v: '"users"' },
+  1847→      { t: 'punc', v: ')' },
+  1848→      { t: 'punc', v: '.' },
+  1849→      { t: 'method', v: 'insert' },
+  1850→      { t: 'punc', v: '({ ' },
+  1851→      { t: 'kw', v: 'email' },
+  1852→      { t: 'punc', v: ': ' },
+  1853→      { t: 'str', v: '"a@b.com"' },
+  1854→      { t: 'punc', v: ' })' },
+  1855→    ],
+  1856→  },
+  1857→  {
+  1858→    label: 'Subscribe realtime',
+  1859→    code: [
+  1860→      { t: 'fn', v: 'selfbase' },
+  1861→      { t: 'punc', v: '.' },
+  1862→      { t: 'method', v: 'channel' },
+  1863→      { t: 'punc', v: '(' },
+  1864→      { t: 'str', v: '"orders"' },
+  1865→      { t: 'punc', v: ')' },
+  1866→      { t: 'punc', v: '.' },
+  1867→      { t: 'method', v: 'on' },
+  1868→      { t: 'punc', v: '(' },
+  1869→      { t: 'str', v: '"INSERT"' },
+  1870→      { t: 'punc', v: ', cb)' },
+  1871→    ],
+  1872→  },
+  1873→  {
+  1874→    label: 'Invoke an AI function',
+  1875→    code: [
+  1876→      { t: 'fn', v: 'selfbase' },
+  1877→      { t: 'punc', v: '.' },
+  1878→      { t: 'method', v: 'functions' },
+  1879→      { t: 'punc', v: '.' },
+  1880→      { t: 'method', v: 'invoke' },
+  1881→      { t: 'punc', v: '(' },
+  1882→      { t: 'str', v: '"summarize"' },
+  1883→      { t: 'punc', v: ', { input })' },
+  1884→    ],
+  1885→  },
+  1886→]
+  1887→
+  1888→const TOKEN_COLORS: Record<string, string> = {
+  1889→  fn: 'text-emerald-600',
+  1890→  method: 'text-teal-600',
+  1891→  str: 'text-amber-600',
+  1892→  num: 'text-amber-600',
+  1893→  kw: 'text-rose-600',
+  1894→  punc: 'text-muted-foreground',
+  1895→  comment: 'text-muted-foreground/60 italic',
+  1896→  plain: 'text-foreground',
+  1897→}
+  1898→
+  1899→function ApiReferenceCard() {
+  1900→  return (
+  1901→    <Card className="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+  1902→      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+  1903→      <CardHeader>
+  1904→        <div className="flex items-center justify-between">
+  1905→          <div>
+  1906→            <CardTitle className="flex items-center gap-2 text-base">
+  1907→              <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600">
+  1908→                <CircleDot className="h-4 w-4" />
+  1909→              </span>
+  1910→              API Quick Reference
+  1911→            </CardTitle>
+  1912→            <CardDescription>Common SDK calls — copy &amp; ship</CardDescription>
+  1913→          </div>
+  1914→          <Badge variant="outline" className="font-mono text-[10px]">
+  1915→            v1
+  1916→          </Badge>
+  1917→        </div>
+  1918→      </CardHeader>
+  1919→      <CardContent>
+  1920→        <div className="space-y-2.5">
+  1921→          {SDK_EXAMPLES.map((ex, i) => (
+  1922→            <div
+  1923→              key={i}
+  1924→              className="rounded-lg border bg-muted/30 p-3 transition-colors hover:bg-muted/60"
+  1925→            >
+  1926→              <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+  1927→                {ex.label}
+  1928→              </div>
+  1929→              <pre className="scrollbar-thin overflow-x-auto font-mono text-xs leading-relaxed">
+  1930→                <code>
+  1931→                  {ex.code.map((tok, j) => (
+  1932→                    <span key={j} className={TOKEN_COLORS[tok.t]}>
+  1933→                      {tok.v}
+  1934→                    </span>
+  1935→                  ))}
+  1936→                </code>
+  1937→              </pre>
+  1938→            </div>
+  1939→          ))}
+  1940→        </div>
+  1941→        <div className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+  1942→          <HardDrive className="h-3 w-3" />
+  1943→          Base URL: <code className="font-mono text-emerald-600">/api/v1/data/&#123;table&#125;</code>
+  1944→        </div>
+  1945→      </CardContent>
+  1946→    </Card>
+  1947→  )
+  1948→}
+  1949→
+  1950→// =====================================================================
+  1951→// HELPERS (load level label)
+  1952→// =====================================================================
+  1953→
+  1954→function loadLevelLabel(level: string): string {
+  1955→  switch (level) {
+  1956→    case 'low':
+  1957→      return 'Low load — healthy'
+  1958→    case 'moderate':
+  1959→      return 'Moderate load'
+  1960→    case 'high':
+  1961→      return 'High load — monitor'
+  1962→    case 'critical':
+  1963→      return 'Critical — attention needed'
+  1964→    default:
+  1965→      return 'Steady'
+  1966→  }
+  1967→}
+  1968→
+  1969→// =====================================================================
+  1970→// SKELETON
+  1971→// =====================================================================
+  1972→
+  1973→/** Skeleton with a moving shimmer overlay (uses .shimmer utility from globals.css). */
+  1974→function ShimmerSkeleton({ className }: { className?: string }) {
+  1975→  return (
+  1976→    <div
+  1977→      className={`relative overflow-hidden rounded-md bg-accent ${className ?? ''}`}
+  1978→      aria-hidden
+  1979→    >
+  1980→      <div className="shimmer absolute inset-0" />
+  1981→    </div>
+  1982→  )
+  1983→}
+  1984→
+  1985→function DashboardSkeleton() {
+  1986→  return (
+  1987→    <div className="space-y-6">
+  1988→      {/* hero skeleton */}
+  1989→      <ShimmerSkeleton className="h-[160px] w-full rounded-2xl" />
+  1990→
+  1991→      {/* KPI row */}
+  1992→      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+  1993→        {Array.from({ length: 4 }).map((_, i) => (
+  1994→          <Card key={i} className="relative overflow-hidden">
+  1995→            <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-400/40 via-teal-400/40 to-emerald-500/40" />
+  1996→            <CardHeader className="pb-2">
+  1997→              <div className="flex items-center justify-between">
+  1998→                <ShimmerSkeleton className="h-3 w-24" />
+  1999→                <ShimmerSkeleton className="h-6 w-6 rounded-md" />
+  2000→              </div>
+
+[showing lines 1-2000 of 2060; use offset=2001 with limit to continue reading]

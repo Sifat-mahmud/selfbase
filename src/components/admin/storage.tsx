@@ -439,7 +439,7 @@ export function StorageView() {
         <CardContent>
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
             <div
-              className={`rounded-lg border p-4 cursor-pointer transition-colors hover:border-emerald-500 ${
+              className={`rounded-lg border p-4 cursor-pointer transition-all hover:border-emerald-500 hover:-translate-y-0.5 hover:shadow-md ${
                 selectedBucket === 'all' ? 'border-emerald-500 bg-emerald-500/5' : ''
               }`}
               onClick={() => setSelectedBucket('all')}
@@ -455,7 +455,7 @@ export function StorageView() {
               .map((b) => (
                 <div
                   key={b.name}
-                  className={`rounded-lg border p-4 cursor-pointer transition-colors hover:border-emerald-500 ${
+                  className={`rounded-lg border p-4 cursor-pointer transition-all hover:border-emerald-500 hover:-translate-y-0.5 hover:shadow-md ${
                     selectedBucket === b.name ? 'border-emerald-500 bg-emerald-500/5' : ''
                   }`}
                   onClick={() => setSelectedBucket(selectedBucket === b.name ? 'all' : b.name)}

@@ -1061,7 +1061,7 @@ export function MonitoringView() {
                   .map((evt) => (
                     <div
                       key={evt.id}
-                      className="flex items-start gap-3 rounded-lg border p-3 hover:bg-muted/40 transition-colors"
+                      className="flex items-start gap-3 rounded-lg border p-3 hover:bg-muted/40 hover:-translate-y-0.5 hover:shadow-md transition-all duration-200"
                     >
                       <Radio className={`mt-0.5 h-4 w-4 ${evt.isResolved ? 'text-emerald-500' : 'text-amber-500'}`} />
                       <div className="flex-1 min-w-0">
@@ -1071,6 +1071,7 @@ export function MonitoringView() {
                         </p>
                       </div>
                       <Badge variant={evt.isResolved ? 'secondary' : 'default'} className="text-xs">
+                        {!evt.isResolved && <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />}
                         {evt.isResolved ? 'Resolved' : 'Open'}
                       </Badge>
                     </div>
