@@ -1163,3 +1163,158 @@ Stage Summary:
 1. Dev server instability in sandbox (environmental, not code bug)
 2. WebSocket/Realtime indicator shows "Connecting..." (Caddy gateway limitation)
 3. Future features: Table relationships view, Pipeline templates gallery, Real-time data sync, Cron scheduling UI, Notification channels (email/Slack), Data backup/restore
+
+---
+
+## Task R10-2a: Smart Pipeline URL Preview API & Auto-Create Table API
+
+**Date**: 2025-03-05
+**Agent**: Full-Stack Developer
+
+### Created Endpoints
+
+1. **POST `/api/pipelines/smart-preview`** — Fetches a URL, auto-detects data structure, returns user-friendly preview
+   - Accepts `{ url, method?, headers? }` in request body
+   - SSRF protection (blocks internal IPs, dangerous protocols)
+   - Auto-detects JSON vs HTML response type
+   - For JSON: recursively finds all array paths in the response tree
+   - Returns `dataPaths` array with each found array's path, label, count, and sample keys
+   - Auto-selects the best array path (root array preferred, then largest)
+   - Auto-detects column types from sample values: INTEGER, DECIMAL, BOOLEAN, TIMESTAMP, JSON, TEXT
+   - Collects first 3 unique non-null sample values per column
+   - Detects nullable columns
+   - Returns `previewRows` (first 5), `totalRows`, `columns`, `selectedPath`, `durationMs`
+   - Handles edge cases: single objects (wrapped in array), primitive arrays (wrapped with id/value), empty responses
+   - For HTML: uses `scrapeHtmlTables` to extract table data
+
+2. **POST `/api/pipelines/auto-create-table`** — Creates a new SbTable with columns on-the-fly
+   - Accepts `{ name, columns: [{ name, type, isPrimaryKey?, isUnique?, isIndexed?, nullable?, defaultValue? }], displayName?, description? }`
+   - Validates table name format (alphanumeric + underscores)
+   - Validates column types (TEXT, INTEGER, DECIMAL, BOOLEAN, TIMESTAMP, JSON)
+   - Checks for duplicate table names and duplicate column names
+   - Creates SbTable + SbColumn records in a single transaction via Prisma nested create
+   - Returns the full table object including columns
+
+### Files Created
+- `/src/app/api/pipelines/smart-preview/route.ts` — Smart preview endpoint
+- `/src/app/api/pipelines/auto-create-table/route.ts` — Auto-create table endpoint
+
+### Key Implementation Details
+- Uses `pipelineFetch` from `@/lib/fetch-utils` for URL fetching with TLS bypass
+- Uses `scrapeHtmlTables` for HTML table extraction
+- Uses `errorResponse`, `serverErrorResponse` from `@/lib/api-utils`
+- Type-safe responses with TypeScript interfaces (`SmartPreviewSuccess`, `SmartPreviewError`)
+- Column type detection heuristic checks up to 10 values per column
+- ISO date regex for TIMESTAMP detection
+- Prisma nested create for atomic table + columns creation
+
+### Verification
+- `bun run lint` passes with no errors
+- Dev server running normally
+
+---
+
+## Task R10-2b: Smart Pipeline Wizard Component ✅
+
+### Summary
+Created a completely redesigned pipeline creation experience as a step-by-step visual wizard, replacing the technical form with a user-friendly flow.
+
+### Files Created
+1. **`/src/app/api/pipelines/smart-preview/route.ts`** — New API endpoint that fetches a URL, auto-detects JSON/HTML data paths, and returns discovered tabular data with column types and sample values
+2. **`/src/app/api/pipelines/auto-create-table/route.ts`** — New API endpoint that auto-creates a database table with columns matching the source data schema
+3. **`/src/components/admin/pipeline-wizard.tsx`** — Main wizard component with 5 steps
+
+### Files Modified
+4. **`/src/components/admin/pipeline.tsx`** — Integrated PipelineWizard:
+   - Imported PipelineWizard component
+   - Added `showWizard` state
+   - Changed "New Pipeline" button to open the wizard instead of the old dialog
+   - Added PipelineWizard component at the bottom of the render with proper props
+   - Kept old create dialog (hidden) for backward compatibility
+   - Empty state "New Pipeline" button also opens wizard
+
+### Wizard Steps
+1. **Paste Data Source URL** — Large input with Globe icon, "Fetch Data" button with emerald gradient, loading spinner, success/error cards with retry
+2. **Choose Your Data** — Clickable data path cards showing path label, row count badge, sample column tags; preview table of first 5 rows; detected columns with type badges and sample values
+3. **Select Destination Table** — Two card options: "Existing Table" (dropdown) or "Create New Table" (input + auto-create); target columns preview
+4. **Map Columns** — Side-by-side source/target columns; click-to-map interaction; Auto-Map (case-insensitive name matching); Unmap All; transformation preview with type conversions; unmapped column warnings
+5. **Set Schedule & Create** — Visual schedule selector (5min/15min/hourly/6h/daily/manual); pipeline name input (auto-generated); expandable config preview; "🚀 Create Pipeline" button with emerald gradient
+
+### Features
+- Full-screen dialog (max-w-4xl, h-[85vh])
+- Step indicator with numbered circles and connecting lines
+- Framer Motion slide transitions between steps
+- Type badge colors: INTEGER=amber, TEXT=emerald, DECIMAL=teal, BOOLEAN=cyan, TIMESTAMP=purple, JSON=rose
+- Auto-transformations: TEXT→INTEGER/DECIMAL/BOOLEAN/TIMESTAMP/JSON, INTEGER/DECIMAL/BOOLEAN→TEXT
+- Smart preview API discovers nested data paths in JSON responses
+- Auto-create table creates columns matching source schema
+- Wizard resets state on close
+- Both light and dark mode support
+
+### Verification
+- `bun run lint` passes with no errors
+- Dev server running normally
+
+
+---
+
+## Round 10 — Smart Pipeline Wizard (Orchestrator Summary)
+
+**Date**: 2025-06-22
+**Agent**: Main Orchestrator (with 2 sub-agents: R10-2a, R10-2b)
+
+### User Request
+User wanted a non-technical pipeline creation experience: paste URL → system fetches data → user clicks to select data table → columns auto-detected → visual click-to-map source→target columns → auto type transformation → schedule → create pipeline. No JSONPath, no manual type selection, no technical jargon.
+
+### What Was Built
+
+**New API Endpoints:**
+1. `POST /api/pipelines/smart-preview` — Fetches any URL, auto-detects JSON/HTML data structure, discovers nested array paths, auto-detects column types (INTEGER, TEXT, DECIMAL, BOOLEAN, TIMESTAMP, JSON), returns sample values and preview rows
+2. `POST /api/pipelines/auto-create-table` — Creates a new database table with columns matching the source schema, all in one atomic transaction
+
+**Smart Pipeline Wizard Component:**
+- 5-step visual wizard replacing the old technical form
+- Step 1: Paste URL → "Fetch Data" → auto-analyze
+- Step 2: Click on detected data path → preview columns & rows
+- Step 3: Choose existing table or auto-create new one
+- Step 4: Click-to-map source→target columns with auto-type-transform
+- Step 5: Pick schedule → review → create pipeline
+
+**Key UX Improvements:**
+- No JSONPath knowledge needed — system auto-discovers data paths
+- No manual type selection — types auto-detected from data
+- Click-to-map columns instead of typing field names
+- Auto-Map button for matching by column name
+- Type transformation preview (e.g., "TEXT → INTEGER auto-transform")
+- Visual schedule picker instead of interval input
+- Auto-generated pipeline name from URL
+
+### API Verification
+- `POST /api/pipelines/smart-preview` → 200 (tested with jsonplaceholder.typicode.com/users, correctly detected 8 columns with types)
+- `POST /api/pipelines/auto-create-table` → 201 (creates table + columns atomically)
+- All existing 15+ API endpoints still return 200
+
+### Files Created (2 new API routes + 1 new component)
+- `/src/app/api/pipelines/smart-preview/route.ts` — Smart URL preview with auto-detection
+- `/src/app/api/pipelines/auto-create-table/route.ts` — Auto-create table endpoint
+- `/src/components/admin/pipeline-wizard.tsx` — 5-step visual wizard component
+
+### Files Modified (1)
+- `/src/components/admin/pipeline.tsx` — Integrated wizard as primary "New Pipeline" flow
+
+### QA Verification
+- `bun run lint` passes with 0 errors
+- Smart Preview API: 200 (auto-detects JSON structure, columns, types)
+- Auto-Create Table API: 201 (creates table with columns)
+- Wizard UI opens from "New Pipeline" button
+- Step 1 shows URL input and Fetch Data button
+- Data entered, Fetch Data button enables
+- Browser test confirmed wizard dialog renders correctly
+
+### Unresolved Issues / Next Steps
+1. Dev server instability in sandbox — server dies during heavy fetch operations
+2. Future: Add pagination support in wizard for large datasets
+3. Future: Add auth configuration step for protected APIs
+4. Future: Add data transformation script editor for advanced users
+5. Future: Pipeline templates gallery for common data sources
+

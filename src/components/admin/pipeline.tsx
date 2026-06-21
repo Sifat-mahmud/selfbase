@@ -92,6 +92,7 @@ import {
   Legend,
 } from 'recharts'
 import { apiGet, apiPost, apiPut, parseJsonField } from '@/lib/api-client'
+import { PipelineWizard } from '@/components/admin/pipeline-wizard'
 
 interface ColumnMapping {
   src: string
@@ -223,6 +224,7 @@ export function PipelineView() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showWizard, setShowWizard] = useState(false)
   const [selectedPipeline, setSelectedPipeline] = useState<PipelineSourceItem | null>(null)
   const [previewTarget, setPreviewTarget] = useState<PipelineSourceItem | null>(null)
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
@@ -1188,10 +1190,13 @@ export function PipelineView() {
           </h1>
           <p className="text-muted-foreground">Configure and manage data source ingestion</p>
         </div>
+        <Button onClick={() => setShowWizard(true)}>
+          <Plus className="mr-1 h-4 w-4" /> New Pipeline
+        </Button>
         <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
           <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-1 h-4 w-4" /> New Pipeline
+            <Button variant="outline" className="hidden">
+              <Plus className="mr-1 h-4 w-4" /> New Pipeline (Advanced)
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-2xl">
@@ -1839,7 +1844,7 @@ export function PipelineView() {
               <GitBranch className="h-14 w-14 mb-3 opacity-30" />
               <p className="text-base font-medium">No pipelines yet</p>
               <p className="text-sm mt-1">Create a pipeline source to start ingesting data.</p>
-              <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+              <Button className="mt-4" onClick={() => setShowWizard(true)}>
                 <Plus className="mr-1 h-4 w-4" /> New Pipeline
               </Button>
             </CardContent>
@@ -2301,6 +2306,20 @@ export function PipelineView() {
           </div>
         )}
       </motion.div>
+
+      {/* Smart Pipeline Wizard */}
+      <PipelineWizard
+        open={showWizard}
+        onOpenChange={setShowWizard}
+        onCreated={loadAll}
+        tables={tables.map(t => ({
+          id: t.id,
+          name: t.name,
+          displayName: t.displayName || undefined,
+          rowCount: t.rowCount ?? 0,
+          columns: (t.columns || []).map(c => ({ name: c.name, type: c.type })),
+        }))}
+      />
     </motion.div>
   )
 }
