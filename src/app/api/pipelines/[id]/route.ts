@@ -61,7 +61,7 @@ export async function PUT(
     // Only update fields that are provided
     const stringFields = [
       'name', 'description', 'sourceType', 'url', 'method', 'authType', 'jsonPath',
-      'scheduleCron', 'onConflict', 'paginationMode',
+      'scheduleCron', 'onConflict', 'preRunAction', 'primaryKeyCols', 'paginationMode',
     ];
     const jsonFields = [
       'headers', 'authConfig', 'columnMappings', 'isActiveWindow',

@@ -7,6 +7,7 @@ import {
   Plus,
   Play,
   Pause,
+  Pencil,
   RefreshCw,
   MoreHorizontal,
   Trash2,
@@ -27,6 +28,7 @@ import {
   TrendingUp,
   Timer,
   Database,
+  Copy,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -124,9 +126,11 @@ interface PipelineSourceItem {
   fetchInterval: number
   jsonPath?: string | null
   onConflict?: string
+  preRunAction?: string
+  primaryKeyCols?: string
   targetTableId?: string | null
   targetTableName?: string | null
-  targetTable?: { name: string } | null
+  targetTable?: { name: string; displayName?: string | null } | null
   columnMappings: string
   lastRun?: PipelineRunItem | null
   pipelineRuns?: PipelineRunItem[]
@@ -234,15 +238,39 @@ export function PipelineView() {
   const [newJsonPath, setNewJsonPath] = useState('')
   const [newInterval, setNewInterval] = useState('300')
   const [newOnConflict, setNewOnConflict] = useState('update')
+  const [newTargetTableId, setNewTargetTableId] = useState('')
+  const [newPreRunAction, setNewPreRunAction] = useState('none')
+  const [newPrimaryKeyCols, setNewPrimaryKeyCols] = useState<string[]>([])
   const [newMappings, setNewMappings] = useState<ColumnMapping[]>([])
+  // Edit dialog state (mirrors the create form)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editPipeline, setEditPipeline] = useState<PipelineSourceItem | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [editType, setEditType] = useState<'rest' | 'rss' | 'websocket' | 'scraper'>('rest')
+  const [editUrl, setEditUrl] = useState('')
+  const [editMethod, setEditMethod] = useState('GET')
+  const [editHeaders, setEditHeaders] = useState('{}')
+  const [editJsonPath, setEditJsonPath] = useState('')
+  const [editInterval, setEditInterval] = useState('300')
+  const [editOnConflict, setEditOnConflict] = useState('update')
+  const [editTargetTableId, setEditTargetTableId] = useState('')
+  const [editPreRunAction, setEditPreRunAction] = useState('none')
+  const [editPrimaryKeyCols, setEditPrimaryKeyCols] = useState<string[]>([])
+  const [editMappings, setEditMappings] = useState<ColumnMapping[]>([])
+  const [tables, setTables] = useState<Array<{ id: string; name: string; displayName?: string | null; rowCount?: number; columns: Array<{ id: string; name: string; type: string }> }>>([])
+  // Next-run countdown (seconds remaining until the next scheduled fetch).
+  const [nextRunIn, setNextRunIn] = useState<number | null>(null)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const [p, r] = await Promise.all([
+      const [p, r, t] = await Promise.all([
         apiGet<PipelineSourceItem[]>('/api/pipelines'),
         apiGet<PipelineRunItem[] | PipelineRunsResponse>('/api/pipelines/runs?limit=100').catch(() => null),
+        apiGet<Array<{ id: string; name: string; displayName?: string | null; columns: Array<{ id: string; name: string; type: string }> }>>('/api/tables').catch(() => []),
       ])
+      if (Array.isArray(t)) setTables(t)
       const list = Array.isArray(p) ? p : []
       // Map targetTable.name -> targetTableName for convenience, normalize columnMappings
       const normalized = list.map((pl) => ({
@@ -270,6 +298,34 @@ export function PipelineView() {
     void loadAll()
   }, [loadAll])
 
+  // Live countdown to the next scheduled run, based on the most recent run
+  // for the currently selected pipeline. Updates every second.
+  useEffect(() => {
+    if (
+      !selectedPipeline ||
+      !selectedPipeline.isActive ||
+      selectedPipeline.fetchInterval <= 0
+    ) {
+      setNextRunIn(null)
+      return
+    }
+    const lastRun = allRuns.find((r) => r.sourceId === selectedPipeline.id)
+    if (!lastRun) {
+      setNextRunIn(null)
+      return
+    }
+    const lastRunTime = new Date(lastRun.startedAt).getTime()
+    const nextRunTime = lastRunTime + selectedPipeline.fetchInterval * 1000
+
+    const updateCountdown = () => {
+      const remaining = Math.max(0, Math.round((nextRunTime - Date.now()) / 1000))
+      setNextRunIn(remaining)
+    }
+    updateCountdown()
+    const interval = setInterval(updateCountdown, 1000)
+    return () => clearInterval(interval)
+  }, [selectedPipeline, allRuns])
+
   const handleCreate = async () => {
     if (!newName.trim() || !newUrl.trim()) {
       toast({ title: 'Name and URL required', variant: 'destructive' })
@@ -286,6 +342,9 @@ export function PipelineView() {
         jsonPath: newJsonPath || null,
         fetchInterval: Number(newInterval) || 300,
         onConflict: newOnConflict,
+        targetTableId: newTargetTableId && newTargetTableId !== '_none' ? newTargetTableId : null,
+        preRunAction: newPreRunAction,
+        primaryKeyCols: JSON.stringify(newPrimaryKeyCols),
         isActive: true,
         columnMappings: JSON.stringify(newMappings),
       }
@@ -307,6 +366,9 @@ export function PipelineView() {
       setNewJsonPath('')
       setNewInterval('300')
       setNewOnConflict('update')
+      setNewTargetTableId('')
+      setNewPreRunAction('none')
+      setNewPrimaryKeyCols([])
       setNewMappings([])
       toast({ title: 'Pipeline created', description: `"${created.name}" has been created.` })
     } catch (err) {
@@ -375,6 +437,115 @@ export function PipelineView() {
       })
     } finally {
       setPreviewLoading(false)
+    }
+  }
+
+  const openEditDialog = (pipeline: PipelineSourceItem) => {
+    setEditPipeline(pipeline)
+    setEditName(pipeline.name)
+    setEditDesc(pipeline.description || '')
+    setEditType(pipeline.sourceType)
+    setEditUrl(pipeline.url)
+    setEditMethod(pipeline.method || 'GET')
+    setEditHeaders(pipeline.headers || '{}')
+    setEditJsonPath(pipeline.jsonPath || '')
+    setEditInterval(String(pipeline.fetchInterval || 300))
+    setEditOnConflict(pipeline.onConflict || 'update')
+    setEditTargetTableId(pipeline.targetTableId || '')
+    setEditPreRunAction(pipeline.preRunAction || 'none')
+    setEditPrimaryKeyCols(parseJsonField<string[]>(pipeline.primaryKeyCols, []))
+    setEditMappings(parseJsonField<ColumnMapping[]>(pipeline.columnMappings, []))
+    setShowEditDialog(true)
+  }
+
+  // Duplicate a pipeline's configuration into a new (inactive) pipeline.
+  const handleDuplicate = async (pipeline: PipelineSourceItem) => {
+    try {
+      const mappings = parseJsonField<ColumnMapping[]>(pipeline.columnMappings, [])
+      const pkCols = parseJsonField<string[]>(pipeline.primaryKeyCols, [])
+      const payload = {
+        name: `${pipeline.name} (copy)`,
+        description: pipeline.description,
+        sourceType: pipeline.sourceType,
+        url: pipeline.url,
+        method: pipeline.method || 'GET',
+        headers: pipeline.headers || null,
+        jsonPath: pipeline.jsonPath || null,
+        fetchInterval: pipeline.fetchInterval,
+        onConflict: pipeline.onConflict || 'update',
+        preRunAction: pipeline.preRunAction || 'none',
+        primaryKeyCols: JSON.stringify(pkCols),
+        targetTableId: pipeline.targetTableId || null,
+        columnMappings: JSON.stringify(mappings),
+        isActive: false, // Duplicated pipelines start inactive
+      }
+      const created = await apiPost<PipelineSourceItem>('/api/pipelines', payload)
+      const normalized: PipelineSourceItem = {
+        ...created,
+        targetTableName: created.targetTable?.name ?? null,
+        lastRun: null,
+      }
+      setPipelines((prev) => [normalized, ...prev])
+      toast({
+        title: 'Pipeline duplicated',
+        description: `"${created.name}" created (inactive). Activate it when ready.`,
+      })
+      // Navigate to the new pipeline
+      setSelectedPipeline(normalized)
+    } catch (err) {
+      toast({
+        title: 'Failed to duplicate pipeline',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editPipeline || !editName.trim() || !editUrl.trim()) {
+      toast({ title: 'Name and URL required', variant: 'destructive' })
+      return
+    }
+    try {
+      const payload: Record<string, unknown> = {
+        name: editName.trim(),
+        description: editDesc || null,
+        sourceType: editType,
+        url: editUrl.trim(),
+        method: editMethod,
+        headers: editHeaders || null,
+        jsonPath: editJsonPath || null,
+        fetchInterval: Number(editInterval) || 300,
+        onConflict: editOnConflict,
+        preRunAction: editPreRunAction,
+        primaryKeyCols: JSON.stringify(editPrimaryKeyCols),
+        targetTableId: editTargetTableId && editTargetTableId !== '_none' ? editTargetTableId : null,
+        columnMappings: JSON.stringify(editMappings),
+      }
+      const updated = await apiPut<PipelineSourceItem>(`/api/pipelines/${editPipeline.id}`, payload)
+      // Update local state
+      setPipelines((prev) =>
+        prev.map((p) =>
+          p.id === editPipeline.id
+            ? { ...p, ...updated, targetTableName: updated.targetTable?.name ?? null }
+            : p,
+        ),
+      )
+      if (selectedPipeline?.id === editPipeline.id) {
+        setSelectedPipeline({
+          ...selectedPipeline,
+          ...updated,
+          targetTableName: updated.targetTable?.name ?? null,
+        })
+      }
+      setShowEditDialog(false)
+      toast({ title: 'Pipeline updated', description: `"${updated.name}" has been saved.` })
+    } catch (err) {
+      toast({
+        title: 'Failed to update pipeline',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -490,6 +661,16 @@ export function PipelineView() {
             {selectedPipeline.isActive ? 'Active' : 'Paused'}
           </Badge>
           <div className="ml-auto flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedPipeline)}>
+              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleDuplicate(selectedPipeline)}
+            >
+              <Copy className="mr-1 h-3.5 w-3.5" /> Duplicate
+            </Button>
             <Button variant="outline" size="sm" onClick={() => void handlePreview(selectedPipeline)}>
               <Eye className="mr-1 h-3.5 w-3.5" /> Preview
             </Button>
@@ -504,7 +685,46 @@ export function PipelineView() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        {/* Config Summary */}
+        <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-200/50 dark:border-emerald-800/30">
+          <div className="flex items-center gap-1.5 text-xs">
+            <Database className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="text-muted-foreground">Target:</span>
+            <span className="font-mono font-medium">{selectedPipeline.targetTableName ?? 'Not set'}</span>
+          </div>
+          <Separator orientation="vertical" className="h-4" />
+          <div className="flex items-center gap-1.5 text-xs">
+            <RefreshCw className="h-3.5 w-3.5 text-teal-600" />
+            <span className="text-muted-foreground">Conflict:</span>
+            <Badge variant="outline" className="text-[10px] capitalize py-0">{selectedPipeline.onConflict}</Badge>
+          </div>
+          {(() => {
+            const pkCols = parseJsonField<string[]>(selectedPipeline.primaryKeyCols, [])
+            return pkCols.length > 0 ? (
+              <>
+                <Separator orientation="vertical" className="h-4" />
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-muted-foreground">🔑 PK:</span>
+                  <span className="font-mono">{pkCols.join(', ')}</span>
+                </div>
+              </>
+            ) : null
+          })()}
+          {selectedPipeline.preRunAction && selectedPipeline.preRunAction !== 'none' && (
+            <>
+              <Separator orientation="vertical" className="h-4" />
+              <div className="flex items-center gap-1.5 text-xs">
+                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                <span className="text-muted-foreground">Pre-run:</span>
+                <Badge variant="outline" className="text-[10px] capitalize py-0 text-amber-700 border-amber-300">
+                  {selectedPipeline.preRunAction}
+                </Badge>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           <Card>
             <CardContent className="pt-4">
               <div className="text-sm text-muted-foreground">Source Type</div>
@@ -537,42 +757,156 @@ export function PipelineView() {
               )}
             </CardContent>
           </Card>
+          <Card className="relative overflow-hidden">
+            <CardContent className="pt-4">
+              <div className="text-sm text-muted-foreground">Next Run</div>
+              {nextRunIn !== null && nextRunIn > 0 ? (
+                <>
+                  <div className="text-lg font-bold font-mono text-emerald-600">
+                    {Math.floor(nextRunIn / 60)}m {nextRunIn % 60}s
+                  </div>
+                  <div className="mt-1 h-1 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-1000"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          ((selectedPipeline.fetchInterval - nextRunIn) /
+                            selectedPipeline.fetchInterval) *
+                            100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="text-lg font-bold text-muted-foreground">
+                  {selectedPipeline?.isActive ? 'Due now' : 'Paused'}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
+        {/* Source URL & Configuration */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Source URL & Configuration</CardTitle>
+            <CardTitle className="text-base bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+              Source URL &amp; Configuration
+            </CardTitle>
             <CardDescription>Pipeline source endpoint and extraction settings</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="font-mono">
-                {selectedPipeline.method}
-              </Badge>
-              <code className="text-sm font-mono break-all">{selectedPipeline.url}</code>
+          <CardContent className="space-y-4">
+            {/* URL row */}
+            <div className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
+              <Badge variant="outline" className="font-mono">{selectedPipeline.method}</Badge>
+              <code className="text-sm font-mono break-all flex-1">{selectedPipeline.url}</code>
               <a
                 href={selectedPipeline.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-auto text-muted-foreground hover:text-emerald-600"
+                className="text-muted-foreground hover:text-emerald-600"
               >
                 <ExternalLink className="h-3.5 w-3.5" />
               </a>
             </div>
-            {selectedPipeline.jsonPath && (
-              <div className="text-sm">
-                <span className="text-muted-foreground">JSONPath: </span>
-                <code className="font-mono">{selectedPipeline.jsonPath}</code>
+
+            {/* Config grid */}
+            <div className="grid gap-3 md:grid-cols-2">
+              {selectedPipeline.jsonPath && (
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wide">JSONPath</span>
+                  <code className="text-sm font-mono block p-2 rounded bg-muted/30">{selectedPipeline.jsonPath}</code>
+                </div>
+              )}
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground uppercase tracking-wide">On Conflict</span>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="capitalize">{selectedPipeline.onConflict}</Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {selectedPipeline.onConflict === 'update' && '— Insert new, update existing by PK'}
+                    {selectedPipeline.onConflict === 'insert' && '— Always insert (no dedup)'}
+                    {selectedPipeline.onConflict === 'replace' && '— Overwrite row on PK match'}
+                    {selectedPipeline.onConflict === 'skip' && '— Skip rows matching PK'}
+                    {selectedPipeline.onConflict === 'truncate' && '— Clear table then insert'}
+                  </span>
+                </div>
               </div>
-            )}
-            {selectedPipeline.onConflict && (
-              <div className="text-sm">
-                <span className="text-muted-foreground">On Conflict: </span>
+              <div className="space-y-1">
+                <span className="text-xs text-muted-foreground uppercase tracking-wide">Pre-Run Action</span>
+                <Badge variant="outline" className="capitalize">{selectedPipeline.preRunAction || 'none'}</Badge>
+              </div>
+              {(() => {
+                const pkCols = parseJsonField<string[]>(selectedPipeline.primaryKeyCols, [])
+                return pkCols.length > 0 ? (
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Primary Key Columns</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {pkCols.map((col) => (
+                        <Badge key={col} variant="secondary" className="gap-1">
+                          <span>🔑</span> {col}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null
+              })()}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Table Mapping &amp; Conflict Resolution</CardTitle>
+            <CardDescription>How fetched data is written to the target table</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="text-sm text-muted-foreground">Target Table</div>
+                <div className="text-base font-bold font-mono">{selectedPipeline.targetTableName ?? 'Not configured'}</div>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Pre-Run Action</div>
                 <Badge variant="outline" className="capitalize">
-                  {selectedPipeline.onConflict}
+                  {selectedPipeline.preRunAction || 'none'}
                 </Badge>
               </div>
-            )}
+            </div>
+
+            <Separator />
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="text-sm text-muted-foreground">On Conflict</div>
+                <Badge variant="outline" className="capitalize">
+                  {selectedPipeline.onConflict || 'update'}
+                </Badge>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {selectedPipeline.onConflict === 'update' && 'Insert new rows, update existing rows matching primary key'}
+                  {selectedPipeline.onConflict === 'insert' && 'Always insert new rows (no dedup)'}
+                  {selectedPipeline.onConflict === 'replace' && 'Overwrite entire row when primary key matches'}
+                  {selectedPipeline.onConflict === 'skip' && 'Skip rows where primary key already exists'}
+                  {selectedPipeline.onConflict === 'truncate' && 'Clear table then insert all rows'}
+                  {!selectedPipeline.onConflict && 'Insert new rows, update existing rows matching primary key'}
+                </p>
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Primary Key Columns</div>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {(() => {
+                    const pkCols = parseJsonField<string[]>(selectedPipeline.primaryKeyCols, [])
+                    return pkCols.length > 0
+                      ? pkCols.map(col => (
+                        <Badge key={col} variant="secondary" className="gap-1">
+                          <span>🔑</span> {col}
+                        </Badge>
+                      ))
+                      : <span className="text-xs text-muted-foreground">None — all rows inserted</span>
+                  })()}
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -848,18 +1182,103 @@ export function PipelineView() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>On Conflict</Label>
+                <Label>Target Table</Label>
+                <Select value={newTargetTableId} onValueChange={(v) => {
+                  setNewTargetTableId(v)
+                  setNewPrimaryKeyCols([])
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select target table..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">None (preview only)</SelectItem>
+                    {tables.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        <span className="font-medium">{t.displayName || t.name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({(t.rowCount ?? 0).toLocaleString()} rows · {t.columns?.length || 0} cols)
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Fetched data will be written to this table. Leave empty for preview-only mode.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Pre-Run Action</Label>
+                <Select value={newPreRunAction} onValueChange={setNewPreRunAction}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None — Keep existing data</SelectItem>
+                    <SelectItem value="truncate">Truncate — Delete all rows before insert</SelectItem>
+                    <SelectItem value="archive">Archive — Archive old data before insert</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  What to do with existing table data before writing new rows.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>On Conflict (Duplicate Rows)</Label>
                 <Select value={newOnConflict} onValueChange={setNewOnConflict}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="update">Update existing</SelectItem>
-                    <SelectItem value="insert">Insert (skip duplicates)</SelectItem>
-                    <SelectItem value="replace">Replace</SelectItem>
+                    <SelectItem value="update">Upsert — Insert new, update existing</SelectItem>
+                    <SelectItem value="insert">Insert Only — Always insert new rows</SelectItem>
+                    <SelectItem value="replace">Replace — Overwrite entire row</SelectItem>
+                    <SelectItem value="skip">Skip — Skip rows that already exist</SelectItem>
+                    <SelectItem value="truncate">Truncate — Clear table then insert all</SelectItem>
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  How to handle rows where the primary key matches an existing row.
+                </p>
               </div>
+              {newTargetTableId && newTargetTableId !== '_none' && (newOnConflict === 'update' || newOnConflict === 'replace' || newOnConflict === 'skip') && (
+                <div className="space-y-2">
+                  <Label>Primary Key Columns</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select which columns uniquely identify a row. Used for upsert, replace, and skip logic.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(() => {
+                      const selectedTable = tables.find(t => t.id === newTargetTableId)
+                      const availableCols = selectedTable?.columns || []
+                      const mappingTargets = newMappings.map(m => m.target).filter(Boolean)
+                      const allCols = [...new Set([...availableCols.map(c => c.name), ...mappingTargets])]
+                      return allCols.map(colName => (
+                        <Badge
+                          key={colName}
+                          variant={newPrimaryKeyCols.includes(colName) ? 'default' : 'outline'}
+                          className="cursor-pointer select-none"
+                          onClick={() => {
+                            setNewPrimaryKeyCols(prev =>
+                              prev.includes(colName)
+                                ? prev.filter(c => c !== colName)
+                                : [...prev, colName]
+                            )
+                          }}
+                        >
+                          {newPrimaryKeyCols.includes(colName) && <span className="mr-1">🔑</span>}
+                          {colName}
+                        </Badge>
+                      ))
+                    })()}
+                  </div>
+                  {newPrimaryKeyCols.length === 0 && (
+                    <p className="text-xs text-amber-600 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      No primary key selected — all rows will be inserted (no upsert/skip).
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Headers (JSON)</Label>
                 <Textarea
@@ -977,6 +1396,287 @@ export function PipelineView() {
                 Cancel
               </Button>
               <Button onClick={handleCreate}>Create Pipeline</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Pipeline Dialog */}
+        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Pipeline Source</DialogTitle>
+              <DialogDescription>Modify pipeline configuration</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto scrollbar-thin">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Name</Label>
+                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="My Pipeline" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Source Type</Label>
+                  <Select value={editType} onValueChange={(v) => setEditType(v as typeof editType)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rest">REST API</SelectItem>
+                      <SelectItem value="rss">RSS Feed</SelectItem>
+                      <SelectItem value="websocket">WebSocket</SelectItem>
+                      <SelectItem value="scraper">Web Scraper</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Brief description" />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2 md:col-span-2">
+                  <Label>URL</Label>
+                  <Input value={editUrl} onChange={(e) => setEditUrl(e.target.value)} placeholder="https://api.example.com/data" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Method</Label>
+                  <Select value={editMethod} onValueChange={setEditMethod}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="GET">GET</SelectItem>
+                      <SelectItem value="POST">POST</SelectItem>
+                      <SelectItem value="PUT">PUT</SelectItem>
+                      <SelectItem value="DELETE">DELETE</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>JSONPath (optional)</Label>
+                  <Input value={editJsonPath} onChange={(e) => setEditJsonPath(e.target.value)} placeholder="data.items" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Fetch Interval (sec)</Label>
+                  <Input type="number" value={editInterval} onChange={(e) => setEditInterval(e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Target Table</Label>
+                <Select value={editTargetTableId || '_none'} onValueChange={(v) => {
+                  setEditTargetTableId(v)
+                  setEditPrimaryKeyCols([])
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select target table..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="_none">None (preview only)</SelectItem>
+                    {tables.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        <span className="font-medium">{t.displayName || t.name}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({(t.rowCount ?? 0).toLocaleString()} rows · {t.columns?.length || 0} cols)
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Fetched data will be written to this table. Leave empty for preview-only mode.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Pre-Run Action</Label>
+                <Select value={editPreRunAction} onValueChange={setEditPreRunAction}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None — Keep existing data</SelectItem>
+                    <SelectItem value="truncate">Truncate — Delete all rows before insert</SelectItem>
+                    <SelectItem value="archive">Archive — Archive old data before insert</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  What to do with existing table data before writing new rows.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>On Conflict (Duplicate Rows)</Label>
+                <Select value={editOnConflict} onValueChange={setEditOnConflict}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="update">Upsert — Insert new, update existing</SelectItem>
+                    <SelectItem value="insert">Insert Only — Always insert new rows</SelectItem>
+                    <SelectItem value="replace">Replace — Overwrite entire row</SelectItem>
+                    <SelectItem value="skip">Skip — Skip rows that already exist</SelectItem>
+                    <SelectItem value="truncate">Truncate — Clear table then insert all</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  How to handle rows where the primary key matches an existing row.
+                </p>
+              </div>
+              {editTargetTableId && editTargetTableId !== '_none' && (editOnConflict === 'update' || editOnConflict === 'replace' || editOnConflict === 'skip') && (
+                <div className="space-y-2">
+                  <Label>Primary Key Columns</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Select which columns uniquely identify a row. Used for upsert, replace, and skip logic.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {(() => {
+                      const selectedTable = tables.find((t) => t.id === editTargetTableId)
+                      const availableCols = selectedTable?.columns || []
+                      const mappingTargets = editMappings.map((m) => m.target).filter(Boolean)
+                      const allCols = [...new Set([...availableCols.map((c) => c.name), ...mappingTargets])]
+                      return allCols.map((colName) => (
+                        <Badge
+                          key={colName}
+                          variant={editPrimaryKeyCols.includes(colName) ? 'default' : 'outline'}
+                          className="cursor-pointer select-none"
+                          onClick={() => {
+                            setEditPrimaryKeyCols((prev) =>
+                              prev.includes(colName)
+                                ? prev.filter((c) => c !== colName)
+                                : [...prev, colName],
+                            )
+                          }}
+                        >
+                          {editPrimaryKeyCols.includes(colName) && <span className="mr-1">🔑</span>}
+                          {colName}
+                        </Badge>
+                      ))
+                    })()}
+                  </div>
+                  {editPrimaryKeyCols.length === 0 && (
+                    <p className="text-xs text-amber-600 flex items-center gap-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      No primary key selected — all rows will be inserted (no upsert/skip).
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label>Headers (JSON)</Label>
+                <Textarea
+                  value={editHeaders}
+                  onChange={(e) => setEditHeaders(e.target.value)}
+                  className="font-mono text-xs"
+                  rows={3}
+                  placeholder='{"Authorization": "Bearer ..."}'
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Column Mappings</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setEditMappings((prev) => [
+                        ...prev,
+                        { src: '', target: '', type: 'TEXT' },
+                      ])
+                    }
+                  >
+                    <Plus className="mr-1 h-3.5 w-3.5" /> Add Mapping
+                  </Button>
+                </div>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Source</TableHead>
+                        <TableHead>Target</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead className="w-8" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {editMappings.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center text-muted-foreground text-xs py-4">
+                            No mappings — source rows will be written as-is.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        editMappings.map((m, i) => (
+                          <TableRow key={i}>
+                            <TableCell>
+                              <Input
+                                value={m.src}
+                                onChange={(e) => {
+                                  const v = e.target.value
+                                  setEditMappings((prev) =>
+                                    prev.map((x, idx) => (idx === i ? { ...x, src: v } : x)),
+                                  )
+                                }}
+                                className="h-8 font-mono text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                value={m.target}
+                                onChange={(e) => {
+                                  const v = e.target.value
+                                  setEditMappings((prev) =>
+                                    prev.map((x, idx) => (idx === i ? { ...x, target: v } : x)),
+                                  )
+                                }}
+                                className="h-8 font-mono text-xs"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                value={m.type ?? 'TEXT'}
+                                onValueChange={(v) =>
+                                  setEditMappings((prev) =>
+                                    prev.map((x, idx) => (idx === i ? { ...x, type: v } : x)),
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON'].map((t) => (
+                                    <SelectItem key={t} value={t}>
+                                      {t}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive"
+                                onClick={() =>
+                                  setEditMappings((prev) => prev.filter((_, idx) => idx !== i))
+                                }
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveEdit}>Save Changes</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -1149,6 +1849,22 @@ export function PipelineView() {
                       ) : (
                         <Badge variant="secondary">Paused</Badge>
                       )}
+                      {pipeline.isActive && pipeline.fetchInterval > 0 && pipeline.lastRun &&
+                        (() => {
+                          const lastRunTime = new Date(pipeline.lastRun.startedAt).getTime()
+                          const nextRunTime = lastRunTime + pipeline.fetchInterval * 1000
+                          const isOverdue = Date.now() > nextRunTime
+                          return (
+                            isOverdue && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] text-amber-700 border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800"
+                              >
+                                Overdue
+                              </Badge>
+                            )
+                          )
+                        })()}
                     </div>
                     {lastRun && (
                       <Tooltip>

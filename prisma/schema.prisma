@@ -199,7 +199,9 @@ model PipelineSource {
   scheduleCron    String?
   isActive        Boolean  @default(true)
   isActiveWindow  String?  // JSON: {start: "09:00", end: "17:00", timezone: "UTC"}
-  onConflict      String   @default("update") // update, insert, replace
+  onConflict      String   @default("update") // update, insert, replace, skip, truncate
+  preRunAction    String   @default("none")   // none, truncate, archive, backup
+  primaryKeyCols  String   @default("[]")     // JSON: ["symbol", "date"] — columns that form the unique key for upsert/skip
   paginationMode  String   @default("none") // none, offset, cursor, link_header
   paginationConfig String? // JSON
   maxPages        Int      @default(100)

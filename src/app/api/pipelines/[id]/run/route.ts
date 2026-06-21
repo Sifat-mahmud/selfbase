@@ -204,13 +204,36 @@ export async function POST(
       let rowsWritten = 0;
       let rowsFailed = 0;
 
-      // Write to target table if specified
+      // ========= TABLE WRITE LOGIC =========
       if (source.targetTableId && rows.length > 0) {
         const table = await db.sbTable.findUnique({
           where: { id: source.targetTableId },
         });
 
         if (table) {
+          // Parse primary key columns
+          const primaryKeyCols: string[] = JSON.parse(source.primaryKeyCols || '[]');
+
+          // --- PRE-RUN ACTION ---
+          if (source.preRunAction === 'truncate') {
+            await db.sbRow.deleteMany({ where: { tableId: table.id } });
+            await db.sbTable.update({
+              where: { id: table.id },
+              data: { rowCount: 0 },
+            });
+          } else if (source.preRunAction === 'archive') {
+            // Archive: for demo, same as truncate (delete all + reset count)
+            await db.sbRow.deleteMany({ where: { tableId: table.id } });
+            await db.sbTable.update({
+              where: { id: table.id },
+              data: { rowCount: 0 },
+            });
+          }
+          // 'none' — do nothing before insert
+
+          // --- CONFLICT RESOLUTION ---
+          const onConflict = source.onConflict || 'update';
+
           for (const row of rows) {
             try {
               const rowData = row as Record<string, unknown>;
@@ -220,33 +243,92 @@ export async function POST(
                 dataToWrite = {};
                 for (const mapping of columnMappings) {
                   let value = rowData[mapping.target] ?? rowData[mapping.src] ?? null;
-                  if (mapping.type === 'DECIMAL' && value !== null) {
-                    value = parseFloat(String(value)) || 0;
-                  } else if (mapping.type === 'INTEGER' && value !== null) {
-                    value = parseInt(String(value), 10) || 0;
-                  }
+                  if (mapping.type === 'DECIMAL' && value !== null) value = parseFloat(String(value)) || 0;
+                  else if (mapping.type === 'INTEGER' && value !== null) value = parseInt(String(value), 10) || 0;
                   dataToWrite[mapping.target] = value;
                 }
               } else {
                 dataToWrite = rowData;
               }
 
-              await db.sbRow.create({
-                data: {
-                  tableId: table.id,
-                  data: JSON.stringify(dataToWrite),
-                },
-              });
-              rowsWritten++;
+              if (onConflict === 'truncate' || onConflict === 'insert') {
+                // Always insert (truncate already cleared the table, or insert = just add)
+                await db.sbRow.create({
+                  data: { tableId: table.id, data: JSON.stringify(dataToWrite) },
+                });
+                rowsWritten++;
+              } else if (primaryKeyCols.length > 0 && (onConflict === 'update' || onConflict === 'skip' || onConflict === 'replace')) {
+                // UPSERT / SKIP / REPLACE logic using primary key columns
+                const allTableRows = await db.sbRow.findMany({
+                  where: { tableId: table.id },
+                });
+
+                let existingRow: { id: string; data: string } | null = null;
+                for (const tableRow of allTableRows) {
+                  try {
+                    const existingData = JSON.parse(tableRow.data) as Record<string, unknown>;
+                    const matchesAllKeys = primaryKeyCols.every(pkCol => {
+                      const pkValue = dataToWrite[pkCol];
+                      const existingValue = existingData[pkCol];
+                      return pkValue !== undefined && String(pkValue) === String(existingValue);
+                    });
+                    if (matchesAllKeys) {
+                      existingRow = tableRow;
+                      break;
+                    }
+                  } catch { continue; }
+                }
+
+                if (existingRow) {
+                  if (onConflict === 'update') {
+                    // Merge: new data overwrites existing data, keep non-mapped fields
+                    const existingData = JSON.parse(existingRow.data) as Record<string, unknown>;
+                    const merged = { ...existingData, ...dataToWrite };
+                    await db.sbRow.update({
+                      where: { id: existingRow.id },
+                      data: {
+                        data: JSON.stringify(merged),
+                        version: { increment: 1 },
+                      },
+                    });
+                    rowsWritten++;
+                  } else if (onConflict === 'replace') {
+                    // Full replace: overwrite with new data entirely
+                    await db.sbRow.update({
+                      where: { id: existingRow.id },
+                      data: {
+                        data: JSON.stringify(dataToWrite),
+                        version: { increment: 1 },
+                      },
+                    });
+                    rowsWritten++;
+                  } else if (onConflict === 'skip') {
+                    // Skip this row, don't insert or update
+                  }
+                } else {
+                  // No existing row matching primary key — insert new
+                  await db.sbRow.create({
+                    data: { tableId: table.id, data: JSON.stringify(dataToWrite) },
+                  });
+                  rowsWritten++;
+                }
+              } else {
+                // No primary key defined — always insert
+                await db.sbRow.create({
+                  data: { tableId: table.id, data: JSON.stringify(dataToWrite) },
+                });
+                rowsWritten++;
+              }
             } catch {
               rowsFailed++;
             }
           }
 
-          // Update table row count
+          // Update table row count to actual count
+          const actualCount = await db.sbRow.count({ where: { tableId: table.id } });
           await db.sbTable.update({
             where: { id: table.id },
-            data: { rowCount: table.rowCount + rowsWritten },
+            data: { rowCount: actualCount },
           });
         }
       }

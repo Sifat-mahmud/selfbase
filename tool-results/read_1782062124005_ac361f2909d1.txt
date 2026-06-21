@@ -1,0 +1,1479 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  GitBranch,
+     7→  Plus,
+     8→  Play,
+     9→  Pause,
+    10→  RefreshCw,
+    11→  MoreHorizontal,
+    12→  Trash2,
+    13→  Clock,
+    14→  CheckCircle2,
+    15→  XCircle,
+    16→  AlertTriangle,
+    17→  Globe,
+    18→  Rss,
+    19→  Radio,
+    20→  Code,
+    21→  ArrowRight,
+    22→  ExternalLink,
+    23→  Search,
+    24→  Eye,
+    25→  Activity,
+    26→  BarChart3,
+    27→  TrendingUp,
+    28→  Timer,
+    29→  Database,
+    30→} from 'lucide-react'
+    31→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    32→import { Button } from '@/components/ui/button'
+    33→import { Input } from '@/components/ui/input'
+    34→import { Badge } from '@/components/ui/badge'
+    35→import { Skeleton } from '@/components/ui/skeleton'
+    36→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    37→import {
+    38→  Table,
+    39→  TableBody,
+    40→  TableCell,
+    41→  TableHead,
+    42→  TableHeader,
+    43→  TableRow,
+    44→} from '@/components/ui/table'
+    45→import {
+    46→  Dialog,
+    47→  DialogContent,
+    48→  DialogDescription,
+    49→  DialogFooter,
+    50→  DialogHeader,
+    51→  DialogTitle,
+    52→  DialogTrigger,
+    53→} from '@/components/ui/dialog'
+    54→import {
+    55→  DropdownMenu,
+    56→  DropdownMenuContent,
+    57→  DropdownMenuItem,
+    58→  DropdownMenuSeparator,
+    59→  DropdownMenuTrigger,
+    60→} from '@/components/ui/dropdown-menu'
+    61→import {
+    62→  Select,
+    63→  SelectContent,
+    64→  SelectItem,
+    65→  SelectTrigger,
+    66→  SelectValue,
+    67→} from '@/components/ui/select'
+    68→import { Label } from '@/components/ui/label'
+    69→import { Textarea } from '@/components/ui/textarea'
+    70→import { Switch } from '@/components/ui/switch'
+    71→import { Separator } from '@/components/ui/separator'
+    72→import {
+    73→  Tooltip,
+    74→  TooltipContent,
+    75→  TooltipTrigger,
+    76→} from '@/components/ui/tooltip'
+    77→import { useToast } from '@/hooks/use-toast'
+    78→import {
+    79→  BarChart,
+    80→  Bar,
+    81→  XAxis,
+    82→  YAxis,
+    83→  CartesianGrid,
+    84→  Tooltip as RTooltip,
+    85→  ResponsiveContainer,
+    86→  PieChart,
+    87→  Pie,
+    88→  Cell,
+    89→  Legend,
+    90→} from 'recharts'
+    91→import { apiGet, apiPost, apiPut, parseJsonField } from '@/lib/api-client'
+    92→
+    93→interface ColumnMapping {
+    94→  src: string
+    95→  target: string
+    96→  type?: string
+    97→  transform?: string
+    98→}
+    99→
+   100→interface PipelineRunItem {
+   101→  id: string
+   102→  sourceId: string
+   103→  status: 'pending' | 'running' | 'success' | 'failed' | 'timeout'
+   104→  startedAt: string
+   105→  completedAt: string | null
+   106→  durationMs: number | null
+   107→  rowsFetched: number
+   108→  rowsWritten: number
+   109→  rowsFailed: number
+   110→  errorPayload?: string | null
+   111→  isManual: boolean
+   112→  source?: { id: string; name: string; sourceType: string; url: string }
+   113→}
+   114→
+   115→interface PipelineSourceItem {
+   116→  id: string
+   117→  name: string
+   118→  description: string | null
+   119→  sourceType: 'rest' | 'rss' | 'websocket' | 'scraper'
+   120→  url: string
+   121→  method: string
+   122→  headers?: string | null
+   123→  isActive: boolean
+   124→  fetchInterval: number
+   125→  jsonPath?: string | null
+   126→  onConflict?: string
+   127→  targetTableId?: string | null
+   128→  targetTableName?: string | null
+   129→  targetTable?: { name: string } | null
+   130→  columnMappings: string
+   131→  lastRun?: PipelineRunItem | null
+   132→  pipelineRuns?: PipelineRunItem[]
+   133→  createdAt: string
+   134→}
+   135→
+   136→interface PipelineRunsResponse {
+   137→  data?: PipelineRunItem[]
+   138→  meta?: { page: number; limit: number; total: number }
+   139→}
+   140→
+   141→interface PreviewResult {
+   142→  success?: boolean
+   143→  url?: string
+   144→  method?: string
+   145→  statusCode?: number
+   146→  durationMs?: number
+   147→  totalRows?: number
+   148→  previewRows?: Array<Record<string, unknown>>
+   149→  columns?: Array<{ name: string; type: string }>
+   150→  error?: string
+   151→}
+   152→
+   153→const sourceIcons = {
+   154→  rest: Code,
+   155→  rss: Rss,
+   156→  websocket: Radio,
+   157→  scraper: Globe,
+   158→}
+   159→
+   160→const statusIcons = {
+   161→  pending: Clock,
+   162→  running: RefreshCw,
+   163→  success: CheckCircle2,
+   164→  failed: XCircle,
+   165→  timeout: AlertTriangle,
+   166→}
+   167→
+   168→const statusColors = {
+   169→  pending: 'text-amber-500',
+   170→  running: 'text-blue-500',
+   171→  success: 'text-emerald-500',
+   172→  failed: 'text-red-500',
+   173→  timeout: 'text-amber-500',
+   174→}
+   175→
+   176→const statusBadgeColors: Record<string, string> = {
+   177→  pending: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   178→  running: 'bg-blue-500/10 text-blue-700 border-blue-200',
+   179→  success: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+   180→  failed: 'bg-red-500/10 text-red-700 border-red-200',
+   181→  timeout: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   182→}
+   183→
+   184→const sourceTypeBadge: Record<string, string> = {
+   185→  rest: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+   186→  rss: 'bg-teal-500/10 text-teal-700 border-teal-200',
+   187→  websocket: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   188→  scraper: 'bg-purple-500/10 text-purple-700 border-purple-200',
+   189→}
+   190→
+   191→// Theme-aware status colors for chart cells (oklch works in both light & dark mode).
+   192→const STATUS_COLORS: Record<string, string> = {
+   193→  success: 'oklch(0.65 0.17 162)', // emerald
+   194→  failed: 'oklch(0.577 0.245 27.325)', // red
+   195→  running: 'oklch(0.6 0.118 184.704)', // teal/blue
+   196→  pending: 'oklch(0.769 0.188 70.08)', // amber
+   197→  timeout: 'oklch(0.7 0.19 50)', // orange
+   198→}
+   199→
+   200→// Framer Motion variants for staggered analytics card entrance.
+   201→const analyticsContainerVariants = {
+   202→  hidden: { opacity: 0 },
+   203→  visible: {
+   204→    opacity: 1,
+   205→    transition: { staggerChildren: 0.06, delayChildren: 0.05 },
+   206→  },
+   207→}
+   208→
+   209→const analyticsItemVariants = {
+   210→  hidden: { opacity: 0, y: 10 },
+   211→  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' as const } },
+   212→}
+   213→
+   214→export function PipelineView() {
+   215→  const { toast } = useToast()
+   216→  const [pipelines, setPipelines] = useState<PipelineSourceItem[]>([])
+   217→  const [allRuns, setAllRuns] = useState<PipelineRunItem[]>([])
+   218→  const [loading, setLoading] = useState(true)
+   219→  const [search, setSearch] = useState('')
+   220→  const [showCreateDialog, setShowCreateDialog] = useState(false)
+   221→  const [selectedPipeline, setSelectedPipeline] = useState<PipelineSourceItem | null>(null)
+   222→  const [previewTarget, setPreviewTarget] = useState<PipelineSourceItem | null>(null)
+   223→  const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
+   224→  const [previewLoading, setPreviewLoading] = useState(false)
+   225→  const [runningId, setRunningId] = useState<string | null>(null)
+   226→
+   227→  // Create form
+   228→  const [newName, setNewName] = useState('')
+   229→  const [newDesc, setNewDesc] = useState('')
+   230→  const [newType, setNewType] = useState<'rest' | 'rss' | 'websocket' | 'scraper'>('rest')
+   231→  const [newUrl, setNewUrl] = useState('')
+   232→  const [newMethod, setNewMethod] = useState('GET')
+   233→  const [newHeaders, setNewHeaders] = useState('{}')
+   234→  const [newJsonPath, setNewJsonPath] = useState('')
+   235→  const [newInterval, setNewInterval] = useState('300')
+   236→  const [newOnConflict, setNewOnConflict] = useState('update')
+   237→  const [newMappings, setNewMappings] = useState<ColumnMapping[]>([])
+   238→
+   239→  const loadAll = useCallback(async () => {
+   240→    setLoading(true)
+   241→    try {
+   242→      const [p, r] = await Promise.all([
+   243→        apiGet<PipelineSourceItem[]>('/api/pipelines'),
+   244→        apiGet<PipelineRunItem[] | PipelineRunsResponse>('/api/pipelines/runs?limit=100').catch(() => null),
+   245→      ])
+   246→      const list = Array.isArray(p) ? p : []
+   247→      // Map targetTable.name -> targetTableName for convenience, normalize columnMappings
+   248→      const normalized = list.map((pl) => ({
+   249→        ...pl,
+   250→        targetTableName: pl.targetTableName ?? pl.targetTable?.name ?? null,
+   251→        lastRun: pl.pipelineRuns && pl.pipelineRuns.length > 0 ? pl.pipelineRuns[0] : null,
+   252→      }))
+   253→      setPipelines(normalized)
+   254→      // apiGet already unwraps `{ success, data }` envelopes, so the result is usually
+   255→      // the raw array. Handle both shapes defensively.
+   256→      const runs = Array.isArray(r) ? r : (r?.data ?? [])
+   257→      setAllRuns(Array.isArray(runs) ? runs : [])
+   258→    } catch (err) {
+   259→      toast({
+   260→        title: 'Failed to load pipelines',
+   261→        description: err instanceof Error ? err.message : 'Unknown error',
+   262→        variant: 'destructive',
+   263→      })
+   264→    } finally {
+   265→      setLoading(false)
+   266→    }
+   267→  }, [toast])
+   268→
+   269→  useEffect(() => {
+   270→    void loadAll()
+   271→  }, [loadAll])
+   272→
+   273→  const handleCreate = async () => {
+   274→    if (!newName.trim() || !newUrl.trim()) {
+   275→      toast({ title: 'Name and URL required', variant: 'destructive' })
+   276→      return
+   277→    }
+   278→    try {
+   279→      const payload: Record<string, unknown> = {
+   280→        name: newName.trim(),
+   281→        description: newDesc || null,
+   282→        sourceType: newType,
+   283→        url: newUrl.trim(),
+   284→        method: newMethod,
+   285→        headers: newHeaders || null,
+   286→        jsonPath: newJsonPath || null,
+   287→        fetchInterval: Number(newInterval) || 300,
+   288→        onConflict: newOnConflict,
+   289→        isActive: true,
+   290→        columnMappings: JSON.stringify(newMappings),
+   291→      }
+   292→      const created = await apiPost<PipelineSourceItem>('/api/pipelines', payload)
+   293→      setPipelines((prev) => [
+   294→        {
+   295→          ...created,
+   296→          targetTableName: created.targetTable?.name ?? null,
+   297→          lastRun: null,
+   298→        },
+   299→        ...prev,
+   300→      ])
+   301→      setShowCreateDialog(false)
+   302→      setNewName('')
+   303→      setNewDesc('')
+   304→      setNewUrl('')
+   305→      setNewMethod('GET')
+   306→      setNewHeaders('{}')
+   307→      setNewJsonPath('')
+   308→      setNewInterval('300')
+   309→      setNewOnConflict('update')
+   310→      setNewMappings([])
+   311→      toast({ title: 'Pipeline created', description: `"${created.name}" has been created.` })
+   312→    } catch (err) {
+   313→      toast({
+   314→        title: 'Failed to create pipeline',
+   315→        description: err instanceof Error ? err.message : 'Unknown error',
+   316→        variant: 'destructive',
+   317→      })
+   318→    }
+   319→  }
+   320→
+   321→  const handleToggleActive = async (pipeline: PipelineSourceItem) => {
+   322→    try {
+   323→      await apiPut(`/api/pipelines/${pipeline.id}`, { isActive: !pipeline.isActive })
+   324→      setPipelines((prev) =>
+   325→        prev.map((p) => (p.id === pipeline.id ? { ...p, isActive: !p.isActive } : p)),
+   326→      )
+   327→      toast({ title: `Pipeline ${pipeline.isActive ? 'paused' : 'activated'}` })
+   328→    } catch (err) {
+   329→      toast({
+   330→        title: 'Failed to update pipeline',
+   331→        description: err instanceof Error ? err.message : 'Unknown error',
+   332→        variant: 'destructive',
+   333→      })
+   334→    }
+   335→  }
+   336→
+   337→  const handleRunNow = async (pipeline: PipelineSourceItem) => {
+   338→    setRunningId(pipeline.id)
+   339→    try {
+   340→      const result = await apiPost<{ runId: string; status: string; rowsFetched?: number; rowsWritten?: number; error?: string }>(
+   341→        `/api/pipelines/${pipeline.id}/run`,
+   342→        {},
+   343→      )
+   344→      toast({
+   345→        title: result.status === 'success' ? 'Pipeline run completed' : 'Pipeline run finished',
+   346→        description:
+   347→          result.status === 'success'
+   348→            ? `Fetched ${result.rowsFetched ?? 0} rows, wrote ${result.rowsWritten ?? 0}.`
+   349→            : result.error ?? `Status: ${result.status}`,
+   350→        variant: result.status === 'success' ? 'default' : 'destructive',
+   351→      })
+   352→      await loadAll()
+   353→    } catch (err) {
+   354→      toast({
+   355→        title: 'Pipeline run failed',
+   356→        description: err instanceof Error ? err.message : 'Unknown error',
+   357→        variant: 'destructive',
+   358→      })
+   359→    } finally {
+   360→      setRunningId(null)
+   361→    }
+   362→  }
+   363→
+   364→  const handlePreview = async (pipeline: PipelineSourceItem) => {
+   365→    setPreviewTarget(pipeline)
+   366→    setPreviewResult(null)
+   367→    setPreviewLoading(true)
+   368→    try {
+   369→      const result = await apiPost<PreviewResult>(`/api/pipelines/${pipeline.id}/preview`, {})
+   370→      setPreviewResult(result)
+   371→    } catch (err) {
+   372→      setPreviewResult({
+   373→        success: false,
+   374→        error: err instanceof Error ? err.message : 'Unknown error',
+   375→      })
+   376→    } finally {
+   377→      setPreviewLoading(false)
+   378→    }
+   379→  }
+   380→
+   381→  const filteredPipelines = pipelines.filter(
+   382→    (p) =>
+   383→      p.name.toLowerCase().includes(search.toLowerCase()) ||
+   384→      (p.description ?? '').toLowerCase().includes(search.toLowerCase()) ||
+   385→      p.url.toLowerCase().includes(search.toLowerCase()),
+   386→  )
+   387→
+   388→  // Build chart data from allRuns grouped by day
+   389→  const chartData = (() => {
+   390→    const map = new Map<string, { day: string; success: number; failed: number; rows: number }>()
+   391→    for (const r of allRuns) {
+   392→      const d = new Date(r.startedAt)
+   393→      const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+   394→      const entry = map.get(key) ?? { day: key, success: 0, failed: 0, rows: 0 }
+   395→      if (r.status === 'success') entry.success += 1
+   396→      if (r.status === 'failed' || r.status === 'timeout') entry.failed += 1
+   397→      entry.rows += r.rowsWritten ?? 0
+   398→      map.set(key, entry)
+   399→    }
+   400→    return Array.from(map.values()).slice(-7)
+   401→  })()
+   402→
+   403→  // ----- Pipeline Analytics (Task 12) -----
+   404→  // Most recent 20 runs, oldest first so the timeline reads left → right.
+   405→  const timelineData = allRuns
+   406→    .slice(0, 20)
+   407→    .reverse()
+   408→    .map((run) => {
+   409→      const d = new Date(run.startedAt)
+   410→      const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+   411→      return {
+   412→        time,
+   413→        duration: run.durationMs ?? 0,
+   414→        status: run.status,
+   415→        rows: run.rowsWritten ?? 0,
+   416→        name: run.source?.name ?? 'Pipeline',
+   417→      }
+   418→    })
+   419→
+   420→  // Status distribution for the donut chart.
+   421→  const statusCounts = allRuns.reduce((acc, run) => {
+   422→    acc[run.status] = (acc[run.status] || 0) + 1
+   423→    return acc
+   424→  }, {} as Record<string, number>)
+   425→
+   426→  const pieData = Object.entries(statusCounts).map(([name, value]) => ({
+   427→    name,
+   428→    value,
+   429→    color: STATUS_COLORS[name] ?? STATUS_COLORS.pending,
+   430→  }))
+   431→
+   432→  // Stat cards
+   433→  const totalRuns = allRuns.length
+   434→  const successCount = allRuns.filter((r) => r.status === 'success').length
+   435→  const successRate = totalRuns > 0 ? Math.round((successCount / totalRuns) * 100) : 0
+   436→  const completedRuns = allRuns.filter((r) => r.durationMs != null)
+   437→  const avgDuration =
+   438→    completedRuns.length > 0
+   439→      ? Math.round(completedRuns.reduce((s, r) => s + (r.durationMs ?? 0), 0) / completedRuns.length)
+   440→      : 0
+   441→  const totalRowsWritten = allRuns.reduce((s, r) => s + (r.rowsWritten ?? 0), 0)
+   442→
+   443→  if (loading) {
+   444→    return (
+   445→      <div className="space-y-6">
+   446→        <div className="flex justify-between">
+   447→          <Skeleton className="h-8 w-48" />
+   448→          <Skeleton className="h-9 w-36" />
+   449→        </div>
+   450→        <div className="grid gap-4 md:grid-cols-2">
+   451→          {Array.from({ length: 4 }).map((_, i) => (
+   452→            <Card key={i}>
+   453→              <CardContent className="p-4">
+   454→                <Skeleton className="h-32 w-full" />
+   455→              </CardContent>
+   456→            </Card>
+   457→          ))}
+   458→        </div>
+   459→      </div>
+   460→    )
+   461→  }
+   462→
+   463→  if (selectedPipeline) {
+   464→    const SourceIcon = sourceIcons[selectedPipeline.sourceType]
+   465→    const lastRun = selectedPipeline.lastRun ?? selectedPipeline.pipelineRuns?.[0] ?? null
+   466→    const LastStatusIcon = lastRun ? statusIcons[lastRun.status] : Clock
+   467→    const mappings = parseJsonField<ColumnMapping[]>(selectedPipeline.columnMappings, [])
+   468→    const sourceRuns = allRuns.filter((r) => r.sourceId === selectedPipeline.id)
+   469→
+   470→    return (
+   471→      <motion.div
+   472→        initial={{ opacity: 0, y: 8 }}
+   473→        animate={{ opacity: 1, y: 0 }}
+   474→        transition={{ duration: 0.2 }}
+   475→        className="space-y-6"
+   476→      >
+   477→        <div className="flex items-center gap-2 flex-wrap">
+   478→          <Button variant="ghost" size="sm" onClick={() => setSelectedPipeline(null)}>
+   479→            <ArrowRight className="h-4 w-4 rotate-180" /> Back
+   480→          </Button>
+   481→          <Separator orientation="vertical" className="h-6" />
+   482→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white">
+   483→            <SourceIcon className="h-5 w-5" />
+   484→          </div>
+   485→          <h1 className="text-2xl font-bold tracking-tight">{selectedPipeline.name}</h1>
+   486→          <Badge variant="outline" className={`capitalize ${sourceTypeBadge[selectedPipeline.sourceType]}`}>
+   487→            {selectedPipeline.sourceType}
+   488→          </Badge>
+   489→          <Badge variant={selectedPipeline.isActive ? 'default' : 'secondary'}>
+   490→            {selectedPipeline.isActive ? 'Active' : 'Paused'}
+   491→          </Badge>
+   492→          <div className="ml-auto flex gap-2">
+   493→            <Button variant="outline" size="sm" onClick={() => void handlePreview(selectedPipeline)}>
+   494→              <Eye className="mr-1 h-3.5 w-3.5" /> Preview
+   495→            </Button>
+   496→            <Button
+   497→              size="sm"
+   498→              onClick={() => void handleRunNow(selectedPipeline)}
+   499→              disabled={runningId === selectedPipeline.id}
+   500→            >
+   501→              <Play className="mr-1 h-3.5 w-3.5" />
+   502→              {runningId === selectedPipeline.id ? 'Running...' : 'Run Now'}
+   503→            </Button>
+   504→          </div>
+   505→        </div>
+   506→
+   507→        <div className="grid gap-4 md:grid-cols-4">
+   508→          <Card>
+   509→            <CardContent className="pt-4">
+   510→              <div className="text-sm text-muted-foreground">Source Type</div>
+   511→              <div className="text-lg font-bold capitalize">{selectedPipeline.sourceType}</div>
+   512→            </CardContent>
+   513→          </Card>
+   514→          <Card>
+   515→            <CardContent className="pt-4">
+   516→              <div className="text-sm text-muted-foreground">Fetch Interval</div>
+   517→              <div className="text-lg font-bold">
+   518→                {selectedPipeline.fetchInterval > 0 ? `${selectedPipeline.fetchInterval}s` : 'Real-time'}
+   519→              </div>
+   520→            </CardContent>
+   521→          </Card>
+   522→          <Card>
+   523→            <CardContent className="pt-4">
+   524→              <div className="text-sm text-muted-foreground">Target Table</div>
+   525→              <div className="text-lg font-bold font-mono">{selectedPipeline.targetTableName ?? '—'}</div>
+   526→            </CardContent>
+   527→          </Card>
+   528→          <Card>
+   529→            <CardContent className="pt-4">
+   530→              <div className="text-sm text-muted-foreground">Last Run</div>
+   531→              <div className="flex items-center gap-1">
+   532→                {lastRun && <LastStatusIcon className={`h-4 w-4 ${statusColors[lastRun.status]}`} />}
+   533→                <span className="text-lg font-bold capitalize">{lastRun?.status ?? 'Never'}</span>
+   534→              </div>
+   535→              {lastRun?.durationMs != null && (
+   536→                <p className="text-xs text-muted-foreground mt-0.5">{lastRun.durationMs}ms · {lastRun.rowsWritten ?? 0} rows written</p>
+   537→              )}
+   538→            </CardContent>
+   539→          </Card>
+   540→        </div>
+   541→
+   542→        <Card>
+   543→          <CardHeader>
+   544→            <CardTitle className="text-base">Source URL & Configuration</CardTitle>
+   545→            <CardDescription>Pipeline source endpoint and extraction settings</CardDescription>
+   546→          </CardHeader>
+   547→          <CardContent className="space-y-3">
+   548→            <div className="flex items-center gap-2">
+   549→              <Badge variant="outline" className="font-mono">
+   550→                {selectedPipeline.method}
+   551→              </Badge>
+   552→              <code className="text-sm font-mono break-all">{selectedPipeline.url}</code>
+   553→              <a
+   554→                href={selectedPipeline.url}
+   555→                target="_blank"
+   556→                rel="noopener noreferrer"
+   557→                className="ml-auto text-muted-foreground hover:text-emerald-600"
+   558→              >
+   559→                <ExternalLink className="h-3.5 w-3.5" />
+   560→              </a>
+   561→            </div>
+   562→            {selectedPipeline.jsonPath && (
+   563→              <div className="text-sm">
+   564→                <span className="text-muted-foreground">JSONPath: </span>
+   565→                <code className="font-mono">{selectedPipeline.jsonPath}</code>
+   566→              </div>
+   567→            )}
+   568→            {selectedPipeline.onConflict && (
+   569→              <div className="text-sm">
+   570→                <span className="text-muted-foreground">On Conflict: </span>
+   571→                <Badge variant="outline" className="capitalize">
+   572→                  {selectedPipeline.onConflict}
+   573→                </Badge>
+   574→              </div>
+   575→            )}
+   576→          </CardContent>
+   577→        </Card>
+   578→
+   579→        <Card>
+   580→          <CardHeader>
+   581→            <CardTitle className="text-base">Column Mappings</CardTitle>
+   582→            <CardDescription>Source-to-target field mappings</CardDescription>
+   583→          </CardHeader>
+   584→          <CardContent>
+   585→            {mappings.length === 0 ? (
+   586→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   587→                <GitBranch className="h-10 w-10 mb-2 opacity-40" />
+   588→                <p className="text-sm">No column mappings configured</p>
+   589→              </div>
+   590→            ) : (
+   591→              <Table>
+   592→                <TableHeader>
+   593→                  <TableRow>
+   594→                    <TableHead>Source Field</TableHead>
+   595→                    <TableHead className="w-8" />
+   596→                    <TableHead>Target Column</TableHead>
+   597→                    <TableHead>Type</TableHead>
+   598→                    <TableHead>Transform</TableHead>
+   599→                  </TableRow>
+   600→                </TableHeader>
+   601→                <TableBody>
+   602→                  {mappings.map((m, i) => (
+   603→                    <TableRow key={i} className="hover:bg-muted/40">
+   604→                      <TableCell className="font-mono text-sm">{m.src}</TableCell>
+   605→                      <TableCell>
+   606→                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+   607→                      </TableCell>
+   608→                      <TableCell className="font-mono text-sm font-medium">{m.target}</TableCell>
+   609→                      <TableCell>
+   610→                        {m.type && (
+   611→                          <Badge variant="outline" className="font-mono text-xs">
+   612→                            {m.type}
+   613→                          </Badge>
+   614→                        )}
+   615→                      </TableCell>
+   616→                      <TableCell className="text-sm text-muted-foreground">{m.transform ?? '—'}</TableCell>
+   617→                    </TableRow>
+   618→                  ))}
+   619→                </TableBody>
+   620→              </Table>
+   621→            )}
+   622→          </CardContent>
+   623→        </Card>
+   624→
+   625→        <Card>
+   626→          <CardHeader>
+   627→            <CardTitle className="text-base">Run History</CardTitle>
+   628→            <CardDescription>Recent pipeline executions ({sourceRuns.length} total)</CardDescription>
+   629→          </CardHeader>
+   630→          <CardContent>
+   631→            {sourceRuns.length === 0 ? (
+   632→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   633→                <Clock className="h-10 w-10 mb-2 opacity-40" />
+   634→                <p className="text-sm">No runs yet</p>
+   635→                <p className="text-xs mt-1">Click "Run Now" to trigger a pipeline execution.</p>
+   636→              </div>
+   637→            ) : (
+   638→              <div className="rounded-md border max-h-96 overflow-y-auto">
+   639→                <Table>
+   640→                  <TableHeader className="sticky top-0 bg-background">
+   641→                    <TableRow>
+   642→                      <TableHead>Status</TableHead>
+   643→                      <TableHead>Started</TableHead>
+   644→                      <TableHead>Duration</TableHead>
+   645→                      <TableHead>Fetched</TableHead>
+   646→                      <TableHead>Written</TableHead>
+   647→                      <TableHead>Failed</TableHead>
+   648→                      <TableHead>Trigger</TableHead>
+   649→                    </TableRow>
+   650→                  </TableHeader>
+   651→                  <TableBody>
+   652→                    {sourceRuns.slice(0, 30).map((run) => {
+   653→                      const RunIcon = statusIcons[run.status]
+   654→                      return (
+   655→                        <TableRow key={run.id} className="hover:bg-muted/40">
+   656→                          <TableCell>
+   657→                            <div className="flex items-center gap-1.5">
+   658→                              <RunIcon className={`h-3.5 w-3.5 ${statusColors[run.status]}`} />
+   659→                              <span className={`text-sm capitalize font-medium ${statusColors[run.status]}`}>
+   660→                                {run.status}
+   661→                              </span>
+   662→                            </div>
+   663→                          </TableCell>
+   664→                          <TableCell className="text-xs text-muted-foreground">
+   665→                            {new Date(run.startedAt).toLocaleString()}
+   666→                          </TableCell>
+   667→                          <TableCell className="font-mono text-xs">
+   668→                            {run.durationMs ? `${run.durationMs}ms` : '—'}
+   669→                          </TableCell>
+   670→                          <TableCell>{run.rowsFetched.toLocaleString()}</TableCell>
+   671→                          <TableCell>{run.rowsWritten.toLocaleString()}</TableCell>
+   672→                          <TableCell className={run.rowsFailed > 0 ? 'text-red-600' : ''}>
+   673→                            {run.rowsFailed}
+   674→                          </TableCell>
+   675→                          <TableCell>
+   676→                            <Badge variant="outline" className="text-xs">
+   677→                              {run.isManual ? 'Manual' : 'Scheduled'}
+   678→                            </Badge>
+   679→                          </TableCell>
+   680→                        </TableRow>
+   681→                      )
+   682→                    })}
+   683→                  </TableBody>
+   684→                </Table>
+   685→              </div>
+   686→            )}
+   687→          </CardContent>
+   688→        </Card>
+   689→
+   690→        {/* Preview Dialog */}
+   691→        <Dialog open={!!previewTarget} onOpenChange={(open) => !open && setPreviewTarget(null)}>
+   692→          <DialogContent className="max-w-5xl">
+   693→            <DialogHeader>
+   694→              <DialogTitle className="flex items-center gap-2">
+   695→                <Eye className="h-4 w-4 text-emerald-600" />
+   696→                Preview: {previewTarget?.name}
+   697→              </DialogTitle>
+   698→              <DialogDescription>
+   699→                Dry-run fetch — no rows are written to the database.
+   700→              </DialogDescription>
+   701→            </DialogHeader>
+   702→            {previewLoading ? (
+   703→              <div className="space-y-2">
+   704→                {Array.from({ length: 5 }).map((_, i) => (
+   705→                  <Skeleton key={i} className="h-8 w-full" />
+   706→                ))}
+   707→              </div>
+   708→            ) : previewResult ? (
+   709→              <div className="space-y-4">
+   710→                {previewResult.error ? (
+   711→                  <div className="rounded-md bg-red-500/10 border border-red-200 p-3 text-sm text-red-700">
+   712→                    {previewResult.error}
+   713→                  </div>
+   714→                ) : (
+   715→                  <>
+   716→                    <div className="flex flex-wrap gap-3 text-xs">
+   717→                      <Badge variant="outline">Status: {previewResult.statusCode ?? '—'}</Badge>
+   718→                      <Badge variant="outline">Duration: {previewResult.durationMs ?? 0}ms</Badge>
+   719→                      <Badge variant="outline">Total rows: {previewResult.totalRows ?? 0}</Badge>
+   720→                      <Badge variant="outline">Preview rows: {previewResult.previewRows?.length ?? 0}</Badge>
+   721→                    </div>
+   722→                    <div className="rounded-md border max-h-[50vh] overflow-auto">
+   723→                      <Table>
+   724→                        <TableHeader className="sticky top-0 bg-background">
+   725→                          <TableRow>
+   726→                            {(previewResult.columns ?? []).map((c) => (
+   727→                              <TableHead key={c.name} className="font-mono text-xs">
+   728→                                {c.name}
+   729→                                <span className="text-muted-foreground ml-1">({c.type})</span>
+   730→                              </TableHead>
+   731→                            ))}
+   732→                          </TableRow>
+   733→                        </TableHeader>
+   734→                        <TableBody>
+   735→                          {(previewResult.previewRows ?? []).length === 0 ? (
+   736→                            <TableRow>
+   737→                              <TableCell
+   738→                                colSpan={(previewResult.columns ?? []).length || 1}
+   739→                                className="text-center text-muted-foreground py-8"
+   740→                              >
+   741→                                No rows returned
+   742→                              </TableCell>
+   743→                            </TableRow>
+   744→                          ) : (
+   745→                            (previewResult.previewRows ?? []).map((row, i) => (
+   746→                              <TableRow key={i}>
+   747→                                {(previewResult.columns ?? []).map((c) => (
+   748→                                  <TableCell key={c.name} className="font-mono text-xs">
+   749→                                    {row[c.name] !== undefined && row[c.name] !== null
+   750→                                      ? String(row[c.name]).slice(0, 80)
+   751→                                      : '—'}
+   752→                                  </TableCell>
+   753→                                ))}
+   754→                              </TableRow>
+   755→                            ))
+   756→                          )}
+   757→                        </TableBody>
+   758→                      </Table>
+   759→                    </div>
+   760→                  </>
+   761→                )}
+   762→              </div>
+   763→            ) : null}
+   764→          </DialogContent>
+   765→        </Dialog>
+   766→      </motion.div>
+   767→    )
+   768→  }
+   769→
+   770→  return (
+   771→    <motion.div
+   772→      initial={{ opacity: 0, y: 8 }}
+   773→      animate={{ opacity: 1, y: 0 }}
+   774→      transition={{ duration: 0.2 }}
+   775→      className="space-y-6"
+   776→    >
+   777→      <div className="flex items-center justify-between flex-wrap gap-2">
+   778→        <div>
+   779→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   780→            Pipeline Studio
+   781→          </h1>
+   782→          <p className="text-muted-foreground">Configure and manage data source ingestion</p>
+   783→        </div>
+   784→        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+   785→          <DialogTrigger asChild>
+   786→            <Button>
+   787→              <Plus className="mr-1 h-4 w-4" /> New Pipeline
+   788→            </Button>
+   789→          </DialogTrigger>
+   790→          <DialogContent className="max-w-2xl">
+   791→            <DialogHeader>
+   792→              <DialogTitle>Create Pipeline Source</DialogTitle>
+   793→              <DialogDescription>Configure a new data ingestion pipeline</DialogDescription>
+   794→            </DialogHeader>
+   795→            <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto">
+   796→              <div className="grid gap-3 md:grid-cols-2">
+   797→                <div className="space-y-2">
+   798→                  <Label>Name</Label>
+   799→                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="My Pipeline" />
+   800→                </div>
+   801→                <div className="space-y-2">
+   802→                  <Label>Source Type</Label>
+   803→                  <Select value={newType} onValueChange={(v) => setNewType(v as typeof newType)}>
+   804→                    <SelectTrigger>
+   805→                      <SelectValue />
+   806→                    </SelectTrigger>
+   807→                    <SelectContent>
+   808→                      <SelectItem value="rest">REST API</SelectItem>
+   809→                      <SelectItem value="rss">RSS Feed</SelectItem>
+   810→                      <SelectItem value="websocket">WebSocket</SelectItem>
+   811→                      <SelectItem value="scraper">Web Scraper</SelectItem>
+   812→                    </SelectContent>
+   813→                  </Select>
+   814→                </div>
+   815→              </div>
+   816→              <div className="space-y-2">
+   817→                <Label>Description</Label>
+   818→                <Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Brief description" />
+   819→              </div>
+   820→              <div className="grid gap-3 md:grid-cols-3">
+   821→                <div className="space-y-2 md:col-span-2">
+   822→                  <Label>URL</Label>
+   823→                  <Input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://api.example.com/data" />
+   824→                </div>
+   825→                <div className="space-y-2">
+   826→                  <Label>Method</Label>
+   827→                  <Select value={newMethod} onValueChange={setNewMethod}>
+   828→                    <SelectTrigger>
+   829→                      <SelectValue />
+   830→                    </SelectTrigger>
+   831→                    <SelectContent>
+   832→                      <SelectItem value="GET">GET</SelectItem>
+   833→                      <SelectItem value="POST">POST</SelectItem>
+   834→                      <SelectItem value="PUT">PUT</SelectItem>
+   835→                      <SelectItem value="DELETE">DELETE</SelectItem>
+   836→                    </SelectContent>
+   837→                  </Select>
+   838→                </div>
+   839→              </div>
+   840→              <div className="grid gap-3 md:grid-cols-2">
+   841→                <div className="space-y-2">
+   842→                  <Label>JSONPath (optional)</Label>
+   843→                  <Input value={newJsonPath} onChange={(e) => setNewJsonPath(e.target.value)} placeholder="data.items" />
+   844→                </div>
+   845→                <div className="space-y-2">
+   846→                  <Label>Fetch Interval (sec)</Label>
+   847→                  <Input type="number" value={newInterval} onChange={(e) => setNewInterval(e.target.value)} />
+   848→                </div>
+   849→              </div>
+   850→              <div className="space-y-2">
+   851→                <Label>On Conflict</Label>
+   852→                <Select value={newOnConflict} onValueChange={setNewOnConflict}>
+   853→                  <SelectTrigger>
+   854→                    <SelectValue />
+   855→                  </SelectTrigger>
+   856→                  <SelectContent>
+   857→                    <SelectItem value="update">Update existing</SelectItem>
+   858→                    <SelectItem value="insert">Insert (skip duplicates)</SelectItem>
+   859→                    <SelectItem value="replace">Replace</SelectItem>
+   860→                  </SelectContent>
+   861→                </Select>
+   862→              </div>
+   863→              <div className="space-y-2">
+   864→                <Label>Headers (JSON)</Label>
+   865→                <Textarea
+   866→                  value={newHeaders}
+   867→                  onChange={(e) => setNewHeaders(e.target.value)}
+   868→                  className="font-mono text-xs"
+   869→                  rows={3}
+   870→                  placeholder='{"Authorization": "Bearer ..."}'
+   871→                />
+   872→              </div>
+   873→              <div className="space-y-2">
+   874→                <div className="flex items-center justify-between">
+   875→                  <Label>Column Mappings</Label>
+   876→                  <Button
+   877→                    type="button"
+   878→                    variant="outline"
+   879→                    size="sm"
+   880→                    onClick={() =>
+   881→                      setNewMappings((prev) => [
+   882→                        ...prev,
+   883→                        { src: '', target: '', type: 'TEXT' },
+   884→                      ])
+   885→                    }
+   886→                  >
+   887→                    <Plus className="mr-1 h-3.5 w-3.5" /> Add Mapping
+   888→                  </Button>
+   889→                </div>
+   890→                <div className="rounded-md border">
+   891→                  <Table>
+   892→                    <TableHeader>
+   893→                      <TableRow>
+   894→                        <TableHead>Source</TableHead>
+   895→                        <TableHead>Target</TableHead>
+   896→                        <TableHead>Type</TableHead>
+   897→                        <TableHead className="w-8" />
+   898→                      </TableRow>
+   899→                    </TableHeader>
+   900→                    <TableBody>
+   901→                      {newMappings.length === 0 ? (
+   902→                        <TableRow>
+   903→                          <TableCell colSpan={4} className="text-center text-muted-foreground text-xs py-4">
+   904→                            No mappings — source rows will be written as-is.
+   905→                          </TableCell>
+   906→                        </TableRow>
+   907→                      ) : (
+   908→                        newMappings.map((m, i) => (
+   909→                          <TableRow key={i}>
+   910→                            <TableCell>
+   911→                              <Input
+   912→                                value={m.src}
+   913→                                onChange={(e) => {
+   914→                                  const v = e.target.value
+   915→                                  setNewMappings((prev) =>
+   916→                                    prev.map((x, idx) => (idx === i ? { ...x, src: v } : x)),
+   917→                                  )
+   918→                                }}
+   919→                                className="h-8 font-mono text-xs"
+   920→                              />
+   921→                            </TableCell>
+   922→                            <TableCell>
+   923→                              <Input
+   924→                                value={m.target}
+   925→                                onChange={(e) => {
+   926→                                  const v = e.target.value
+   927→                                  setNewMappings((prev) =>
+   928→                                    prev.map((x, idx) => (idx === i ? { ...x, target: v } : x)),
+   929→                                  )
+   930→                                }}
+   931→                                className="h-8 font-mono text-xs"
+   932→                              />
+   933→                            </TableCell>
+   934→                            <TableCell>
+   935→                              <Select
+   936→                                value={m.type ?? 'TEXT'}
+   937→                                onValueChange={(v) =>
+   938→                                  setNewMappings((prev) =>
+   939→                                    prev.map((x, idx) => (idx === i ? { ...x, type: v } : x)),
+   940→                                  )
+   941→                                }
+   942→                              >
+   943→                                <SelectTrigger className="h-8 text-xs">
+   944→                                  <SelectValue />
+   945→                                </SelectTrigger>
+   946→                                <SelectContent>
+   947→                                  {['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON'].map((t) => (
+   948→                                    <SelectItem key={t} value={t}>
+   949→                                      {t}
+   950→                                    </SelectItem>
+   951→                                  ))}
+   952→                                </SelectContent>
+   953→                              </Select>
+   954→                            </TableCell>
+   955→                            <TableCell>
+   956→                              <Button
+   957→                                variant="ghost"
+   958→                                size="icon"
+   959→                                className="h-7 w-7 text-destructive"
+   960→                                onClick={() =>
+   961→                                  setNewMappings((prev) => prev.filter((_, idx) => idx !== i))
+   962→                                }
+   963→                              >
+   964→                                <Trash2 className="h-3.5 w-3.5" />
+   965→                              </Button>
+   966→                            </TableCell>
+   967→                          </TableRow>
+   968→                        ))
+   969→                      )}
+   970→                    </TableBody>
+   971→                  </Table>
+   972→                </div>
+   973→              </div>
+   974→            </div>
+   975→            <DialogFooter>
+   976→              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+   977→                Cancel
+   978→              </Button>
+   979→              <Button onClick={handleCreate}>Create Pipeline</Button>
+   980→            </DialogFooter>
+   981→          </DialogContent>
+   982→        </Dialog>
+   983→      </div>
+   984→
+   985→      <div className="grid gap-4 md:grid-cols-4">
+   986→        <Card>
+   987→          <CardContent className="pt-4">
+   988→            <div className="text-sm text-muted-foreground">Total Pipelines</div>
+   989→            <div className="text-2xl font-bold">{pipelines.length}</div>
+   990→          </CardContent>
+   991→        </Card>
+   992→        <Card>
+   993→          <CardContent className="pt-4">
+   994→            <div className="text-sm text-muted-foreground">Active</div>
+   995→            <div className="text-2xl font-bold text-emerald-600">
+   996→              {pipelines.filter((p) => p.isActive).length}
+   997→            </div>
+   998→          </CardContent>
+   999→        </Card>
+  1000→        <Card>
+  1001→          <CardContent className="pt-4">
+  1002→            <div className="text-sm text-muted-foreground">Failed (recent)</div>
+  1003→            <div className="text-2xl font-bold text-red-600">
+  1004→              {allRuns.filter((r) => r.status === 'failed').length}
+  1005→            </div>
+  1006→          </CardContent>
+  1007→        </Card>
+  1008→        <Card>
+  1009→          <CardContent className="pt-4">
+  1010→            <div className="text-sm text-muted-foreground">Total Rows Written</div>
+  1011→            <div className="text-2xl font-bold">
+  1012→              {allRuns.reduce((s, r) => s + (r.rowsWritten ?? 0), 0).toLocaleString()}
+  1013→            </div>
+  1014→          </CardContent>
+  1015→        </Card>
+  1016→      </div>
+  1017→
+  1018→      {chartData.length > 0 && (
+  1019→        <Card>
+  1020→          <CardHeader>
+  1021→            <CardTitle className="text-base">Pipeline Runs & Rows Written</CardTitle>
+  1022→            <CardDescription>Rows written per day across all pipelines</CardDescription>
+  1023→          </CardHeader>
+  1024→          <CardContent>
+  1025→            <div className="h-[200px]">
+  1026→              <ResponsiveContainer width="100%" height="100%">
+  1027→                <BarChart data={chartData}>
+  1028→                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+  1029→                  <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+  1030→                  <YAxis tick={{ fontSize: 11 }} />
+  1031→                  <RTooltip
+  1032→                    contentStyle={{
+  1033→                      backgroundColor: 'hsl(var(--popover))',
+  1034→                      border: '1px solid hsl(var(--border))',
+  1035→                      borderRadius: '8px',
+  1036→                      fontSize: '12px',
+  1037→                    }}
+  1038→                  />
+  1039→                  <Bar dataKey="rows" fill="#10b981" radius={[4, 4, 0, 0]} name="Rows Written" />
+  1040→                </BarChart>
+  1041→              </ResponsiveContainer>
+  1042→            </div>
+  1043→          </CardContent>
+  1044→        </Card>
+  1045→      )}
+  1046→
+  1047→      <div className="flex items-center gap-3 flex-wrap">
+  1048→        <div className="relative flex-1 max-w-sm">
+  1049→          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+  1050→          <Input
+  1051→            placeholder="Search pipelines..."
+  1052→            value={search}
+  1053→            onChange={(e) => setSearch(e.target.value)}
+  1054→            className="pl-9"
+  1055→          />
+  1056→        </div>
+  1057→        <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+  1058→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+  1059→        </Button>
+  1060→      </div>
+  1061→
+  1062→      <div className="grid gap-4 md:grid-cols-2">
+  1063→        {filteredPipelines.length === 0 ? (
+  1064→          <Card className="md:col-span-2">
+  1065→            <CardContent className="py-16 flex flex-col items-center justify-center text-muted-foreground">
+  1066→              <GitBranch className="h-14 w-14 mb-3 opacity-30" />
+  1067→              <p className="text-base font-medium">No pipelines yet</p>
+  1068→              <p className="text-sm mt-1">Create a pipeline source to start ingesting data.</p>
+  1069→              <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+  1070→                <Plus className="mr-1 h-4 w-4" /> New Pipeline
+  1071→              </Button>
+  1072→            </CardContent>
+  1073→          </Card>
+  1074→        ) : (
+  1075→          filteredPipelines.map((pipeline) => {
+  1076→            const SourceIcon = sourceIcons[pipeline.sourceType]
+  1077→            const lastRun = pipeline.lastRun ?? pipeline.pipelineRuns?.[0] ?? null
+  1078→            const StatusIcon = lastRun ? statusIcons[lastRun.status] : Clock
+  1079→            return (
+  1080→              <Card
+  1081→                key={pipeline.id}
+  1082→                className="cursor-pointer hover:shadow-md hover:border-emerald-200 transition-all"
+  1083→                onClick={() => setSelectedPipeline(pipeline)}
+  1084→              >
+  1085→                <CardHeader className="pb-2">
+  1086→                  <div className="flex items-center justify-between">
+  1087→                    <div className="flex items-center gap-2">
+  1088→                      <div className="rounded-md bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-1.5">
+  1089→                        <SourceIcon className="h-4 w-4 text-emerald-600" />
+  1090→                      </div>
+  1091→                      <CardTitle className="text-base">{pipeline.name}</CardTitle>
+  1092→                    </div>
+  1093→                    <DropdownMenu>
+  1094→                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+  1095→                        <Button variant="ghost" size="icon" className="h-7 w-7">
+  1096→                          <MoreHorizontal className="h-3.5 w-3.5" />
+  1097→                        </Button>
+  1098→                      </DropdownMenuTrigger>
+  1099→                      <DropdownMenuContent align="end">
+  1100→                        <DropdownMenuItem
+  1101→                          onClick={(e) => {
+  1102→                            e.stopPropagation()
+  1103→                            void handleRunNow(pipeline)
+  1104→                          }}
+  1105→                        >
+  1106→                          <Play className="mr-2 h-3.5 w-3.5" /> Run Now
+  1107→                        </DropdownMenuItem>
+  1108→                        <DropdownMenuItem
+  1109→                          onClick={(e) => {
+  1110→                            e.stopPropagation()
+  1111→                            void handlePreview(pipeline)
+  1112→                          }}
+  1113→                        >
+  1114→                          <Eye className="mr-2 h-3.5 w-3.5" /> Preview
+  1115→                        </DropdownMenuItem>
+  1116→                        <DropdownMenuItem
+  1117→                          onClick={(e) => {
+  1118→                            e.stopPropagation()
+  1119→                            void handleToggleActive(pipeline)
+  1120→                          }}
+  1121→                        >
+  1122→                          {pipeline.isActive ? (
+  1123→                            <>
+  1124→                              <Pause className="mr-2 h-3.5 w-3.5" /> Pause
+  1125→                            </>
+  1126→                          ) : (
+  1127→                            <>
+  1128→                              <Play className="mr-2 h-3.5 w-3.5" /> Activate
+  1129→                            </>
+  1130→                          )}
+  1131→                        </DropdownMenuItem>
+  1132→                        <DropdownMenuSeparator />
+  1133→                        <DropdownMenuItem className="text-destructive" onClick={(e) => e.stopPropagation()}>
+  1134→                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+  1135→                        </DropdownMenuItem>
+  1136→                      </DropdownMenuContent>
+  1137→                    </DropdownMenu>
+  1138→                  </div>
+  1139→                  <CardDescription className="line-clamp-1">{pipeline.description}</CardDescription>
+  1140→                </CardHeader>
+  1141→                <CardContent>
+  1142→                  <div className="flex items-center justify-between mb-3">
+  1143→                    <div className="flex items-center gap-2">
+  1144→                      <Badge variant="outline" className={`capitalize ${sourceTypeBadge[pipeline.sourceType]}`}>
+  1145→                        {pipeline.sourceType}
+  1146→                      </Badge>
+  1147→                      {pipeline.isActive ? (
+  1148→                        <Badge className="bg-emerald-500/10 text-emerald-600 border-0">Active</Badge>
+  1149→                      ) : (
+  1150→                        <Badge variant="secondary">Paused</Badge>
+  1151→                      )}
+  1152→                    </div>
+  1153→                    {lastRun && (
+  1154→                      <Tooltip>
+  1155→                        <TooltipTrigger asChild>
+  1156→                          <div className="flex items-center gap-1">
+  1157→                            <StatusIcon className={`h-3.5 w-3.5 ${statusColors[lastRun.status]}`} />
+  1158→                            <span className={`text-xs font-medium capitalize ${statusColors[lastRun.status]}`}>
+  1159→                              {lastRun.status}
+  1160→                            </span>
+  1161→                          </div>
+  1162→                        </TooltipTrigger>
+  1163→                        <TooltipContent>
+  1164→                          {lastRun.durationMs ? `${lastRun.durationMs}ms` : 'In progress'} · {new Date(lastRun.startedAt).toLocaleString()}
+  1165→                        </TooltipContent>
+  1166→                      </Tooltip>
+  1167→                    )}
+  1168→                  </div>
+  1169→                  <div className="grid grid-cols-3 gap-2 text-center">
+  1170→                    <div className="rounded-md bg-muted/50 p-2">
+  1171→                      <div className="text-xs text-muted-foreground">Fetched</div>
+  1172→                      <div className="text-sm font-bold">{lastRun?.rowsFetched.toLocaleString() ?? '—'}</div>
+  1173→                    </div>
+  1174→                    <div className="rounded-md bg-muted/50 p-2">
+  1175→                      <div className="text-xs text-muted-foreground">Written</div>
+  1176→                      <div className="text-sm font-bold">{lastRun?.rowsWritten.toLocaleString() ?? '—'}</div>
+  1177→                    </div>
+  1178→                    <div className="rounded-md bg-muted/50 p-2">
+  1179→                      <div className="text-xs text-muted-foreground">Failed</div>
+  1180→                      <div className="text-sm font-bold text-red-500">{lastRun?.rowsFailed ?? '—'}</div>
+  1181→                    </div>
+  1182→                  </div>
+  1183→                  {pipeline.targetTableName && (
+  1184→                    <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+  1185→                      <ArrowRight className="h-3 w-3" />
+  1186→                      <span className="font-mono">{pipeline.targetTableName}</span>
+  1187→                      <span className="mx-1">·</span>
+  1188→                      <span>{pipeline.fetchInterval > 0 ? `Every ${pipeline.fetchInterval}s` : 'Real-time'}</span>
+  1189→                    </div>
+  1190→                  )}
+  1191→                </CardContent>
+  1192→              </Card>
+  1193→            )
+  1194→          })
+  1195→        )}
+  1196→      </div>
+  1197→
+  1198→      {/* Pipeline Analytics — run history timeline + status distribution */}
+  1199→      <motion.div
+  1200→        initial={{ opacity: 0, y: 12 }}
+  1201→        animate={{ opacity: 1, y: 0 }}
+  1202→        transition={{ duration: 0.3, delay: 0.1 }}
+  1203→        className="space-y-4"
+  1204→      >
+  1205→        <div className="flex items-center gap-3 pt-2">
+  1206→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white shadow-sm">
+  1207→            <Activity className="h-5 w-5" />
+  1208→          </div>
+  1209→          <div>
+  1210→            <h2 className="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+  1211→              Pipeline Analytics
+  1212→            </h2>
+  1213→            <p className="text-sm text-muted-foreground">
+  1214→              Run history and performance metrics across all pipelines
+  1215→            </p>
+  1216→          </div>
+  1217→        </div>
+  1218→
+  1219→        {/* Stat cards row */}
+  1220→        <motion.div
+  1221→          variants={analyticsContainerVariants}
+  1222→          initial="hidden"
+  1223→          animate="visible"
+  1224→          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+  1225→        >
+  1226→          <motion.div variants={analyticsItemVariants}>
+  1227→            <Card className="overflow-hidden relative">
+  1228→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1229→              <CardContent className="pt-5">
+  1230→                <div className="flex items-center justify-between">
+  1231→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1232→                    Total Runs
+  1233→                  </div>
+  1234→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1235→                    <BarChart3 className="h-3.5 w-3.5 text-emerald-600" />
+  1236→                  </div>
+  1237→                </div>
+  1238→                <div className="mt-2 text-2xl font-bold">{totalRuns.toLocaleString()}</div>
+  1239→                <div className="text-xs text-muted-foreground mt-0.5">
+  1240→                  {successCount} successful · {totalRuns - successCount} other
+  1241→                </div>
+  1242→              </CardContent>
+  1243→            </Card>
+  1244→          </motion.div>
+  1245→
+  1246→          <motion.div variants={analyticsItemVariants}>
+  1247→            <Card className="overflow-hidden relative">
+  1248→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1249→              <CardContent className="pt-5">
+  1250→                <div className="flex items-center justify-between">
+  1251→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1252→                    Success Rate
+  1253→                  </div>
+  1254→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1255→                    <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+  1256→                  </div>
+  1257→                </div>
+  1258→                <div className="mt-2 text-2xl font-bold text-emerald-600">{successRate}%</div>
+  1259→                <div className="text-xs text-muted-foreground mt-0.5">
+  1260→                  {totalRuns > 0 ? `${successCount} of ${totalRuns} runs` : 'No runs yet'}
+  1261→                </div>
+  1262→              </CardContent>
+  1263→            </Card>
+  1264→          </motion.div>
+  1265→
+  1266→          <motion.div variants={analyticsItemVariants}>
+  1267→            <Card className="overflow-hidden relative">
+  1268→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1269→              <CardContent className="pt-5">
+  1270→                <div className="flex items-center justify-between">
+  1271→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1272→                    Avg Duration
+  1273→                  </div>
+  1274→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1275→                    <Timer className="h-3.5 w-3.5 text-emerald-600" />
+  1276→                  </div>
+  1277→                </div>
+  1278→                <div className="mt-2 text-2xl font-bold">
+  1279→                  {avgDuration > 0 ? `${avgDuration.toLocaleString()}ms` : '—'}
+  1280→                </div>
+  1281→                <div className="text-xs text-muted-foreground mt-0.5">
+  1282→                  {completedRuns.length > 0
+  1283→                    ? `across ${completedRuns.length} completed runs`
+  1284→                    : 'no completed runs'}
+  1285→                </div>
+  1286→              </CardContent>
+  1287→            </Card>
+  1288→          </motion.div>
+  1289→
+  1290→          <motion.div variants={analyticsItemVariants}>
+  1291→            <Card className="overflow-hidden relative">
+  1292→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1293→              <CardContent className="pt-5">
+  1294→                <div className="flex items-center justify-between">
+  1295→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1296→                    Total Rows Written
+  1297→                  </div>
+  1298→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1299→                    <Database className="h-3.5 w-3.5 text-emerald-600" />
+  1300→                  </div>
+  1301→                </div>
+  1302→                <div className="mt-2 text-2xl font-bold">{totalRowsWritten.toLocaleString()}</div>
+  1303→                <div className="text-xs text-muted-foreground mt-0.5">across all runs</div>
+  1304→              </CardContent>
+  1305→            </Card>
+  1306→          </motion.div>
+  1307→        </motion.div>
+  1308→
+  1309→        {totalRuns === 0 ? (
+  1310→          <Card>
+  1311→            <CardContent className="py-12 flex flex-col items-center justify-center text-muted-foreground">
+  1312→              <Activity className="h-10 w-10 mb-2 opacity-40" />
+  1313→              <p className="text-sm font-medium">No run history yet</p>
+  1314→              <p className="text-xs mt-1">
+  1315→                Run a pipeline to populate the timeline and status charts.
+  1316→              </p>
+  1317→            </CardContent>
+  1318→          </Card>
+  1319→        ) : (
+  1320→          <div className="grid gap-4 lg:grid-cols-3">
+  1321→            {/* Run Duration Timeline (Bar Chart) */}
+  1322→            <Card className="lg:col-span-2">
+  1323→              <CardHeader className="pb-2">
+  1324→                <CardTitle className="text-base flex items-center gap-2">
+  1325→                  <BarChart3 className="h-4 w-4 text-emerald-600" />
+  1326→                  Run Duration Timeline
+  1327→                </CardTitle>
+  1328→                <CardDescription>
+  1329→                  Duration (ms) of the last {timelineData.length} pipeline runs
+  1330→                </CardDescription>
+  1331→              </CardHeader>
+  1332→              <CardContent>
+  1333→                <div className="h-[280px] w-full">
+  1334→                  <ResponsiveContainer width="100%" height="100%">
+  1335→                    <BarChart data={timelineData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+  1336→                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+  1337→                      <XAxis
+  1338→                        dataKey="time"
+  1339→                        tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+  1340→                        tickLine={false}
+  1341→                        axisLine={{ stroke: 'var(--border)' }}
+  1342→                      />
+  1343→                      <YAxis
+  1344→                        tick={{ fontSize: 11, fill: 'var(--muted-foreground)' }}
+  1345→                        tickLine={false}
+  1346→                        axisLine={false}
+  1347→                        width={48}
+  1348→                      />
+  1349→                      <RTooltip
+  1350→                        cursor={{ fill: 'var(--muted)', opacity: 0.3 }}
+  1351→                        contentStyle={{
+  1352→                          backgroundColor: 'var(--popover)',
+  1353→                          border: '1px solid var(--border)',
+  1354→                          borderRadius: '8px',
+  1355→                          fontSize: '12px',
+  1356→                          color: 'var(--popover-foreground)',
+  1357→                        }}
+  1358→                        labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600 }}
+  1359→                        itemStyle={{ color: 'var(--popover-foreground)' }}
+  1360→                        formatter={(value: number, _name, entry) => {
+  1361→                          const status = (entry?.payload as { status?: string })?.status ?? 'unknown'
+  1362→                          const rows = (entry?.payload as { rows?: number })?.rows ?? 0
+  1363→                          return [
+  1364→                            `${Number(value).toLocaleString()}ms · ${rows.toLocaleString()} rows`,
+  1365→                            status.charAt(0).toUpperCase() + status.slice(1),
+  1366→                          ]
+  1367→                        }}
+  1368→                        labelFormatter={(label) => `Started ${label}`}
+  1369→                      />
+  1370→                      <Bar dataKey="duration" radius={[4, 4, 0, 0]} name="Duration">
+  1371→                        {timelineData.map((entry, i) => (
+  1372→                          <Cell
+  1373→                            key={`cell-${i}`}
+  1374→                            fill={STATUS_COLORS[entry.status] ?? STATUS_COLORS.pending}
+  1375→                          />
+  1376→                        ))}
+  1377→                      </Bar>
+  1378→                    </BarChart>
+  1379→                  </ResponsiveContainer>
+  1380→                </div>
+  1381→                {/* Status legend */}
+  1382→                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+  1383→                  {Object.entries(STATUS_COLORS).map(([status, color]) => {
+  1384→                    const count = statusCounts[status] ?? 0
+  1385→                    if (count === 0) return null
+  1386→                    return (
+  1387→                      <div key={status} className="flex items-center gap-1.5">
+  1388→                        <span
+  1389→                          className="inline-block h-2.5 w-2.5 rounded-sm"
+  1390→                          style={{ backgroundColor: color }}
+  1391→                          aria-hidden
+  1392→                        />
+  1393→                        <span className="capitalize text-muted-foreground">{status}</span>
+  1394→                        <span className="font-medium">{count}</span>
+  1395→                      </div>
+  1396→                    )
+  1397→                  })}
+  1398→                </div>
+  1399→              </CardContent>
+  1400→            </Card>
+  1401→
+  1402→            {/* Status Distribution (Donut Chart) */}
+  1403→            <Card>
+  1404→              <CardHeader className="pb-2">
+  1405→                <CardTitle className="text-base flex items-center gap-2">
+  1406→                  <Activity className="h-4 w-4 text-emerald-600" />
+  1407→                  Status Distribution
+  1408→                </CardTitle>
+  1409→                <CardDescription>Run outcome breakdown</CardDescription>
+  1410→              </CardHeader>
+  1411→              <CardContent>
+  1412→                <div className="h-[280px] w-full relative">
+  1413→                  <ResponsiveContainer width="100%" height="100%">
+  1414→                    <PieChart>
+  1415→                      <Pie
+  1416→                        data={pieData}
+  1417→                        dataKey="value"
+  1418→                        nameKey="name"
+  1419→                        cx="50%"
+  1420→                        cy="50%"
+  1421→                        innerRadius={60}
+  1422→                        outerRadius={90}
+  1423→                        paddingAngle={2}
+  1424→                        stroke="var(--background)"
+  1425→                        strokeWidth={2}
+  1426→                      >
+  1427→                        {pieData.map((entry, i) => (
+  1428→                          <Cell key={`pie-cell-${i}`} fill={entry.color} />
+  1429→                        ))}
+  1430→                      </Pie>
+  1431→                      <RTooltip
+  1432→                        contentStyle={{
+  1433→                          backgroundColor: 'var(--popover)',
+  1434→                          border: '1px solid var(--border)',
+  1435→                          borderRadius: '8px',
+  1436→                          fontSize: '12px',
+  1437→                          color: 'var(--popover-foreground)',
+  1438→                        }}
+  1439→                        labelStyle={{ color: 'var(--muted-foreground)', fontWeight: 600 }}
+  1440→                        itemStyle={{ color: 'var(--popover-foreground)' }}
+  1441→                        formatter={(value: number, name: string) => [
+  1442→                          `${value} run${value === 1 ? '' : 's'}`,
+  1443→                          name.charAt(0).toUpperCase() + name.slice(1),
+  1444→                        ]}
+  1445→                      />
+  1446→                      <Legend
+  1447→                        verticalAlign="bottom"
+  1448→                        iconType="circle"
+  1449→                        iconSize={8}
+  1450→                        wrapperStyle={{
+  1451→                          fontSize: '11px',
+  1452→                          color: 'var(--muted-foreground)',
+  1453→                          paddingTop: '4px',
+  1454→                        }}
+  1455→                        formatter={(value: string) => (
+  1456→                          <span style={{ color: 'var(--muted-foreground)' }} className="capitalize">
+  1457→                            {value}
+  1458→                          </span>
+  1459→                        )}
+  1460→                      />
+  1461→                    </PieChart>
+  1462→                  </ResponsiveContainer>
+  1463→                  {/* Center label overlay */}
+  1464→                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center -mt-7">
+  1465→                    <div className="text-2xl font-bold">{totalRuns}</div>
+  1466→                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+  1467→                      Total Runs
+  1468→                    </div>
+  1469→                  </div>
+  1470→                </div>
+  1471→              </CardContent>
+  1472→            </Card>
+  1473→          </div>
+  1474→        )}
+  1475→      </motion.div>
+  1476→    </motion.div>
+  1477→  )
+  1478→}
+  1479→
