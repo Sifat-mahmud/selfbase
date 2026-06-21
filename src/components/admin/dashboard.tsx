@@ -130,6 +130,32 @@ interface SourceError {
   occurredAt: string
 }
 
+interface PipelineRun {
+  id: string
+  sourceId: string
+  status: string
+  startedAt: string
+  completedAt?: string | null
+  durationMs?: number | null
+  rowsFetched: number
+  rowsWritten: number
+  rowsFailed: number
+  isManual: boolean
+  source?: { id: string; name: string; sourceType: string; url: string }
+}
+
+interface FunctionRunItem {
+  id: string
+  functionId: string
+  status: string
+  triggeredBy?: string | null
+  durationMs?: number | null
+  memoryUsedMb?: number | null
+  startedAt: string
+  completedAt?: string | null
+  func?: { id: string; name: string; triggerType: string }
+}
+
 interface DashboardData {
   load: LoadData | null
   uptime: UptimeData | null
@@ -139,6 +165,8 @@ interface DashboardData {
   functions: SbFunction[]
   queue: QueueData | null
   logs: SourceError[]
+  pipelineRuns: PipelineRun[]
+  functionRuns: FunctionRunItem[]
 }
 
 // =====================================================================
@@ -158,6 +186,20 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   } catch {
     return null
   }
+}
+
+/** Normalize an API response that may be wrapped or have pagination into an array. */
+function normalizeArray<T>(raw: T | null): T[] {
+  if (!raw) return []
+  if (Array.isArray(raw)) return raw
+  if (typeof raw === 'object' && raw !== null) {
+    const obj = raw as Record<string, unknown>
+    // Handle { data: [...] } envelope
+    if (Array.isArray(obj.data)) return obj.data as T[]
+    // Handle { runs: [...] } envelope (functions/runs)
+    if (Array.isArray(obj.runs)) return obj.runs as T[]
+  }
+  return []
 }
 
 function formatNumber(n: number, mode: 'compact' | 'full' = 'compact'): string {
@@ -384,6 +426,51 @@ function Sparkline({
 }
 
 // =====================================================================
+// MINI SPARKLINE — tiny recharts-based inline chart for KPI card headers
+// =====================================================================
+
+function MiniSparkline({
+  data,
+  color,
+  width = 60,
+  height = 30,
+}: {
+  data: number[]
+  color: string
+  width?: number
+  height?: number
+}) {
+  if (!data || data.length < 2) return null
+
+  const chartData = data.map((v, i) => ({ i, v }))
+  const gradId = `mini-grad-${color.replace('#', '')}`
+
+  return (
+    <div style={{ width, height }} className="shrink-0">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={chartData} margin={{ top: 2, right: 0, left: 0, bottom: 2 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <Area
+            type="monotone"
+            dataKey="v"
+            stroke={color}
+            strokeWidth={1.5}
+            fill={`url(#${gradId})`}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// =====================================================================
 // CHANGE PILL — up/down/neutral indicator
 // =====================================================================
 
@@ -431,13 +518,15 @@ export function DashboardView() {
     functions: [],
     queue: null,
     logs: [],
+    pipelineRuns: [],
+    functionRuns: [],
   })
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
   const fetchAll = useCallback(async () => {
-    const [load, uptime, heartbeats, tables, pipelines, functions, queue, logs] =
+    const [load, uptime, heartbeats, tables, pipelines, functions, queue, logs, pipelineRuns, functionRuns] =
       await Promise.all([
         fetchJson<LoadData>('/api/monitoring/load'),
         fetchJson<UptimeData>('/api/monitoring/uptime'),
@@ -447,6 +536,8 @@ export function DashboardView() {
         fetchJson<SbFunction[]>('/api/functions'),
         fetchJson<QueueData>('/api/queue'),
         fetchJson<SourceError[]>('/api/logs?limit=8'),
+        fetchJson<PipelineRun[]>('/api/pipelines/runs?limit=5'),
+        fetchJson<FunctionRunItem[]>('/api/functions/runs?limit=5'),
       ])
 
     setData({
@@ -458,6 +549,8 @@ export function DashboardView() {
       functions: functions ?? [],
       queue: queue ?? null,
       logs: logs ?? [],
+      pipelineRuns: normalizeArray(pipelineRuns) ?? [],
+      functionRuns: normalizeArray(functionRuns) ?? [],
     })
     setLastUpdated(new Date())
   }, [])
@@ -989,70 +1082,18 @@ function DashboardContent({
           queueTotal={computed.queueTotal}
           health={computed.health}
           heartbeatCount={computed.heartbeatCount}
+          cpuTotal={computed.cpuTotal}
+          ramPercent={computed.ramPercent}
+          cpuApi={computed.cpuApi}
+          cpuScraper={computed.cpuScraper}
+          cpuFunctions={computed.cpuFunctions}
         />
 
-        <Card className="lg:col-span-2 group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
-          <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base">Recent Activity</CardTitle>
-                <CardDescription>Latest errors & events from /api/logs</CardDescription>
-              </div>
-              <Badge variant="outline" className="text-xs">
-                {data.logs.length} recent
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {data.logs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-                <div className="rounded-full bg-emerald-500/10 p-2.5 text-emerald-600">
-                  <CheckCircle2 className="h-5 w-5" />
-                </div>
-                <p className="text-sm font-medium">No recent errors</p>
-                <p className="text-xs text-muted-foreground">All sources are healthy right now.</p>
-              </div>
-            ) : (
-              <div className="scrollbar-thin max-h-[420px] space-y-2.5 overflow-y-auto pr-2">
-                {data.logs.map((log) => {
-                  const bucket =
-                    log.errorType.includes('validation')
-                      ? 'amber'
-                      : log.errorType.includes('network')
-                        ? 'red'
-                        : 'red'
-                  const styles = PROGRESS_STYLES[bucket]
-                  return (
-                    <div
-                      key={log.id}
-                      className="group/log flex items-start gap-3 rounded-lg border p-3 transition-all duration-200 hover:translate-x-0.5 hover:border-emerald-500/30 hover:bg-muted/40 hover:shadow-sm"
-                    >
-                      <div className={`mt-0.5 rounded-full p-1.5 transition-transform group-hover/log:scale-110 ${styles.bg} ${styles.text}`}>
-                        <AlertTriangle className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm leading-tight">{log.message}</p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span>{formatRelativeTime(log.occurredAt)}</span>
-                          {log.tableName && (
-                            <>
-                              <span>·</span>
-                              <span className="font-mono">{log.tableName}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <Badge variant="outline" className="shrink-0 text-[10px] font-mono">
-                        {log.errorType}
-                      </Badge>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <UnifiedActivityCard
+          pipelineRuns={data.pipelineRuns}
+          functionRuns={data.functionRuns}
+          logs={data.logs}
+        />
       </motion.div>
 
       {/* ====================== QUICK ACTIONS + API REFERENCE ====================== */}
@@ -1268,7 +1309,12 @@ function KPICard({
           <CardTitle className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {title}
           </CardTitle>
-          <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">{icon}</div>
+          <div className="flex items-center gap-1.5">
+            {spark && spark.length > 1 && (
+              <MiniSparkline data={spark.slice(-12)} color={sparkColor ?? '#10b981'} />
+            )}
+            <div className="rounded-md bg-emerald-500/10 p-1.5 text-emerald-600 transition-colors group-hover:bg-emerald-500/20">{icon}</div>
+          </div>
         </CardHeader>
         <CardContent className="relative">
           <div className="text-3xl font-bold tracking-tight">
@@ -1416,6 +1462,11 @@ function ServiceStatusCard({
   queueTotal,
   health,
   heartbeatCount,
+  cpuTotal,
+  ramPercent,
+  cpuApi,
+  cpuScraper,
+  cpuFunctions,
 }: {
   activePipelines: number
   activeFunctions: number
@@ -1426,6 +1477,11 @@ function ServiceStatusCard({
   queueTotal: number
   health: 'healthy' | 'degraded' | 'down'
   heartbeatCount: number
+  cpuTotal: number
+  ramPercent: number
+  cpuApi: number
+  cpuScraper: number
+  cpuFunctions: number
 }) {
   type SvcStatus = 'healthy' | 'warning' | 'critical' | 'idle'
   const dotFor = (active: boolean, hasIssue = false): SvcStatus =>
@@ -1445,6 +1501,24 @@ function ServiceStatusCard({
       : health === 'degraded'
         ? 'text-amber-600'
         : 'text-red-600'
+
+  const services = [
+    { status: health === 'healthy' ? 'healthy' : health === 'degraded' ? 'warning' : 'critical' as SvcStatus, label: 'API Server', value: health === 'healthy' ? 'Running' : health === 'degraded' ? 'Degraded' : 'Down', memPercent: cpuApi },
+    { status: dotFor(activePipelineRuns > 0), label: 'Pipeline Engine', value: `${activePipelines} configured · ${activePipelineRuns} running`, memPercent: cpuScraper },
+    { status: dotFor(activeScrapers > 0), label: 'Web Scraper', value: `${activeScrapers} running`, memPercent: cpuScraper },
+    { status: dotFor(activeFunctions > 0), label: 'Functions Runtime', value: `${activeFunctions} active`, memPercent: cpuFunctions },
+    { status: dotFor(queueTotal === 0, queueTotal > 0 && processingCount > 0), label: 'Priority Queue', value: `${queuedCount} queued · ${processingCount} processing`, memPercent: cpuApi },
+    { status: dotFor(heartbeatCount > 0), label: 'Heartbeat Monitor', value: `${heartbeatCount} beats (24h)`, memPercent: cpuTotal },
+    { status: 'healthy' as SvcStatus, label: 'Storage Layer', value: 'OK', memPercent: ramPercent },
+    { status: 'healthy' as SvcStatus, label: 'AI / LLM Gateway', value: 'Ready', memPercent: 0 },
+  ]
+
+  const dotColor: Record<SvcStatus, string> = {
+    healthy: 'bg-emerald-500',
+    warning: 'bg-amber-500',
+    critical: 'bg-red-500',
+    idle: 'bg-muted-foreground/40',
+  }
 
   return (
     <motion.div
@@ -1471,117 +1545,184 @@ function ServiceStatusCard({
             </span>
             Service Status
           </CardTitle>
-          <CardDescription>Active services &amp; runtime counts</CardDescription>
+          <CardDescription>Active services &amp; resource usage</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2.5">
-          <ServiceRow
-            status={health === 'healthy' ? 'healthy' : health === 'degraded' ? 'warning' : 'critical'}
-            label="API Server"
-            value={health === 'healthy' ? 'Running' : health === 'degraded' ? 'Degraded' : 'Down'}
-          />
-          <ServiceRow
-            status={dotFor(activePipelineRuns > 0)}
-            label="Pipeline Engine"
-            value={`${activePipelines} configured · ${activePipelineRuns} running`}
-            badge={`${activePipelines} active`}
-          />
-          <ServiceRow
-            status={dotFor(activeScrapers > 0)}
-            label="Web Scraper"
-            value={`${activeScrapers} running now`}
-            badge={`${activeScrapers} active`}
-          />
-          <ServiceRow
-            status={dotFor(activeFunctions > 0)}
-            label="Functions Runtime"
-            value={`${activeFunctions} active`}
-            badge={`${activeFunctions} active`}
-          />
-          <ServiceRow
-            status={dotFor(queueTotal === 0, queueTotal > 0 && processingCount > 0)}
-            label="Priority Queue"
-            value={`${queuedCount} queued · ${processingCount} processing`}
-            badge={queueTotal > 0 ? `${queueTotal} total` : 'Empty'}
-          />
-          <ServiceRow
-            status={dotFor(heartbeatCount > 0)}
-            label="Heartbeat Monitor"
-            value={`${heartbeatCount} beats (24h)`}
-          />
-          <ServiceRow status="healthy" label="Storage Layer" value="OK" />
+        <CardContent>
+          <div className="grid grid-cols-2 gap-2">
+            {services.map((svc) => (
+              <div
+                key={svc.label}
+                className="group/svc rounded-lg border bg-card p-2.5 transition-colors hover:bg-muted/40"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor[svc.status]}`} />
+                  <span className="text-xs font-medium truncate">{svc.label}</span>
+                </div>
+                <p className="mt-1 truncate text-[10px] text-muted-foreground">{svc.value}</p>
+                {svc.memPercent > 0 && (
+                  <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+                    <motion.div
+                      className={`h-full rounded-full ${progressBucket(svc.memPercent) === 'red' ? 'bg-red-500' : progressBucket(svc.memPercent) === 'amber' ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.min(100, svc.memPercent)}%` }}
+                      transition={{ duration: 0.6, ease: 'easeOut' }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </motion.div>
   )
 }
 
-function ServiceRow({
-  status,
-  label,
-  value,
-  badge,
+// =====================================================================
+// UNIFIED ACTIVITY CARD — combined timeline from multiple sources
+// =====================================================================
+
+type TimelineKind = 'pipeline' | 'function' | 'error'
+
+interface TimelineEntry {
+  id: string
+  kind: TimelineKind
+  title: string
+  description: string
+  timestamp: string
+  status: string
+}
+
+function UnifiedActivityCard({
+  pipelineRuns,
+  functionRuns,
+  logs,
 }: {
-  status: 'healthy' | 'warning' | 'critical' | 'idle'
-  label: string
-  value: string
-  badge?: string
+  pipelineRuns: PipelineRun[]
+  functionRuns: FunctionRunItem[]
+  logs: SourceError[]
 }) {
-  const statusConfig = {
-    healthy: {
-      dot: 'bg-emerald-500',
-      ring: 'bg-emerald-400/40',
-      icon: <CheckCircle2 className="h-3.5 w-3.5" />,
-      iconWrap: 'bg-emerald-500/10 text-emerald-600',
-    },
-    warning: {
-      dot: 'bg-amber-500',
-      ring: 'bg-amber-400/40',
-      icon: <AlertTriangle className="h-3.5 w-3.5" />,
-      iconWrap: 'bg-amber-500/10 text-amber-600',
-    },
-    critical: {
-      dot: 'bg-red-500',
-      ring: 'bg-red-400/40',
-      icon: <AlertTriangle className="h-3.5 w-3.5" />,
-      iconWrap: 'bg-red-500/10 text-red-600',
-    },
-    idle: {
-      dot: 'bg-muted-foreground/40',
-      ring: 'bg-muted-foreground/20',
-      icon: <Minus className="h-3.5 w-3.5" />,
-      iconWrap: 'bg-muted/60 text-muted-foreground',
-    },
-  }[status]
+  const entries: TimelineEntry[] = useMemo(() => {
+    const items: TimelineEntry[] = []
+
+    for (const run of pipelineRuns) {
+      items.push({
+        id: `pipeline-${run.id}`,
+        kind: 'pipeline',
+        title: run.source?.name ?? `Pipeline ${run.sourceId.slice(0, 8)}`,
+        description: `${run.rowsWritten} rows written · ${run.rowsFetched} fetched`,
+        timestamp: run.startedAt,
+        status: run.status,
+      })
+    }
+
+    for (const run of functionRuns) {
+      items.push({
+        id: `function-${run.id}`,
+        kind: 'function',
+        title: run.func?.name ?? `Function ${run.functionId.slice(0, 8)}`,
+        description: run.durationMs != null ? `${run.durationMs}ms` : 'Running...',
+        timestamp: run.startedAt,
+        status: run.status,
+      })
+    }
+
+    for (const log of logs.slice(0, 3)) {
+      items.push({
+        id: `error-${log.id}`,
+        kind: 'error',
+        title: log.message.length > 60 ? `${log.message.slice(0, 60)}...` : log.message,
+        description: log.tableName ?? log.errorType,
+        timestamp: log.occurredAt,
+        status: 'failed',
+      })
+    }
+
+    return items.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    )
+  }, [pipelineRuns, functionRuns, logs])
+
+  const totalCount = pipelineRuns.length + functionRuns.length + logs.length
+
+  const kindIcon: Record<TimelineKind, React.ReactNode> = {
+    pipeline: <GitBranch className="h-3.5 w-3.5" />,
+    function: <Code2 className="h-3.5 w-3.5" />,
+    error: <AlertTriangle className="h-3.5 w-3.5" />,
+  }
+
+  const kindColor: Record<TimelineKind, string> = {
+    pipeline: 'bg-teal-500/10 text-teal-600',
+    function: 'bg-purple-500/10 text-purple-600',
+    error: 'bg-red-500/10 text-red-600',
+  }
+
+  const statusBadge: Record<string, string> = {
+    success: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    failed: 'bg-red-500/10 text-red-700 dark:text-red-400',
+    running: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+    pending: 'bg-muted text-muted-foreground',
+    timeout: 'bg-rose-500/10 text-rose-700 dark:text-rose-400',
+  }
 
   return (
-    <div className="group/row flex items-center justify-between gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-muted/40">
-      <div className="flex items-center gap-2.5">
-        {/* status dot with ping ring for active healthy/warning/critical */}
-        <div className="relative flex h-2.5 w-2.5 items-center justify-center">
-          {status !== 'idle' && (
-            <span className={`absolute inline-flex h-full w-full animate-ping rounded-full ${statusConfig.ring} opacity-70`} />
-          )}
-          <span className={`relative inline-flex h-2 w-2 rounded-full ${statusConfig.dot}`} />
-        </div>
-        {/* status icon that scales on hover */}
-        <motion.div
-          whileHover={{ scale: 1.18 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 18 }}
-          className={`rounded-md p-1 ${statusConfig.iconWrap}`}
-        >
-          {statusConfig.icon}
-        </motion.div>
-        <span className="text-sm">{label}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="hidden text-xs text-muted-foreground sm:inline">{value}</span>
-        {badge && (
-          <Badge variant="secondary" className="text-[10px]">
-            {badge}
+    <Card className="lg:col-span-2 group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
+      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Recent Activity</CardTitle>
+            <CardDescription>Pipeline runs, function invocations & errors</CardDescription>
+          </div>
+          <Badge variant="outline" className="text-xs">
+            {totalCount} events
           </Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {entries.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <div className="rounded-full bg-emerald-500/10 p-2.5 text-emerald-600">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium">No recent activity</p>
+            <p className="text-xs text-muted-foreground">Everything is quiet right now.</p>
+          </div>
+        ) : (
+          <div className="scrollbar-thin max-h-[420px] overflow-y-auto pr-2">
+            {entries.map((entry, idx) => (
+              <div key={entry.id} className="flex gap-3">
+                {/* Timeline rail */}
+                <div className="flex flex-col items-center">
+                  <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${kindColor[entry.kind]}`}>
+                    {kindIcon[entry.kind]}
+                  </div>
+                  {idx < entries.length - 1 && (
+                    <div className="w-px flex-1 bg-border" />
+                  )}
+                </div>
+                {/* Content */}
+                <div className={`min-w-0 flex-1 pb-4 ${idx === entries.length - 1 ? '' : ''}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium leading-tight truncate">{entry.title}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground truncate">{entry.description}</p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusBadge[entry.status] ?? statusBadge.pending}`}>
+                      {entry.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <Clock className="h-2.5 w-2.5" />
+                    {formatRelativeTime(entry.timestamp)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 

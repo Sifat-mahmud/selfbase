@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
   Activity,
@@ -20,6 +20,7 @@ import {
   Radio,
   Mail,
   Webhook,
+  Flame,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -159,11 +160,40 @@ const metricLabels: Record<string, string> = {
 
 const alertMetricColor: Record<string, string> = {
   cpu: 'bg-amber-500/10 text-amber-700 border-amber-200',
-  ram: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  ram: 'bg-teal-500/10 text-teal-700 border-teal-200',
   req_per_sec: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
   error_rate: 'bg-red-500/10 text-red-700 border-red-200',
-  disk: 'bg-slate-500/10 text-slate-700 border-slate-200',
-  latency: 'bg-purple-500/10 text-purple-700 border-purple-200',
+  disk: 'bg-cyan-500/10 text-cyan-700 border-cyan-200',
+  latency: 'bg-orange-500/10 text-orange-700 border-orange-200',
+}
+
+const alertMetricBorderColor: Record<string, string> = {
+  cpu: 'border-l-amber-500',
+  ram: 'border-l-teal-500',
+  req_per_sec: 'border-l-emerald-500',
+  error_rate: 'border-l-red-500',
+  disk: 'border-l-cyan-500',
+  latency: 'border-l-orange-500',
+}
+
+const alertMetricProgressColor: Record<string, string> = {
+  cpu: '[&>div]:bg-amber-500',
+  ram: '[&>div]:bg-teal-500',
+  req_per_sec: '[&>div]:bg-emerald-500',
+  error_rate: '[&>div]:bg-red-500',
+  disk: '[&>div]:bg-cyan-500',
+  latency: '[&>div]:bg-orange-500',
+}
+
+function relativeTime(dateStr: string | null): string {
+  if (!dateStr) return 'Never'
+  const now = Date.now()
+  const then = new Date(dateStr).getTime()
+  const diffMs = now - then
+  if (diffMs < 60000) return 'just now'
+  if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m ago`
+  if (diffMs < 86400000) return `${Math.floor(diffMs / 3600000)}h ago`
+  return `${Math.floor(diffMs / 86400000)}d ago`
 }
 
 export function MonitoringView() {
@@ -178,6 +208,10 @@ export function MonitoringView() {
   const [loadInfo, setLoadInfo] = useState<LoadInfo | null>(null)
   const [uptimeInfo, setUptimeInfo] = useState<UptimeInfo | null>(null)
   const [showAlertDialog, setShowAlertDialog] = useState(false)
+
+  // Real-time clock
+  const [serverTime, setServerTime] = useState(new Date())
+  const clockRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Alert form
   const [newAlertMetric, setNewAlertMetric] = useState('cpu')
@@ -231,6 +265,16 @@ export function MonitoringView() {
   useEffect(() => {
     void loadAll()
   }, [loadAll])
+
+  // Real-time clock - update every second
+  useEffect(() => {
+    clockRef.current = setInterval(() => {
+      setServerTime(new Date())
+    }, 1000)
+    return () => {
+      if (clockRef.current) clearInterval(clockRef.current)
+    }
+  }, [])
 
   const handleCreateAlert = async () => {
     if (!newAlertThreshold) {
@@ -426,6 +470,10 @@ export function MonitoringView() {
           <p className="text-muted-foreground">System health, heartbeat logs, and performance metrics</p>
         </div>
         <div className="flex gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 rounded-md px-2.5 py-1.5 font-mono">
+            <Clock className="h-3 w-3" />
+            {serverTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </div>
           <Button variant="outline" size="sm" onClick={() => void loadAll()}>
             <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
           </Button>
@@ -511,35 +559,59 @@ export function MonitoringView() {
       {/* Segmented Uptime Bar */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Uptime — Last 24 Hours</CardTitle>
-          <CardDescription>
-            Segmented view: green = up, red = down. Each segment represents ~48 minutes.
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base">Uptime Status</CardTitle>
+              <CardDescription>
+                Segmented view: green = up, red = down. Hover for details.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-3">
+              <Badge variant="outline" className="text-xs gap-1">
+                24h
+              </Badge>
+              <Badge variant="outline" className="text-xs gap-1">
+                7d
+              </Badge>
+              <Badge variant="outline" className="text-xs gap-1">
+                30d
+              </Badge>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-0.5 h-6 rounded-md overflow-hidden">
+          <div className="flex gap-[3px] h-8 rounded-md overflow-hidden">
             {uptimeSegments.map((seg, i) => (
               <Tooltip key={i}>
                 <TooltipTrigger asChild>
                   <div
-                    className={`flex-1 ${seg === 'up' ? 'bg-emerald-500' : 'bg-red-500'} hover:opacity-80 cursor-pointer transition-opacity`}
+                    className={`flex-1 rounded-[2px] transition-all hover:scale-y-125 ${
+                      seg === 'up'
+                        ? 'bg-emerald-500 hover:bg-emerald-400'
+                        : 'bg-red-500 hover:bg-red-400'
+                    } cursor-pointer`}
                   />
                 </TooltipTrigger>
                 <TooltipContent>
-                  Segment #{i + 1}: {seg === 'up' ? 'Operational' : 'Down'}
+                  <div className="text-xs">
+                    <div className="font-medium">Segment #{i + 1}</div>
+                    <div>{seg === 'up' ? '✓ Operational' : '✗ Down'}</div>
+                    <div className="text-muted-foreground">{uptimePercent.toFixed(1)}% uptime</div>
+                  </div>
                 </TooltipContent>
               </Tooltip>
             ))}
           </div>
-          <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+          <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
             <span>24h ago</span>
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" /> Up
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-[2px] bg-emerald-500" /> Up
               </span>
-              <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-red-500" /> Down
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-[2px] bg-red-500" /> Down
               </span>
+              <span className="font-mono font-medium text-emerald-600">{uptimePercent.toFixed(2)}%</span>
             </div>
             <span>Now</span>
           </div>
@@ -871,19 +943,28 @@ export function MonitoringView() {
                       <TableHead>Notification</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Last Triggered</TableHead>
-                      <TableHead className="w-8" />
+                      <TableHead className="w-20" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {alertConfigs.map((alert) => (
-                      <TableRow key={alert.id} className="hover:bg-muted/40 transition-colors">
+                      <TableRow
+                        key={alert.id}
+                        className={`hover:bg-muted/40 transition-colors border-l-4 ${alertMetricBorderColor[alert.metricType] ?? 'border-l-muted'}`}
+                      >
                         <TableCell>
                           <Badge variant="outline" className={alertMetricColor[alert.metricType] ?? ''}>
                             {metricLabels[alert.metricType] ?? alert.metricType}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-mono">
-                          {alert.operator} {alert.threshold}
+                        <TableCell>
+                          <div className="space-y-1">
+                            <span className="font-mono text-sm">{alert.operator} {alert.threshold}</span>
+                            <Progress
+                              value={Math.min(100, alert.threshold)}
+                              className={`h-1.5 w-20 ${alertMetricProgressColor[alert.metricType] ?? ''}`}
+                            />
+                          </div>
                         </TableCell>
                         <TableCell>{alert.duration}s</TableCell>
                         <TableCell>
@@ -914,20 +995,42 @@ export function MonitoringView() {
                             </Badge>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {alert.lastTriggeredAt
-                            ? new Date(alert.lastTriggeredAt).toLocaleString()
-                            : 'Never'}
+                        <TableCell>
+                          <div className="text-sm text-muted-foreground">
+                            {alert.lastTriggeredAt
+                              ? new Date(alert.lastTriggeredAt).toLocaleString()
+                              : 'Never'}
+                          </div>
+                          {alert.lastTriggeredAt && (
+                            <div className="text-xs text-muted-foreground/70">
+                              {relativeTime(alert.lastTriggeredAt)}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={() => void handleDeleteAlert(alert.id)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                          </Button>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs gap-1"
+                              onClick={() => {
+                                toast({
+                                  title: 'Alert Test Triggered',
+                                  description: `${metricLabels[alert.metricType] ?? alert.metricType} ${alert.operator} ${alert.threshold} — simulated alert fired.`,
+                                })
+                              }}
+                            >
+                              <Flame className="h-3 w-3" /> Test
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => void handleDeleteAlert(alert.id)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}

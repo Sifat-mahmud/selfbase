@@ -193,7 +193,7 @@ export function NotificationsBell() {
           {unreadCount > 0 && (
             <Badge
               variant="outline"
-              className="border-red-200 bg-red-50 text-red-700 text-[10px]"
+              className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400 text-[10px]"
             >
               {unreadCount} new
             </Badge>
@@ -275,7 +275,7 @@ export function NotificationsBell() {
             setOpen(false)
             setActiveSection('logs')
           }}
-          className="flex w-full items-center justify-center gap-1 px-4 py-2.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-50"
+          className="flex w-full items-center justify-center gap-1 px-4 py-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 transition-colors hover:bg-emerald-500/10 dark:hover:bg-emerald-500/20"
         >
           View all in Logs
           <ChevronRight className="h-3 w-3" />

@@ -23,6 +23,9 @@ import {
   Loader2,
   Wand2,
   DollarSign,
+  User,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -125,7 +128,8 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   status?: 'pending' | 'completed' | 'failed'
-  meta?: { durationMs?: number; sources?: number }
+  meta?: { durationMs?: number; sources?: number; tokens?: number }
+  timestamp?: Date
 }
 
 interface SearchResult {
@@ -187,6 +191,7 @@ export function AiView() {
   const [chatTable, setChatTable] = useState('')
   const [chatModel, setChatModel] = useState('')
   const [chatSending, setChatSending] = useState(false)
+  const [sessionTokens, setSessionTokens] = useState(0)
   const chatScrollRef = useRef<HTMLDivElement>(null)
 
   // Search
@@ -355,8 +360,8 @@ export function AiView() {
       toast({ title: 'Select a table and enter a query', variant: 'destructive' })
       return
     }
-    const userMsg: ChatMessage = { role: 'user', content: chatInput }
-    const pendingMsg: ChatMessage = { role: 'assistant', content: '', status: 'pending' }
+    const userMsg: ChatMessage = { role: 'user', content: chatInput, timestamp: new Date() }
+    const pendingMsg: ChatMessage = { role: 'assistant', content: '', status: 'pending', timestamp: new Date() }
     setChatMessages((prev) => [...prev, userMsg, pendingMsg])
     setChatSending(true)
     const query = chatInput
@@ -368,6 +373,8 @@ export function AiView() {
         model: chatModel || undefined,
         prompt: 'You are a helpful assistant answering questions about the user\'s data.',
       })
+      const usedTokens = result.response ? Math.ceil(chatInput.length / 4) + Math.ceil(result.response.length / 4) : 0
+      setSessionTokens((prev) => prev + usedTokens)
       setChatMessages((prev) =>
         prev.map((m, i) =>
           i === prev.length - 1
@@ -375,7 +382,8 @@ export function AiView() {
                 role: 'assistant',
                 content: result.response ?? result.error ?? 'No response received.',
                 status: result.error ? 'failed' : 'completed',
-                meta: { sources: Array.isArray(result.results) ? result.results.length : 0 },
+                meta: { sources: Array.isArray(result.results) ? result.results.length : 0, tokens: usedTokens },
+                timestamp: new Date(),
               }
             : m,
         ),
@@ -388,6 +396,7 @@ export function AiView() {
                 role: 'assistant',
                 content: `Failed to get response: ${err instanceof Error ? err.message : 'Unknown error'}`,
                 status: 'failed',
+                timestamp: new Date(),
               }
             : m,
         ),
@@ -634,11 +643,30 @@ export function AiView() {
                             />
                           </div>
                           <div>
-                            <div className="font-semibold">{config.name}</div>
+                            <div className="font-semibold flex items-center gap-2">
+                              {config.name}
+                              {config.apiKey ? (
+                                <span className="flex items-center gap-1 text-xs text-emerald-600">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Connected
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-xs text-amber-600">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" /> Not Configured
+                                </span>
+                              )}
+                            </div>
                             <div className="text-xs text-muted-foreground font-mono">{config.modelName}</div>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs gap-1"
+                            onClick={() => void handleTestConnection(config)}
+                          >
+                            <Zap className="h-3 w-3" /> Test
+                          </Button>
                           <Switch
                             checked={config.isActive}
                             onCheckedChange={() => void handleToggleActive(config)}
@@ -911,10 +939,18 @@ export function AiView() {
           <div className="grid gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2 flex flex-col">
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-emerald-600" />
-                  RAG Chat
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-emerald-600" />
+                    RAG Chat
+                    {sessionTokens > 0 && (
+                      <Badge variant="outline" className="text-xs font-mono ml-1 gap-1 border-emerald-200 text-emerald-700 bg-emerald-500/5">
+                        <Zap className="h-2.5 w-2.5" />
+                        {sessionTokens.toLocaleString()} tokens
+                      </Badge>
+                    )}
+                  </CardTitle>
+                </div>
                 <CardDescription>Ask questions about your data</CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col">
@@ -932,32 +968,53 @@ export function AiView() {
                     chatMessages.map((msg, i) => (
                       <div
                         key={i}
-                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} gap-2`}
                       >
-                        <div
-                          className={`rounded-lg px-3 py-2 max-w-[80%] text-sm whitespace-pre-wrap ${
-                            msg.role === 'user'
-                              ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white'
-                              : msg.status === 'failed'
-                                ? 'bg-red-500/10 text-red-700 border border-red-200'
-                                : msg.status === 'pending'
-                                  ? 'bg-muted text-muted-foreground'
-                                  : 'bg-muted'
-                          }`}
-                        >
-                          {msg.status === 'pending' ? (
-                            <span className="flex items-center gap-2">
-                              <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
-                            </span>
-                          ) : (
-                            msg.content
-                          )}
-                          {msg.meta?.sources !== undefined && msg.status === 'completed' && (
-                            <div className="text-xs opacity-70 mt-1">
-                              {msg.meta.sources} source(s) retrieved
-                            </div>
-                          )}
+                        {msg.role === 'assistant' && (
+                          <div className="shrink-0 rounded-full bg-emerald-500/10 p-1.5 h-7 w-7 flex items-center justify-center mt-0.5">
+                            <Brain className="h-3.5 w-3.5 text-emerald-600" />
+                          </div>
+                        )}
+                        <div className="max-w-[80%]">
+                          <div
+                            className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                              msg.role === 'user'
+                                ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white'
+                                : msg.status === 'failed'
+                                  ? 'bg-red-500/10 text-red-700 border border-red-200 border-l-4 border-l-red-500'
+                                  : msg.status === 'pending'
+                                    ? 'bg-muted text-muted-foreground border-l-4 border-l-emerald-400'
+                                    : 'bg-muted border-l-4 border-l-emerald-500'
+                            }`}
+                          >
+                            {msg.status === 'pending' ? (
+                              <span className="flex items-center gap-2">
+                                <span className="flex gap-1">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:0ms]" />
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:150ms]" />
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-bounce [animation-delay:300ms]" />
+                                </span>
+                                Thinking...
+                              </span>
+                            ) : (
+                              msg.content
+                            )}
+                            {msg.meta?.sources !== undefined && msg.status === 'completed' && (
+                              <div className="text-xs opacity-70 mt-1">
+                                {msg.meta.sources} source(s) retrieved
+                              </div>
+                            )}
+                          </div>
+                          <div className={`text-[10px] text-muted-foreground mt-1 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                            {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''}
+                            {msg.meta?.tokens ? ` · ${msg.meta.tokens} tokens` : ''}
+                          </div>
                         </div>
+                        {msg.role === 'user' && (
+                          <div className="shrink-0 rounded-full bg-teal-500/10 p-1.5 h-7 w-7 flex items-center justify-center mt-0.5">
+                            <User className="h-3.5 w-3.5 text-teal-600" />
+                          </div>
+                        )}
                       </div>
                     ))
                   )}

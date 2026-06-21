@@ -66,20 +66,21 @@ import { SettingsView } from '@/components/admin/settings'
 import { RealtimeIndicator } from '@/components/admin/realtime-indicator'
 import { NotificationsBell } from '@/components/admin/notifications-bell'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { KeyboardShortcuts } from '@/components/admin/keyboard-shortcuts'
 
-const navItems: { section: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { section: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { section: 'tables', label: 'Tables', icon: Database },
-  { section: 'pipeline', label: 'Pipeline Studio', icon: GitBranch },
-  { section: 'scraper', label: 'Web Scraper', icon: Globe },
-  { section: 'auth', label: 'Auth', icon: Shield },
-  { section: 'storage', label: 'Storage', icon: HardDrive },
-  { section: 'functions', label: 'Functions', icon: Code2 },
-  { section: 'monitoring', label: 'Monitoring', icon: Activity },
-  { section: 'ai', label: 'AI', icon: Brain },
-  { section: 'logs', label: 'Logs', icon: FileText },
-  { section: 'playground' as AdminSection, label: 'API Playground', icon: Terminal },
-  { section: 'settings', label: 'Settings', icon: Settings },
+const navItems: { section: AdminSection; label: string; icon: React.ComponentType<{ className?: string }>; color: string }[] = [
+  { section: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'text-emerald-500' },
+  { section: 'tables', label: 'Tables', icon: Database, color: 'text-emerald-600' },
+  { section: 'pipeline', label: 'Pipeline Studio', icon: GitBranch, color: 'text-teal-500' },
+  { section: 'scraper', label: 'Web Scraper', icon: Globe, color: 'text-amber-500' },
+  { section: 'auth', label: 'Auth', icon: Shield, color: 'text-rose-500' },
+  { section: 'storage', label: 'Storage', icon: HardDrive, color: 'text-cyan-500' },
+  { section: 'functions', label: 'Functions', icon: Code2, color: 'text-purple-500' },
+  { section: 'monitoring', label: 'Monitoring', icon: Activity, color: 'text-orange-500' },
+  { section: 'ai', label: 'AI', icon: Brain, color: 'text-violet-500' },
+  { section: 'logs', label: 'Logs', icon: FileText, color: 'text-slate-500' },
+  { section: 'playground' as AdminSection, label: 'API Playground', icon: Terminal, color: 'text-pink-500' },
+  { section: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500' },
 ]
 
 // Normalizes API responses that may be either a raw array or { data: [...] }
@@ -107,6 +108,75 @@ const EMPTY_SEARCH_RESULTS: SearchResults = {
   users: [],
 }
 
+// =====================================================================
+// FOOTER STATUS BAR — mini stats bar in the footer
+// =====================================================================
+
+interface FooterStats {
+  uptimePercent: number
+  tables: number
+  pipelines: number
+  lastHeartbeatAgo: string
+}
+
+function FooterStatusBar() {
+  const [stats, setStats] = useState<FooterStats | null>(null)
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const [uptimeRes, tablesRes, pipelinesRes, hbRes] = await Promise.all([
+          fetch('/api/monitoring/uptime').then((r) => r.json()).catch(() => null),
+          fetch('/api/tables').then((r) => r.json()).catch(() => null),
+          fetch('/api/pipelines?isActive=true').then((r) => r.json()).catch(() => null),
+          fetch('/api/monitoring/heartbeat?limit=1').then((r) => r.json()).catch(() => null),
+        ])
+        if (!active) return
+
+        const uptime = uptimeRes?.data ?? uptimeRes
+        const tablesArr = Array.isArray(tablesRes) ? tablesRes : tablesRes?.data ?? []
+        const pipelinesArr = Array.isArray(pipelinesRes) ? pipelinesRes : pipelinesRes?.data ?? []
+        const hbArr = Array.isArray(hbRes) ? hbRes : hbRes?.data ?? []
+
+        const lastHb = Array.isArray(hbArr) && hbArr.length > 0 ? hbArr[0] : null
+        let lastHbAgo = '—'
+        if (lastHb?.recordedAt) {
+          const diff = Date.now() - new Date(lastHb.recordedAt).getTime()
+          const sec = Math.floor(diff / 1000)
+          lastHbAgo = sec < 60 ? `${sec}s ago` : `${Math.floor(sec / 60)}m ago`
+        }
+
+        setStats({
+          uptimePercent: uptime?.uptimePercent ?? 100,
+          tables: tablesArr.length ?? 0,
+          pipelines: pipelinesArr.length ?? 0,
+          lastHeartbeatAgo: lastHbAgo,
+        })
+      } catch {
+        // silently ignore
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  if (!stats) {
+    return <span className="hidden sm:inline text-muted-foreground/50">Loading...</span>
+  }
+
+  return (
+    <span className="hidden sm:flex items-center gap-3 text-[11px]">
+      <span>Uptime: <span className="text-emerald-600 dark:text-emerald-400 font-medium">{stats.uptimePercent.toFixed(1)}%</span></span>
+      <span className="text-border">|</span>
+      <span>Tables: <span className="font-medium">{stats.tables}</span></span>
+      <span className="text-border">|</span>
+      <span>Pipelines: <span className="font-medium">{stats.pipelines}</span></span>
+      <span className="text-border">|</span>
+      <span>Last HB: <span className="font-medium">{stats.lastHeartbeatAgo}</span></span>
+    </span>
+  )
+}
+
 function SectionContent({ section }: { section: AdminSection }) {
   switch (section) {
     case 'dashboard': return <DashboardView />
@@ -128,6 +198,7 @@ function SectionContent({ section }: { section: AdminSection }) {
 export default function AdminStudio() {
   const { activeSection, setActiveSection } = useAdminStore()
   const [commandOpen, setCommandOpen] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [searchResults, setSearchResults] = useState<SearchResults>(EMPTY_SEARCH_RESULTS)
   const [dataLoaded, setDataLoaded] = useState(false)
   // Ref guard prevents duplicate in-flight fetches when the palette reopens quickly
@@ -140,6 +211,10 @@ export default function AdminStudio() {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
         setCommandOpen((open) => !open)
+      }
+      if (e.key === '/' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        setShortcutsOpen((open) => !open)
       }
     }
     document.addEventListener('keydown', down)
@@ -258,7 +333,7 @@ export default function AdminStudio() {
                       onClick={() => setActiveSection(item.section)}
                       tooltip={item.label}
                     >
-                      <item.icon className="h-4 w-4" />
+                      <item.icon className={`h-4 w-4 ${activeSection !== item.section ? item.color : ''}`} />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -327,7 +402,14 @@ export default function AdminStudio() {
           {/* Footer */}
           <footer className="border-t bg-background border-border px-4 py-2 shrink-0">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>SelfBase v1.0 · Self-Hosted · Local-First</span>
+              <div className="flex items-center gap-3">
+                <div className="flex h-2 w-2 items-center justify-center">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
+                <span>SelfBase v1.0</span>
+                <span className="hidden sm:inline text-border">|</span>
+                <FooterStatusBar />
+              </div>
               <span className="hidden sm:inline">AI-Native Backend-as-a-Service</span>
             </div>
           </footer>
@@ -487,9 +569,16 @@ export default function AdminStudio() {
             <CommandItem onSelect={() => { setActiveSection('ai'); setCommandOpen(false) }}>
               <Brain className="mr-2 h-4 w-4" />Open RAG Chat
             </CommandItem>
+            <CommandItem onSelect={() => { setCommandOpen(false); setShortcutsOpen(true) }}>
+              <Command className="mr-2 h-4 w-4" />Keyboard Shortcuts
+              <kbd className="ml-auto inline-flex h-4 items-center gap-0.5 rounded border bg-muted px-1 font-mono text-[10px]">⌘/</kbd>
+            </CommandItem>
           </CommandGroup>
         </CommandList>
       </CommandDialog>
+
+      {/* Keyboard Shortcuts Dialog */}
+      <KeyboardShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </SidebarProvider>
   )
 }

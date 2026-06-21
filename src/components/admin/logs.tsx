@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
   FileText,
@@ -19,6 +19,8 @@ import {
   GitBranch,
   Server,
   Filter,
+  Copy,
+  Check,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -43,6 +45,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet } from '@/lib/api-client'
 
@@ -111,6 +114,20 @@ const errorTypeBadgeColors: Record<string, string> = {
   timeout: 'bg-amber-500/10 text-amber-700 border-amber-200',
 }
 
+const levelBadgeColors: Record<string, string> = {
+  error: 'bg-red-500/10 text-red-600 border-red-200',
+  warning: 'bg-amber-500/10 text-amber-600 border-amber-200',
+  info: 'bg-emerald-500/10 text-emerald-600 border-emerald-200',
+  debug: 'bg-slate-500/10 text-slate-600 border-slate-200',
+}
+
+const levelDotColors: Record<string, string> = {
+  error: 'bg-red-500',
+  warning: 'bg-amber-500',
+  info: 'bg-emerald-500',
+  debug: 'bg-slate-500',
+}
+
 const sourceIcons: Record<string, React.ComponentType<{ className?: string }>> = {
   rest: GitBranch,
   rss: GitBranch,
@@ -166,6 +183,9 @@ export function LogsView() {
   const [dateTo, setDateTo] = useState('')
   const [expandedLog, setExpandedLog] = useState<string | null>(null)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -192,6 +212,47 @@ export function LogsView() {
   useEffect(() => {
     void loadAll()
   }, [loadAll])
+
+  // Auto-refresh every 5 seconds
+  useEffect(() => {
+    if (autoRefresh) {
+      autoRefreshRef.current = setInterval(() => {
+        void loadAll()
+      }, 5000)
+    } else {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current)
+        autoRefreshRef.current = null
+      }
+    }
+    return () => {
+      if (autoRefreshRef.current) {
+        clearInterval(autoRefreshRef.current)
+      }
+    }
+  }, [autoRefresh, loadAll])
+
+  const handleCopy = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch {
+      // fallback - ignore
+    }
+  }
+
+  const highlightSearch = (text: string, query: string) => {
+    if (!query.trim()) return text
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+    const parts = text.split(regex)
+    if (parts.length <= 1) return text
+    return parts.map((part, i) =>
+      regex.test(part)
+        ? `<mark class="bg-amber-200/80 text-amber-900 rounded px-0.5">${part}</mark>`
+        : part
+    ).join('')
+  }
 
   const filteredLogs = sourceErrors.filter((log) => {
     const level = mapLevel(log.errorType)
@@ -263,7 +324,18 @@ export function LogsView() {
           </h1>
           <p className="text-muted-foreground">Error logs, pipeline errors, and system events</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-1.5">
+            <Switch
+              checked={autoRefresh}
+              onCheckedChange={setAutoRefresh}
+              className="scale-75"
+            />
+            <span className="text-xs text-muted-foreground">Auto-refresh</span>
+            {autoRefresh && (
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            )}
+          </div>
           <Button variant="outline" size="sm" onClick={() => void loadAll()}>
             <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
           </Button>
@@ -405,36 +477,26 @@ export function LogsView() {
                 <div className="divide-y max-h-[700px] overflow-y-auto">
                   {filteredLogs.map((log) => {
                     const level = mapLevel(log.errorType)
-                    const LevelIcon =
-                      level === 'error'
-                        ? XCircle
-                        : level === 'warning'
-                          ? AlertTriangle
-                          : Info
                     const ErrorTypeIcon = errorTypeIcons[log.errorType] ?? AlertCircle
                     const isExpanded = expandedLog === log.id
                     const SourceIcon =
                       log.source?.sourceType ? sourceIcons[log.source.sourceType] ?? FileText : FileText
+                    const highlightedMessage = search ? highlightSearch(log.message, search) : log.message
                     return (
-                      <div key={log.id} className="hover:bg-muted/30 transition-colors">
+                      <div key={log.id} className={`hover:bg-muted/30 transition-colors border-l-4 ${level === 'error' ? 'border-l-red-500' : level === 'warning' ? 'border-l-amber-500' : 'border-l-emerald-500'}`}>
                         <div
                           className="flex items-start gap-3 p-4 cursor-pointer"
                           onClick={() => setExpandedLog(isExpanded ? null : log.id)}
                         >
-                          <LevelIcon
-                            className={`h-4 w-4 mt-0.5 shrink-0 ${
-                              level === 'error'
-                                ? 'text-red-500'
-                                : level === 'warning'
-                                  ? 'text-amber-500'
-                                  : 'text-emerald-500'
-                            }`}
-                          />
+                          <span className={`h-2.5 w-2.5 rounded-full mt-1.5 shrink-0 ${levelDotColors[level] ?? 'bg-slate-500'}`} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-sm font-medium">{log.message}</span>
+                              <span className="text-sm font-medium" dangerouslySetInnerHTML={{ __html: highlightedMessage }} />
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                              <Badge variant="outline" className={levelBadgeColors[level] ?? ''}>
+                                {level}
+                              </Badge>
                               <Badge variant="outline" className={errorTypeBadgeColors[log.errorType] ?? ''}>
                                 <ErrorTypeIcon className="h-2.5 w-2.5 mr-1" />
                                 {log.errorType}
@@ -453,20 +515,70 @@ export function LogsView() {
                             </div>
                           </div>
                           <div className="shrink-0">
-                            {log.rawPayload ? (
-                              isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                              )
-                            ) : null}
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
                           </div>
                         </div>
-                        {isExpanded && log.rawPayload && (
-                          <div className="px-4 pb-4 pl-11">
-                            <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
-                              {log.rawPayload}
-                            </pre>
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pl-[52px] space-y-3">
+                            <div className="grid gap-3 md:grid-cols-2 text-xs">
+                              <div>
+                                <div className="text-muted-foreground mb-1">Error Type</div>
+                                <Badge variant="outline" className={errorTypeBadgeColors[log.errorType] ?? ''}>
+                                  <ErrorTypeIcon className="h-2.5 w-2.5 mr-1" />
+                                  {log.errorType}
+                                </Badge>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Level</div>
+                                <Badge variant="outline" className={levelBadgeColors[level] ?? ''}>
+                                  {level}
+                                </Badge>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Source</div>
+                                <span>{log.source?.name ?? '—'}{log.source?.sourceType ? ` (${log.source.sourceType})` : ''}</span>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Table</div>
+                                <span className="font-mono">{log.tableName ?? log.table?.name ?? '—'}</span>
+                              </div>
+                              <div className="md:col-span-2">
+                                <div className="text-muted-foreground mb-1">Timestamp (ISO)</div>
+                                <span className="font-mono">{new Date(log.occurredAt).toISOString()}</span>
+                              </div>
+                            </div>
+                            {log.message && (
+                              <div>
+                                <div className="text-muted-foreground mb-1 text-xs">Full Message</div>
+                                <div className="rounded-md bg-muted/50 p-3 text-sm">{log.message}</div>
+                              </div>
+                            )}
+                            {log.rawPayload && (
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-muted-foreground text-xs">Raw Payload</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs gap-1"
+                                    onClick={() => void handleCopy(log.rawPayload ?? '', log.id)}
+                                  >
+                                    {copiedId === log.id ? (
+                                      <><Check className="h-3 w-3" /> Copied</>
+                                    ) : (
+                                      <><Copy className="h-3 w-3" /> Copy</>
+                                    )}
+                                  </Button>
+                                </div>
+                                <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
+                                  {log.rawPayload}
+                                </pre>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -497,18 +609,23 @@ export function LogsView() {
                 <div className="divide-y max-h-[600px] overflow-y-auto">
                   {sourceErrorsDetailed.map((log) => {
                     const ErrorTypeIcon = errorTypeIcons[log.errorType] ?? AlertCircle
+                    const level = mapLevel(log.errorType)
                     const SourceIcon = log.source?.sourceType ? sourceIcons[log.source.sourceType] ?? FileText : FileText
                     const isExpanded = expandedLog === log.id
+                    const highlightedMessage = search ? highlightSearch(log.message, search) : log.message
                     return (
-                      <div key={log.id} className="hover:bg-muted/30 transition-colors">
+                      <div key={log.id} className={`hover:bg-muted/30 transition-colors border-l-4 ${level === 'error' ? 'border-l-red-500' : level === 'warning' ? 'border-l-amber-500' : 'border-l-emerald-500'}`}>
                         <div
                           className="flex items-start gap-3 p-4 cursor-pointer"
                           onClick={() => setExpandedLog(isExpanded ? null : log.id)}
                         >
-                          <ErrorTypeIcon className={`h-4 w-4 mt-0.5 shrink-0 ${errorTypeColors[log.errorType] ?? 'text-amber-500'}`} />
+                          <span className={`h-2.5 w-2.5 rounded-full mt-1.5 shrink-0 ${levelDotColors[level] ?? 'bg-slate-500'}`} />
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium">{log.message}</div>
+                            <div className="text-sm font-medium" dangerouslySetInnerHTML={{ __html: highlightedMessage }} />
                             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                              <Badge variant="outline" className={levelBadgeColors[level] ?? ''}>
+                                {level}
+                              </Badge>
                               <Badge variant="outline" className={errorTypeBadgeColors[log.errorType] ?? ''}>
                                 {log.errorType}
                               </Badge>
@@ -524,21 +641,71 @@ export function LogsView() {
                               <span>· {new Date(log.occurredAt).toLocaleString()}</span>
                             </div>
                           </div>
-                          {log.rawPayload && (
-                            <div className="shrink-0">
-                              {isExpanded ? (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </div>
-                          )}
+                          <div className="shrink-0">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
                         </div>
-                        {isExpanded && log.rawPayload && (
-                          <div className="px-4 pb-4 pl-11">
-                            <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
-                              {log.rawPayload}
-                            </pre>
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pl-[52px] space-y-3">
+                            <div className="grid gap-3 md:grid-cols-2 text-xs">
+                              <div>
+                                <div className="text-muted-foreground mb-1">Error Type</div>
+                                <Badge variant="outline" className={errorTypeBadgeColors[log.errorType] ?? ''}>
+                                  <ErrorTypeIcon className="h-2.5 w-2.5 mr-1" />
+                                  {log.errorType}
+                                </Badge>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Level</div>
+                                <Badge variant="outline" className={levelBadgeColors[level] ?? ''}>
+                                  {level}
+                                </Badge>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Source</div>
+                                <span>{log.source?.name ?? '—'}{log.source?.sourceType ? ` (${log.source.sourceType})` : ''}</span>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Table</div>
+                                <span className="font-mono">{log.table?.name ?? '—'}</span>
+                              </div>
+                              <div className="md:col-span-2">
+                                <div className="text-muted-foreground mb-1">Timestamp (ISO)</div>
+                                <span className="font-mono">{new Date(log.occurredAt).toISOString()}</span>
+                              </div>
+                            </div>
+                            {log.message && (
+                              <div>
+                                <div className="text-muted-foreground mb-1 text-xs">Full Message</div>
+                                <div className="rounded-md bg-muted/50 p-3 text-sm">{log.message}</div>
+                              </div>
+                            )}
+                            {log.rawPayload && (
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-muted-foreground text-xs">Raw Payload</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs gap-1"
+                                    onClick={() => void handleCopy(log.rawPayload ?? '', `src-${log.id}`)}
+                                  >
+                                    {copiedId === `src-${log.id}` ? (
+                                      <><Check className="h-3 w-3" /> Copied</>
+                                    ) : (
+                                      <><Copy className="h-3 w-3" /> Copy</>
+                                    )}
+                                  </Button>
+                                </div>
+                                <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
+                                  {log.rawPayload}
+                                </pre>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -569,19 +736,22 @@ export function LogsView() {
                 <div className="divide-y max-h-[600px] overflow-y-auto">
                   {functionErrors.map((err) => {
                     const isExpanded = expandedLog === err.id
-                    const StatusIcon = err.status === 'timeout' ? AlertTriangle : XCircle
+                    const level = err.status === 'timeout' ? 'warning' : 'error'
                     return (
-                      <div key={err.id} className="hover:bg-muted/30 transition-colors">
+                      <div key={err.id} className={`hover:bg-muted/30 transition-colors border-l-4 ${err.status === 'timeout' ? 'border-l-amber-500' : 'border-l-red-500'}`}>
                         <div
                           className="flex items-start gap-3 p-4 cursor-pointer"
                           onClick={() => setExpandedLog(isExpanded ? null : err.id)}
                         >
-                          <StatusIcon className={`h-4 w-4 mt-0.5 shrink-0 ${err.status === 'timeout' ? 'text-amber-500' : 'text-red-500'}`} />
+                          <span className={`h-2.5 w-2.5 rounded-full mt-1.5 shrink-0 ${levelDotColors[level] ?? 'bg-red-500'}`} />
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-medium">
                               {err.functionName ?? 'Unknown function'} — {err.status}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+                              <Badge variant="outline" className={levelBadgeColors[level] ?? ''}>
+                                {level}
+                              </Badge>
                               <Badge variant="outline" className="text-xs capitalize">
                                 {err.status}
                               </Badge>
@@ -596,12 +766,61 @@ export function LogsView() {
                               <span>· {new Date(err.startedAt).toLocaleString()}</span>
                             </div>
                           </div>
+                          <div className="shrink-0">
+                            {isExpanded ? (
+                              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                            )}
+                          </div>
                         </div>
-                        {isExpanded && (err.errorPayload || err.input) && (
-                          <div className="px-4 pb-4 pl-11 space-y-2">
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pl-[52px] space-y-3">
+                            <div className="grid gap-3 md:grid-cols-2 text-xs">
+                              <div>
+                                <div className="text-muted-foreground mb-1">Function</div>
+                                <span>{err.functionName ?? 'Unknown'}</span>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Status</div>
+                                <Badge variant="outline" className="text-xs capitalize">{err.status}</Badge>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Triggered By</div>
+                                <span>{err.triggeredBy ?? '—'}</span>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground mb-1">Duration</div>
+                                <span className="font-mono">{err.durationMs != null ? `${err.durationMs}ms` : '—'}</span>
+                              </div>
+                              <div className="md:col-span-2">
+                                <div className="text-muted-foreground mb-1">Started At (ISO)</div>
+                                <span className="font-mono">{new Date(err.startedAt).toISOString()}</span>
+                              </div>
+                              {err.completedAt && (
+                                <div className="md:col-span-2">
+                                  <div className="text-muted-foreground mb-1">Completed At (ISO)</div>
+                                  <span className="font-mono">{new Date(err.completedAt).toISOString()}</span>
+                                </div>
+                              )}
+                            </div>
                             {err.errorPayload && (
                               <div>
-                                <p className="text-xs text-muted-foreground mb-1">Error:</p>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-muted-foreground text-xs">Error Payload</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs gap-1"
+                                    onClick={() => void handleCopy(err.errorPayload ?? '', `fn-${err.id}`)}
+                                  >
+                                    {copiedId === `fn-${err.id}` ? (
+                                      <><Check className="h-3 w-3" /> Copied</>
+                                    ) : (
+                                      <><Copy className="h-3 w-3" /> Copy</>
+                                    )}
+                                  </Button>
+                                </div>
                                 <pre className="rounded-md bg-slate-950 text-red-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
                                   {err.errorPayload}
                                 </pre>
@@ -609,7 +828,21 @@ export function LogsView() {
                             )}
                             {err.input && (
                               <div>
-                                <p className="text-xs text-muted-foreground mb-1">Input:</p>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-muted-foreground text-xs">Input</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 text-xs gap-1"
+                                    onClick={() => void handleCopy(err.input ?? '', `fn-in-${err.id}`)}
+                                  >
+                                    {copiedId === `fn-in-${err.id}` ? (
+                                      <><Check className="h-3 w-3" /> Copied</>
+                                    ) : (
+                                      <><Copy className="h-3 w-3" /> Copy</>
+                                    )}
+                                  </Button>
+                                </div>
                                 <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[150px]">
                                   {err.input}
                                 </pre>

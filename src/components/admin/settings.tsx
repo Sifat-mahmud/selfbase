@@ -24,6 +24,10 @@ import {
   Clock,
   Activity,
   CircleAlert,
+  Mail,
+  Wrench,
+  AlertTriangle,
+  XCircle,
 } from 'lucide-react'
 import {
   Card,
@@ -69,6 +73,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 /* -------------------------------------------------------------------------- */
 /*                              Config Key Map                                */
@@ -242,11 +251,13 @@ function StickySaveBar({
   onReset,
   saving,
   dirty,
+  dirtyCount,
 }: {
   onSave: () => void
   onReset: () => void
   saving: boolean
   dirty: boolean
+  dirtyCount?: number
 }) {
   return (
     <div className="sticky bottom-0 -mx-4 mt-6 flex items-center justify-between border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8">
@@ -254,7 +265,7 @@ function StickySaveBar({
         {dirty ? (
           <>
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Unsaved changes
+            Unsaved changes{dirtyCount != null && dirtyCount > 0 ? ` (${dirtyCount} field${dirtyCount !== 1 ? 's' : ''})` : ''}
           </>
         ) : (
           <>
@@ -326,6 +337,62 @@ function ToggleField({
         </div>
       )}
     />
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*                            Validation Helpers                              */
+/* -------------------------------------------------------------------------- */
+
+function ValidationIndicator({ value, keyName }: { value: unknown; keyName: string }) {
+  const defaults: Record<string, unknown> = CONFIG_DEFAULTS
+  const isInsecureDefault =
+    (keyName === 'security.corsOrigins' && value === '*') ||
+    (keyName === 'security.ipWhitelist' && (value === '' || value == null)) ||
+    (keyName === 'general.adminEmail' && value === 'admin@selfbase.local') ||
+    (keyName === 'storage.cdnBaseUrl' && value === 'https://cdn.selfbase.local')
+  const isMissing =
+    value === '' || value === undefined || value === null
+  const isDefault =
+    keyName in defaults && value === defaults[keyName]
+
+  if (isMissing) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+        </TooltipTrigger>
+        <TooltipContent>Required field is missing</TooltipContent>
+      </Tooltip>
+    )
+  }
+  if (isInsecureDefault) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+        </TooltipTrigger>
+        <TooltipContent>Using default or insecure value</TooltipContent>
+      </Tooltip>
+    )
+  }
+  if (isDefault) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+        </TooltipTrigger>
+        <TooltipContent>Using default value</TooltipContent>
+      </Tooltip>
+    )
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+      </TooltipTrigger>
+      <TooltipContent>Properly configured</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -402,7 +469,10 @@ function GeneralTab({
               name="general.appName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>App Name</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>App Name</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="general.appName" />
+                  </div>
                   <FormControl>
                     <Input placeholder="SelfBase" {...field} />
                   </FormControl>
@@ -416,7 +486,10 @@ function GeneralTab({
               name="general.adminEmail"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Admin Email</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>Admin Email</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="general.adminEmail" />
+                  </div>
                   <FormControl>
                     <Input type="email" placeholder="admin@selfbase.local" {...field} />
                   </FormControl>
@@ -575,6 +648,7 @@ function GeneralTab({
           onReset={() => form.reset()}
           saving={saving}
           dirty={form.formState.isDirty}
+          dirtyCount={Object.keys(form.formState.dirtyFields).length}
         />
       </form>
     </Form>
@@ -680,7 +754,10 @@ function AiTab({
               name="ai.defaultLlmProvider"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Default LLM Provider</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>Default LLM Provider</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="ai.defaultLlmProvider" />
+                  </div>
                   <Select
                     onValueChange={field.onChange}
                     value={(field.value as string) || ''}
@@ -733,7 +810,10 @@ function AiTab({
               name="ai.defaultEmbeddingModel"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Default Embedding Model</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>Default Embedding Model</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="ai.defaultEmbeddingModel" />
+                  </div>
                   <FormControl>
                     <Input placeholder="text-embedding-3-small" {...field} />
                   </FormControl>
@@ -807,6 +887,7 @@ function AiTab({
           onReset={() => form.reset()}
           saving={saving}
           dirty={form.formState.isDirty}
+          dirtyCount={Object.keys(form.formState.dirtyFields).length}
         />
       </form>
     </Form>
@@ -881,7 +962,10 @@ function StorageTab({
               name="storage.defaultBucketName"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Default Bucket Name</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>Default Bucket Name</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="storage.defaultBucketName" />
+                  </div>
                   <FormControl>
                     <Input placeholder="selfbase-default" {...field} />
                   </FormControl>
@@ -966,7 +1050,10 @@ function StorageTab({
               name="storage.cdnBaseUrl"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>CDN Base URL</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>CDN Base URL</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="storage.cdnBaseUrl" />
+                  </div>
                   <FormControl>
                     <Input
                       placeholder="https://cdn.selfbase.local"
@@ -987,6 +1074,7 @@ function StorageTab({
           onReset={() => form.reset()}
           saving={saving}
           dirty={form.formState.isDirty}
+          dirtyCount={Object.keys(form.formState.dirtyFields).length}
         />
       </form>
     </Form>
@@ -1113,7 +1201,10 @@ function SecurityTab({
               name="security.ipWhitelist"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>IP Whitelist</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>IP Whitelist</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="security.ipWhitelist" />
+                  </div>
                   <FormControl>
                     <Textarea
                       rows={5}
@@ -1134,7 +1225,10 @@ function SecurityTab({
               name="security.corsOrigins"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>CORS Origins</FormLabel>
+                  <div className="flex items-center gap-1.5">
+                    <FormLabel>CORS Origins</FormLabel>
+                    <ValidationIndicator value={field.value} keyName="security.corsOrigins" />
+                  </div>
                   <FormControl>
                     <Textarea
                       rows={5}
@@ -1159,6 +1253,7 @@ function SecurityTab({
           onReset={() => form.reset()}
           saving={saving}
           dirty={form.formState.isDirty}
+          dirtyCount={Object.keys(form.formState.dirtyFields).length}
         />
       </form>
     </Form>
@@ -1377,12 +1472,12 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
         </Card>
       </div>
 
-      <Card>
+      <Card className="border-2 border-red-200 bg-red-500/5 dark:border-red-800 dark:bg-red-500/10">
         <CardHeader>
           <SectionHeader
             icon={CircleAlert}
-            title="Maintenance Actions"
-            description="Operational tasks for this instance."
+            title="Danger Zone"
+            description="Irreversible operations that affect service availability."
           />
         </CardHeader>
         <CardContent>
@@ -1391,7 +1486,7 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
               variant="outline"
               onClick={() => setShowRestartConfirm(true)}
               disabled={restarting}
-              className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+              className="gap-2 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
             >
               {restarting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1412,7 +1507,7 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction
-                    className="bg-amber-600 text-white hover:bg-amber-700"
+                    className="bg-red-600 text-white hover:bg-red-700"
                     onClick={() => void handleRestart()}
                   >
                     Restart Now
@@ -1434,7 +1529,7 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
               Export Config
             </Button>
             <p className="text-xs text-muted-foreground">
-              Restart triggers a graceful container reload. Export downloads a JSON snapshot of all
+              These actions are irreversible. Restart triggers a graceful container reload. Export downloads a JSON snapshot of all
               system config keys.
             </p>
           </div>
@@ -1555,7 +1650,7 @@ export function SettingsView() {
               value="general"
               className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
-              <Sliders className="h-3.5 w-3.5" />
+              <SettingsIcon className="h-3.5 w-3.5" />
               General
             </TabsTrigger>
             <TabsTrigger
@@ -1569,7 +1664,7 @@ export function SettingsView() {
               value="storage"
               className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
-              <HardDrive className="h-3.5 w-3.5" />
+              <Database className="h-3.5 w-3.5" />
               Storage
             </TabsTrigger>
             <TabsTrigger
@@ -1583,7 +1678,7 @@ export function SettingsView() {
               value="deployment"
               className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
-              <Server className="h-3.5 w-3.5" />
+              <Wrench className="h-3.5 w-3.5" />
               Deployment
             </TabsTrigger>
           </TabsList>

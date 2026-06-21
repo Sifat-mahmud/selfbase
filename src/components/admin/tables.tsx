@@ -28,6 +28,10 @@ import {
   Check,
   X,
   Loader2,
+  Sparkles,
+  ArrowRight,
+  Hash,
+  Rows3,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -1656,6 +1660,46 @@ export function TablesView() {
         </Dialog>
       </div>
 
+      {/* Quick Stats Bar */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+          <div className="rounded-md bg-emerald-500/10 p-2">
+            <Database className="h-4 w-4 text-emerald-600" />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Total Tables</div>
+            <div className="text-lg font-bold tabular-nums">{tables.length}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+          <div className="rounded-md bg-teal-500/10 p-2">
+            <Rows3 className="h-4 w-4 text-teal-600" />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Total Rows</div>
+            <div className="text-lg font-bold tabular-nums">{tables.reduce((s, t) => s + t.rowCount, 0).toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+          <div className="rounded-md bg-amber-500/10 p-2">
+            <Columns3 className="h-4 w-4 text-amber-600" />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Total Columns</div>
+            <div className="text-lg font-bold tabular-nums">{tables.reduce((s, t) => s + t.columns.length, 0).toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+          <div className="rounded-md bg-rose-500/10 p-2">
+            <Hash className="h-4 w-4 text-rose-600" />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Avg Rows/Table</div>
+            <div className="text-lg font-bold tabular-nums">{tables.length > 0 ? Math.round(tables.reduce((s, t) => s + t.rowCount, 0) / tables.length).toLocaleString() : '0'}</div>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -1675,19 +1719,23 @@ export function TablesView() {
       <Card>
         <CardContent className="p-0">
           {filteredTables.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-              <Database className="h-14 w-14 mb-3 opacity-30" />
-              <p className="text-base font-medium">No tables found</p>
-              <p className="text-sm mt-1">
-                {tables.length === 0
-                  ? 'Create your first table to get started.'
-                  : 'Try adjusting your search.'}
-              </p>
-              {tables.length === 0 && (
-                <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
-                  <Plus className="mr-1 h-4 w-4" /> New Table
-                </Button>
-              )}
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+              <div className="rounded-2xl border-2 border-dashed border-muted-foreground/20 p-8 flex flex-col items-center">
+                <div className="rounded-xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-amber-500/10 p-4 mb-4">
+                  <Database className="h-12 w-12 text-emerald-500/60" />
+                </div>
+                <p className="text-lg font-semibold text-foreground">No tables found</p>
+                <p className="text-sm mt-1.5 max-w-xs text-center">
+                  {tables.length === 0
+                    ? 'Create your first table to start storing and managing your data.'
+                    : 'Try adjusting your search to find what you\'re looking for.'}
+                </p>
+                {tables.length === 0 && (
+                  <Button className="mt-5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white" onClick={() => setShowCreateDialog(true)}>
+                    <Sparkles className="mr-1.5 h-4 w-4" /> Create Table
+                  </Button>
+                )}
+              </div>
             </div>
           ) : (
             <Table>
@@ -1716,16 +1764,20 @@ export function TablesView() {
                   return (
                     <TableRow
                       key={table.id}
-                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+                      className="cursor-pointer hover:bg-muted/50 hover:shadow-sm transition-all duration-200 group"
                       onClick={() => setSelectedTable(table)}
                     >
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Database className="h-4 w-4 text-emerald-500" />
                           <div>
-                            <div className="font-medium">{table.displayName || table.name}</div>
+                            <div className="font-medium flex items-center gap-2">
+                              {table.displayName || table.name}
+                              <Badge variant="outline" className="text-lg font-bold tabular-nums border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400">{table.rowCount}</Badge>
+                            </div>
                             <div className="text-xs text-muted-foreground font-mono">{table.name}</div>
                           </div>
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
                         </div>
                       </TableCell>
                       <TableCell>

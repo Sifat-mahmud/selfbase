@@ -1,0 +1,853 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback } from 'react'
+     4→     4→import { motion } from 'framer-motion'
+     5→     5→import {
+     6→     6→  Code2,
+     7→     7→  Plus,
+     8→     8→  Play,
+     9→     9→  Clock,
+    10→    10→  CheckCircle2,
+    11→    11→  XCircle,
+    12→    12→  AlertTriangle,
+    13→    13→  MoreHorizontal,
+    14→    14→  Pencil,
+    15→    15→  Trash2,
+    16→    16→  Search,
+    17→    17→  Zap,
+    18→    18→  Calendar,
+    19→    19→  Radio,
+    20→    20→  ArrowRight,
+    21→    21→  Terminal,
+    22→    22→  Copy,
+    23→    23→  RefreshCw,
+    24→    24→  Loader2,
+    25→    25→} from 'lucide-react'
+    26→    26→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    27→    27→import { Button } from '@/components/ui/button'
+    28→    28→import { Input } from '@/components/ui/input'
+    29→    29→import { Badge } from '@/components/ui/badge'
+    30→    30→import { Skeleton } from '@/components/ui/skeleton'
+    31→    31→import { Textarea } from '@/components/ui/textarea'
+    32→    32→import { Label } from '@/components/ui/label'
+    33→    33→import {
+    34→    34→  Table,
+    35→    35→  TableBody,
+    36→    36→  TableCell,
+    37→    37→  TableHead,
+    38→    38→  TableHeader,
+    39→    39→  TableRow,
+    40→    40→} from '@/components/ui/table'
+    41→    41→import {
+    42→    42→  Dialog,
+    43→    43→  DialogContent,
+    44→    44→  DialogDescription,
+    45→    45→  DialogFooter,
+    46→    46→  DialogHeader,
+    47→    47→  DialogTitle,
+    48→    48→  DialogTrigger,
+    49→    49→} from '@/components/ui/dialog'
+    50→    50→import {
+    51→    51→  DropdownMenu,
+    52→    52→  DropdownMenuContent,
+    53→    53→  DropdownMenuItem,
+    54→    54→  DropdownMenuSeparator,
+    55→    55→  DropdownMenuTrigger,
+    56→    56→} from '@/components/ui/dropdown-menu'
+    57→    57→import {
+    58→    58→  Select,
+    59→    59→  SelectContent,
+    60→    60→  SelectItem,
+    61→    61→  SelectTrigger,
+    62→    62→  SelectValue,
+    63→    63→} from '@/components/ui/select'
+    64→    64→import { Switch } from '@/components/ui/switch'
+    65→    65→import {
+    66→    66→  Tooltip,
+    67→    67→  TooltipContent,
+    68→    68→  TooltipTrigger,
+    69→    69→} from '@/components/ui/tooltip'
+    70→    70→import { useToast } from '@/hooks/use-toast'
+    71→    71→import { apiGet, apiPost, apiPut, apiDelete, parseJsonField } from '@/lib/api-client'
+    72→    72→
+    73→    73→interface FunctionRunItem {
+    74→    74→  id: string
+    75→    75→  status: 'pending' | 'running' | 'success' | 'failed' | 'timeout'
+    76→    76→  triggeredBy: string | null
+    77→    77→  durationMs: number | null
+    78→    78→  memoryUsedMb: number | null
+    79→    79→  startedAt: string
+    80→    80→  completedAt: string | null
+    81→    81→  errorPayload?: string | null
+    82→    82→  output?: string | null
+    83→    83→}
+    84→    84→
+    85→    85→interface SbFunctionItem {
+    86→    86→  id: string
+    87→    87→  name: string
+    88→    88→  description: string | null
+    89→    89→  code: string
+    90→    90→  runtime: string
+    91→    91→  triggerType: 'http' | 'schedule' | 'event'
+    92→    92→  triggerConfig: string | null
+    93→    93→  envVars?: string | null
+    94→    94→  timeoutMs: number
+    95→    95→  memoryMb: number
+    96→    96→  isActive: boolean
+    97→    97→  createdAt: string
+    98→    98→  functionRuns?: FunctionRunItem[]
+    99→    99→}
+   100→   100→
+   101→   101→const triggerIcons = {
+   102→   102→  http: Zap,
+   103→   103→  schedule: Clock,
+   104→   104→  event: Radio,
+   105→   105→}
+   106→   106→
+   107→   107→const triggerBadgeColors: Record<string, string> = {
+   108→   108→  http: 'bg-blue-500/10 text-blue-700 border-blue-200',
+   109→   109→  schedule: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   110→   110→  event: 'bg-purple-500/10 text-purple-700 border-purple-200',
+   111→   111→}
+   112→   112→
+   113→   113→const statusIcons = {
+   114→   114→  pending: Clock,
+   115→   115→  running: Play,
+   116→   116→  success: CheckCircle2,
+   117→   117→  failed: XCircle,
+   118→   118→  timeout: AlertTriangle,
+   119→   119→}
+   120→   120→
+   121→   121→const statusColors = {
+   122→   122→  pending: 'text-amber-500',
+   123→   123→  running: 'text-blue-500',
+   124→   124→  success: 'text-emerald-500',
+   125→   125→  failed: 'text-red-500',
+   126→   126→  timeout: 'text-amber-500',
+   127→   127→}
+   128→   128→
+   129→   129→const statusBadgeColors: Record<string, string> = {
+   130→   130→  pending: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   131→   131→  running: 'bg-blue-500/10 text-blue-700 border-blue-200',
+   132→   132→  success: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+   133→   133→  failed: 'bg-red-500/10 text-red-700 border-red-200',
+   134→   134→  timeout: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   135→   135→}
+   136→   136→
+   137→   137→const defaultCode = `export default async function handler(ctx) {
+   138→   138→  const { input, env } = ctx;
+   139→   139→  // Your code here
+   140→   140→  console.log('Input:', input);
+   141→   141→  return { ok: true, received: Object.keys(input || {}).length };
+   142→   142→}
+   143→   143→`
+   144→   144→
+   145→   145→export function FunctionsView() {
+   146→   146→  const { toast } = useToast()
+   147→   147→  const [functions, setFunctions] = useState<SbFunctionItem[]>([])
+   148→   148→  const [loading, setLoading] = useState(true)
+   149→   149→  const [search, setSearch] = useState('')
+   150→   150→  const [showCreateDialog, setShowCreateDialog] = useState(false)
+   151→   151→  const [selectedFunction, setSelectedFunction] = useState<SbFunctionItem | null>(null)
+   152→   152→  const [runningId, setRunningId] = useState<string | null>(null)
+   153→   153→  const [runResult, setRunResult] = useState<{ fn: SbFunctionItem; result: { runId: string; status: string; output?: unknown; durationMs?: number; error?: string } } | null>(null)
+   154→   154→
+   155→   155→  // Create form
+   156→   156→  const [newName, setNewName] = useState('')
+   157→   157→  const [newDesc, setNewDesc] = useState('')
+   158→   158→  const [newRuntime, setNewRuntime] = useState('javascript')
+   159→   159→  const [newTrigger, setNewTrigger] = useState<'http' | 'schedule' | 'event'>('http')
+   160→   160→  const [newTimeout, setNewTimeout] = useState('30000')
+   161→   161→  const [newMemory, setNewMemory] = useState('128')
+   162→   162→  const [newCron, setNewCron] = useState('')
+   163→   163→  const [newEventPattern, setNewEventPattern] = useState('')
+   164→   164→  const [newEnvVars, setNewEnvVars] = useState('{}')
+   165→   165→  const [codeText, setCodeText] = useState(defaultCode)
+   166→   166→
+   167→   167→  const loadAll = useCallback(async () => {
+   168→   168→    setLoading(true)
+   169→   169→    try {
+   170→   170→      const data = await apiGet<SbFunctionItem[]>('/api/functions')
+   171→   171→      setFunctions(Array.isArray(data) ? data : [])
+   172→   172→    } catch (err) {
+   173→   173→      toast({
+   174→   174→        title: 'Failed to load functions',
+   175→   175→        description: err instanceof Error ? err.message : 'Unknown error',
+   176→   176→        variant: 'destructive',
+   177→   177→      })
+   178→   178→    } finally {
+   179→   179→      setLoading(false)
+   180→   180→    }
+   181→   181→  }, [toast])
+   182→   182→
+   183→   183→  useEffect(() => {
+   184→   184→    void loadAll()
+   185→   185→  }, [loadAll])
+   186→   186→
+   187→   187→  const handleCreate = async () => {
+   188→   188→    if (!newName.trim()) {
+   189→   189→      toast({ title: 'Name required', variant: 'destructive' })
+   190→   190→      return
+   191→   191→    }
+   192→   192→    const triggerConfig: Record<string, unknown> = {}
+   193→   193→    if (newTrigger === 'schedule' && newCron) triggerConfig.cron = newCron
+   194→   194→    if (newTrigger === 'event' && newEventPattern) triggerConfig.pattern = newEventPattern
+   195→   195→    try {
+   196→   196→      const created = await apiPost<SbFunctionItem>('/api/functions', {
+   197→   197→        name: newName.trim(),
+   198→   198→        description: newDesc || null,
+   199→   199→        code: codeText,
+   200→   200→        runtime: newRuntime,
+   201→   201→        triggerType: newTrigger,
+   202→   202→        triggerConfig: Object.keys(triggerConfig).length > 0 ? JSON.stringify(triggerConfig) : null,
+   203→   203→        envVars: newEnvVars || null,
+   204→   204→        timeoutMs: Number(newTimeout) || 30000,
+   205→   205→        memoryMb: Number(newMemory) || 128,
+   206→   206→        isActive: true,
+   207→   207→      })
+   208→   208→      setFunctions((prev) => [{ ...created, functionRuns: [] }, ...prev])
+   209→   209→      setShowCreateDialog(false)
+   210→   210→      setNewName('')
+   211→   211→      setNewDesc('')
+   212→   212→      setNewRuntime('javascript')
+   213→   213→      setNewTrigger('http')
+   214→   214→      setNewTimeout('30000')
+   215→   215→      setNewMemory('128')
+   216→   216→      setNewCron('')
+   217→   217→      setNewEventPattern('')
+   218→   218→      setNewEnvVars('{}')
+   219→   219→      setCodeText(defaultCode)
+   220→   220→      toast({ title: 'Function created', description: `"${created.name}" has been deployed.` })
+   221→   221→    } catch (err) {
+   222→   222→      toast({
+   223→   223→        title: 'Failed to create function',
+   224→   224→        description: err instanceof Error ? err.message : 'Unknown error',
+   225→   225→        variant: 'destructive',
+   226→   226→      })
+   227→   227→    }
+   228→   228→  }
+   229→   229→
+   230→   230→  const handleToggleActive = async (fn: SbFunctionItem) => {
+   231→   231→    try {
+   232→   232→      await apiPut(`/api/functions/${fn.id}`, { isActive: !fn.isActive })
+   233→   233→      setFunctions((prev) =>
+   234→   234→        prev.map((f) => (f.id === fn.id ? { ...f, isActive: !f.isActive } : f)),
+   235→   235→      )
+   236→   236→      if (selectedFunction?.id === fn.id) {
+   237→   237→        setSelectedFunction((prev) => (prev ? { ...prev, isActive: !prev.isActive } : prev))
+   238→   238→      }
+   239→   239→      toast({ title: `Function ${fn.isActive ? 'deactivated' : 'activated'}` })
+   240→   240→    } catch (err) {
+   241→   241→      toast({
+   242→   242→        title: 'Failed to toggle function',
+   243→   243→        description: err instanceof Error ? err.message : 'Unknown error',
+   244→   244→        variant: 'destructive',
+   245→   245→      })
+   246→   246→    }
+   247→   247→  }
+   248→   248→
+   249→   249→  const handleRun = async (fn: SbFunctionItem) => {
+   250→   250→    setRunningId(fn.id)
+   251→   251→    try {
+   252→   252→      const result = await apiPost<{ runId: string; status: string; output?: unknown; durationMs?: number; error?: string }>(
+   253→   253→        `/api/functions/${fn.id}/run`,
+   254→   254→        {},
+   255→   255→      )
+   256→   256→      setRunResult({ fn, result })
+   257→   257→      toast({
+   258→   258→        title: result.status === 'success' ? 'Function executed' : 'Function run failed',
+   259→   259→        description:
+   260→   260→          result.status === 'success'
+   261→   261→            ? `Completed in ${result.durationMs ?? 0}ms.`
+   262→   262→            : result.error ?? `Status: ${result.status}`,
+   263→   263→        variant: result.status === 'success' ? 'default' : 'destructive',
+   264→   264→      })
+   265→   265→      await loadAll()
+   266→   266→      if (selectedFunction?.id === fn.id) {
+   267→   267→        const fresh = (await apiGet<SbFunctionItem[]>('/api/functions')).find((f) => f.id === fn.id)
+   268→   268→        if (fresh) setSelectedFunction(fresh)
+   269→   269→      }
+   270→   270→    } catch (err) {
+   271→   271→      toast({
+   272→   272→        title: 'Function run failed',
+   273→   273→        description: err instanceof Error ? err.message : 'Unknown error',
+   274→   274→        variant: 'destructive',
+   275→   275→      })
+   276→   276→    } finally {
+   277→   277→      setRunningId(null)
+   278→   278→    }
+   279→   279→  }
+   280→   280→
+   281→   281→  const handleDelete = async (fn: SbFunctionItem) => {
+   282→   282→    try {
+   283→   283→      await apiDelete(`/api/functions/${fn.id}`)
+   284→   284→      setFunctions((prev) => prev.filter((f) => f.id !== fn.id))
+   285→   285→      if (selectedFunction?.id === fn.id) setSelectedFunction(null)
+   286→   286→      toast({ title: 'Function deleted', variant: 'destructive' })
+   287→   287→    } catch (err) {
+   288→   288→      toast({
+   289→   289→        title: 'Failed to delete function',
+   290→   290→        description: err instanceof Error ? err.message : 'Unknown error',
+   291→   291→        variant: 'destructive',
+   292→   292→      })
+   293→   293→    }
+   294→   294→  }
+   295→   295→
+   296→   296→  const filteredFunctions = functions.filter(
+   297→   297→    (f) =>
+   298→   298→      f.name.toLowerCase().includes(search.toLowerCase()) ||
+   299→   299→      (f.description ?? '').toLowerCase().includes(search.toLowerCase()),
+   300→   300→  )
+   301→   301→
+   302→   302→  if (loading) {
+   303→   303→    return (
+   304→   304→      <div className="space-y-6">
+   305→   305→        <Skeleton className="h-8 w-48" />
+   306→   306→        <div className="grid gap-4 md:grid-cols-2">
+   307→   307→          {Array.from({ length: 4 }).map((_, i) => (
+   308→   308→            <Card key={i}>
+   309→   309→              <CardContent className="p-4">
+   310→   310→                <Skeleton className="h-40 w-full" />
+   311→   311→              </CardContent>
+   312→   312→            </Card>
+   313→   313→          ))}
+   314→   314→        </div>
+   315→   315→      </div>
+   316→   316→    )
+   317→   317→  }
+   318→   318→
+   319→   319→  if (selectedFunction) {
+   320→   320→    const TriggerIcon = triggerIcons[selectedFunction.triggerType]
+   321→   321→    const runs = selectedFunction.functionRuns ?? []
+   322→   322→    return (
+   323→   323→      <motion.div
+   324→   324→        initial={{ opacity: 0, y: 8 }}
+   325→   325→        animate={{ opacity: 1, y: 0 }}
+   326→   326→        transition={{ duration: 0.2 }}
+   327→   327→        className="space-y-6"
+   328→   328→      >
+   329→   329→        <div className="flex items-center gap-2 flex-wrap">
+   330→   330→          <Button variant="ghost" size="sm" onClick={() => setSelectedFunction(null)}>
+   331→   331→            <ArrowRight className="h-4 w-4 rotate-180" /> Back
+   332→   332→          </Button>
+   333→   333→          <div className="h-6 w-px bg-border" />
+   334→   334→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white">
+   335→   335→            <Code2 className="h-5 w-5" />
+   336→   336→          </div>
+   337→   337→          <h1 className="text-2xl font-bold tracking-tight">{selectedFunction.name}</h1>
+   338→   338→          <Badge variant="outline" className={`capitalize ${triggerBadgeColors[selectedFunction.triggerType]}`}>
+   339→   339→            <TriggerIcon className="h-3 w-3 mr-1" />
+   340→   340→            {selectedFunction.triggerType}
+   341→   341→          </Badge>
+   342→   342→          <Badge variant={selectedFunction.isActive ? 'default' : 'secondary'}>
+   343→   343→            {selectedFunction.isActive ? 'Active' : 'Inactive'}
+   344→   344→          </Badge>
+   345→   345→          <div className="ml-auto flex gap-2">
+   346→   346→            <Button
+   347→   347→              size="sm"
+   348→   348→              onClick={() => void handleRun(selectedFunction)}
+   349→   349→              disabled={runningId === selectedFunction.id || !selectedFunction.isActive}
+   350→   350→            >
+   351→   351→              {runningId === selectedFunction.id ? (
+   352→   352→                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+   353→   353→              ) : (
+   354→   354→                <Play className="mr-1 h-3.5 w-3.5" />
+   355→   355→              )}
+   356→   356→              Run
+   357→   357→            </Button>
+   358→   358→          </div>
+   359→   359→        </div>
+   360→   360→
+   361→   361→        <div className="grid gap-4 md:grid-cols-4">
+   362→   362→          <Card>
+   363→   363→            <CardContent className="pt-4">
+   364→   364→              <div className="text-sm text-muted-foreground">Trigger</div>
+   365→   365→              <div className="flex items-center gap-1 text-lg font-bold capitalize">
+   366→   366→                <TriggerIcon className="h-4 w-4" />
+   367→   367→                {selectedFunction.triggerType}
+   368→   368→              </div>
+   369→   369→            </CardContent>
+   370→   370→          </Card>
+   371→   371→          <Card>
+   372→   372→            <CardContent className="pt-4">
+   373→   373→              <div className="text-sm text-muted-foreground">Timeout</div>
+   374→   374→              <div className="text-lg font-bold">{selectedFunction.timeoutMs / 1000}s</div>
+   375→   375→            </CardContent>
+   376→   376→          </Card>
+   377→   377→          <Card>
+   378→   378→            <CardContent className="pt-4">
+   379→   379→              <div className="text-sm text-muted-foreground">Memory</div>
+   380→   380→              <div className="text-lg font-bold">{selectedFunction.memoryMb} MB</div>
+   381→   381→            </CardContent>
+   382→   382→          </Card>
+   383→   383→          <Card>
+   384→   384→            <CardContent className="pt-4">
+   385→   385→              <div className="text-sm text-muted-foreground">Total Runs</div>
+   386→   386→              <div className="text-lg font-bold">{runs.length}</div>
+   387→   387→            </CardContent>
+   388→   388→          </Card>
+   389→   389→        </div>
+   390→   390→
+   391→   391→        <Card>
+   392→   392→          <CardHeader className="flex flex-row items-center justify-between">
+   393→   393→            <div>
+   394→   394→              <CardTitle className="text-base">Source Code</CardTitle>
+   395→   395→              <CardDescription>
+   396→   396→                {selectedFunction.runtime} · {selectedFunction.code.split('\n').length} lines
+   397→   397→              </CardDescription>
+   398→   398→            </div>
+   399→   399→            <div className="flex gap-2">
+   400→   400→              <Tooltip>
+   401→   401→                <TooltipTrigger asChild>
+   402→   402→                  <Button
+   403→   403→                    variant="outline"
+   404→   404→                    size="sm"
+   405→   405→                    onClick={() => {
+   406→   406→                      navigator.clipboard.writeText(selectedFunction.code)
+   407→   407→                      toast({ title: 'Code copied' })
+   408→   408→                    }}
+   409→   409→                  >
+   410→   410→                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy
+   411→   411→                  </Button>
+   412→   412→                </TooltipTrigger>
+   413→   413→                <TooltipContent>Copy code to clipboard</TooltipContent>
+   414→   414→              </Tooltip>
+   415→   415→              <Button size="sm" onClick={() => void handleRun(selectedFunction)} disabled={runningId === selectedFunction.id || !selectedFunction.isActive}>
+   416→   416→                <Play className="h-3.5 w-3.5 mr-1" /> Run
+   417→   417→              </Button>
+   418→   418→            </div>
+   419→   419→          </CardHeader>
+   420→   420→          <CardContent>
+   421→   421→            <div className="rounded-md bg-slate-950 text-emerald-400 p-4 overflow-auto max-h-[400px]">
+   422→   422→              <pre className="text-sm font-mono whitespace-pre-wrap">{selectedFunction.code}</pre>
+   423→   423→            </div>
+   424→   424→          </CardContent>
+   425→   425→        </Card>
+   426→   426→
+   427→   427→        {selectedFunction.triggerConfig && (
+   428→   428→          <Card>
+   429→   429→            <CardHeader>
+   430→   430→              <CardTitle className="text-base">Trigger Configuration</CardTitle>
+   431→   431→              <CardDescription>How this function is invoked</CardDescription>
+   432→   432→            </CardHeader>
+   433→   433→            <CardContent>
+   434→   434→              <div className="rounded-md bg-muted/50 p-3">
+   435→   435→                <pre className="text-sm font-mono">
+   436→   436→                  {JSON.stringify(parseJsonField(selectedFunction.triggerConfig, {}), null, 2)}
+   437→   437→                </pre>
+   438→   438→              </div>
+   439→   439→            </CardContent>
+   440→   440→          </Card>
+   441→   441→        )}
+   442→   442→
+   443→   443→        <Card>
+   444→   444→          <CardHeader>
+   445→   445→            <CardTitle className="text-base">Run History</CardTitle>
+   446→   446→            <CardDescription>Recent function executions</CardDescription>
+   447→   447→          </CardHeader>
+   448→   448→          <CardContent>
+   449→   449→            {runs.length === 0 ? (
+   450→   450→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   451→   451→                <Terminal className="h-10 w-10 mb-2 opacity-40" />
+   452→   452→                <p className="text-sm">No runs yet</p>
+   453→   453→                <p className="text-xs mt-1">Click "Run" to execute this function.</p>
+   454→   454→              </div>
+   455→   455→            ) : (
+   456→   456→              <div className="rounded-md border max-h-96 overflow-y-auto">
+   457→   457→                <Table>
+   458→   458→                  <TableHeader className="sticky top-0 bg-background">
+   459→   459→                    <TableRow>
+   460→   460→                      <TableHead>Status</TableHead>
+   461→   461→                      <TableHead>Trigger</TableHead>
+   462→   462→                      <TableHead>Duration</TableHead>
+   463→   463→                      <TableHead>Memory</TableHead>
+   464→   464→                      <TableHead>Started</TableHead>
+   465→   465→                    </TableRow>
+   466→   466→                  </TableHeader>
+   467→   467→                  <TableBody>
+   468→   468→                    {runs.map((run) => {
+   469→   469→                      const RunIcon = statusIcons[run.status]
+   470→   470→                      return (
+   471→   471→                        <TableRow key={run.id} className="hover:bg-muted/40">
+   472→   472→                          <TableCell>
+   473→   473→                            <div className="flex items-center gap-1.5">
+   474→   474→                              <RunIcon className={`h-3.5 w-3.5 ${statusColors[run.status]}`} />
+   475→   475→                              <span className={`text-sm capitalize font-medium ${statusColors[run.status]}`}>
+   476→   476→                                {run.status}
+   477→   477→                              </span>
+   478→   478→                            </div>
+   479→   479→                          </TableCell>
+   480→   480→                          <TableCell>
+   481→   481→                            <Badge variant="outline" className="text-xs capitalize">
+   482→   482→                              {run.triggeredBy ?? '—'}
+   483→   483→                            </Badge>
+   484→   484→                          </TableCell>
+   485→   485→                          <TableCell className="font-mono text-sm">
+   486→   486→                            {run.durationMs ? `${run.durationMs}ms` : '—'}
+   487→   487→                          </TableCell>
+   488→   488→                          <TableCell className="text-sm">
+   489→   489→                            {run.memoryUsedMb ? `${Math.round(run.memoryUsedMb)} MB` : '—'}
+   490→   490→                          </TableCell>
+   491→   491→                          <TableCell className="text-sm text-muted-foreground">
+   492→   492→                            {new Date(run.startedAt).toLocaleString()}
+   493→   493→                          </TableCell>
+   494→   494→                        </TableRow>
+   495→   495→                      )
+   496→   496→                    })}
+   497→   497→                  </TableBody>
+   498→   498→                </Table>
+   499→   499→              </div>
+   500→   500→            )}
+   501→   501→          </CardContent>
+   502→   502→        </Card>
+   503→   503→
+   504→   504→        {/* Run Result Dialog */}
+   505→   505→        <Dialog open={!!runResult} onOpenChange={(open) => !open && setRunResult(null)}>
+   506→   506→          <DialogContent className="max-w-2xl">
+   507→   507→            <DialogHeader>
+   508→   508→              <DialogTitle className="flex items-center gap-2">
+   509→   509→                {runResult?.result.status === 'success' ? (
+   510→   510→                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   511→   511→                ) : (
+   512→   512→                  <XCircle className="h-4 w-4 text-red-500" />
+   513→   513→                )}
+   514→   514→                Function Result: {runResult?.fn.name}
+   515→   515→              </DialogTitle>
+   516→   516→              <DialogDescription>
+   517→   517→                {runResult?.result.status === 'success' ? 'Executed successfully' : 'Execution failed'}
+   518→   518→                {runResult?.result.durationMs ? ` in ${runResult.result.durationMs}ms` : ''}
+   519→   519→              </DialogDescription>
+   520→   520→            </DialogHeader>
+   521→   521→            <div className="space-y-3">
+   522→   522→              <div className="flex gap-3 text-xs">
+   523→   523→                <Badge variant={runResult?.result.status === 'success' ? 'default' : 'destructive'} className="capitalize">
+   524→   524→                  {runResult?.result.status}
+   525→   525→                </Badge>
+   526→   526→                {runResult?.result.durationMs && (
+   527→   527→                  <Badge variant="outline">Duration: {runResult.result.durationMs}ms</Badge>
+   528→   528→                )}
+   529→   529→                <Badge variant="outline">Run ID: {runResult?.result.runId?.slice(0, 8)}...</Badge>
+   530→   530→              </div>
+   531→   531→              {runResult?.result.error && (
+   532→   532→                <div className="rounded-md bg-red-500/10 border border-red-200 p-3 text-sm text-red-700">
+   533→   533→                  {runResult.result.error}
+   534→   534→                </div>
+   535→   535→              )}
+   536→   536→              {runResult?.result.output !== undefined && (
+   537→   537→                <div>
+   538→   538→                  <div className="text-sm font-medium mb-1">Output</div>
+   539→   539→                  <div className="rounded-md bg-slate-950 text-emerald-400 p-3 overflow-auto max-h-[40vh]">
+   540→   540→                    <pre className="text-sm font-mono whitespace-pre-wrap">
+   541→   541→                      {typeof runResult.result.output === 'string'
+   542→   542→                        ? runResult.result.output
+   543→   543→                        : JSON.stringify(runResult.result.output, null, 2)}
+   544→   544→                    </pre>
+   545→   545→                  </div>
+   546→   546→                </div>
+   547→   547→              )}
+   548→   548→            </div>
+   549→   549→            <DialogFooter>
+   550→   550→              <Button variant="outline" onClick={() => setRunResult(null)}>Close</Button>
+   551→   551→              <Button
+   552→   552→                onClick={() => {
+   553→   553→                  if (runResult?.result.output) {
+   554→   554→                    navigator.clipboard.writeText(
+   555→   555→                      typeof runResult.result.output === 'string'
+   556→   556→                        ? runResult.result.output
+   557→   557→                        : JSON.stringify(runResult.result.output, null, 2),
+   558→   558→                    )
+   559→   559→                    toast({ title: 'Output copied' })
+   560→   560→                  }
+   561→   561→                }}
+   562→   562→              >
+   563→   563→                <Copy className="mr-1 h-3.5 w-3.5" /> Copy Output
+   564→   564→              </Button>
+   565→   565→            </DialogFooter>
+   566→   566→          </DialogContent>
+   567→   567→        </Dialog>
+   568→   568→      </motion.div>
+   569→   569→    )
+   570→   570→  }
+   571→   571→
+   572→   572→  return (
+   573→   573→    <motion.div
+   574→   574→      initial={{ opacity: 0, y: 8 }}
+   575→   575→      animate={{ opacity: 1, y: 0 }}
+   576→   576→      transition={{ duration: 0.2 }}
+   577→   577→      className="space-y-6"
+   578→   578→    >
+   579→   579→      <div className="flex items-center justify-between flex-wrap gap-2">
+   580→   580→        <div>
+   581→   581→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   582→   582→            Functions
+   583→   583→          </h1>
+   584→   584→          <p className="text-muted-foreground">Manage serverless functions and triggers</p>
+   585→   585→        </div>
+   586→   586→        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+   587→   587→          <DialogTrigger asChild>
+   588→   588→            <Button>
+   589→   589→              <Plus className="mr-1 h-4 w-4" /> New Function
+   590→   590→            </Button>
+   591→   591→          </DialogTrigger>
+   592→   592→          <DialogContent className="max-w-3xl">
+   593→   593→            <DialogHeader>
+   594→   594→              <DialogTitle>Create Function</DialogTitle>
+   595→   595→              <DialogDescription>Deploy a new serverless function</DialogDescription>
+   596→   596→            </DialogHeader>
+   597→   597→            <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto">
+   598→   598→              <div className="grid gap-3 md:grid-cols-2">
+   599→   599→                <div className="space-y-2">
+   600→   600→                  <Label>Function Name</Label>
+   601→   601→                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="myFunction" />
+   602→   602→                </div>
+   603→   603→                <div className="space-y-2">
+   604→   604→                  <Label>Runtime</Label>
+   605→   605→                  <Select value={newRuntime} onValueChange={setNewRuntime}>
+   606→   606→                    <SelectTrigger>
+   607→   607→                      <SelectValue />
+   608→   608→                    </SelectTrigger>
+   609→   609→                    <SelectContent>
+   610→   610→                      <SelectItem value="javascript">JavaScript</SelectItem>
+   611→   611→                      <SelectItem value="typescript">TypeScript</SelectItem>
+   612→   612→                    </SelectContent>
+   613→   613→                  </Select>
+   614→   614→                </div>
+   615→   615→              </div>
+   616→   616→              <div className="space-y-2">
+   617→   617→                <Label>Description</Label>
+   618→   618→                <Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="What does this function do?" />
+   619→   619→              </div>
+   620→   620→              <div className="grid gap-3 md:grid-cols-3">
+   621→   621→                <div className="space-y-2">
+   622→   622→                  <Label>Trigger Type</Label>
+   623→   623→                  <Select value={newTrigger} onValueChange={(v) => setNewTrigger(v as typeof newTrigger)}>
+   624→   624→                    <SelectTrigger>
+   625→   625→                      <SelectValue />
+   626→   626→                    </SelectTrigger>
+   627→   627→                    <SelectContent>
+   628→   628→                      <SelectItem value="http">HTTP Endpoint</SelectItem>
+   629→   629→                      <SelectItem value="schedule">Scheduled (Cron)</SelectItem>
+   630→   630→                      <SelectItem value="event">Event-driven</SelectItem>
+   631→   631→                    </SelectContent>
+   632→   632→                  </Select>
+   633→   633→                </div>
+   634→   634→                <div className="space-y-2">
+   635→   635→                  <Label>Timeout (ms)</Label>
+   636→   636→                  <Input type="number" value={newTimeout} onChange={(e) => setNewTimeout(e.target.value)} />
+   637→   637→                </div>
+   638→   638→                <div className="space-y-2">
+   639→   639→                  <Label>Memory (MB)</Label>
+   640→   640→                  <Input type="number" value={newMemory} onChange={(e) => setNewMemory(e.target.value)} />
+   641→   641→                </div>
+   642→   642→              </div>
+   643→   643→              {newTrigger === 'schedule' && (
+   644→   644→                <div className="space-y-2">
+   645→   645→                  <Label>Cron Expression</Label>
+   646→   646→                  <Input
+   647→   647→                    value={newCron}
+   648→   648→                    onChange={(e) => setNewCron(e.target.value)}
+   649→   649→                    placeholder="0 9 * * *"
+   650→   650→                  />
+   651→   651→                  <p className="text-xs text-muted-foreground">Standard cron format (min hour day month weekday)</p>
+   652→   652→                </div>
+   653→   653→              )}
+   654→   654→              {newTrigger === 'event' && (
+   655→   655→                <div className="space-y-2">
+   656→   656→                  <Label>Event Pattern</Label>
+   657→   657→                  <Input
+   658→   658→                    value={newEventPattern}
+   659→   659→                    onChange={(e) => setNewEventPattern(e.target.value)}
+   660→   660→                    placeholder="orders.*"
+   661→   661→                  />
+   662→   662→                </div>
+   663→   663→              )}
+   664→   664→              <div className="space-y-2">
+   665→   665→                <Label>Environment Variables (JSON)</Label>
+   666→   666→                <Textarea
+   667→   667→                  value={newEnvVars}
+   668→   668→                  onChange={(e) => setNewEnvVars(e.target.value)}
+   669→   669→                  className="font-mono text-xs"
+   670→   670→                  rows={3}
+   671→   671→                  placeholder='{"API_KEY": "..."}'
+   672→   672→                />
+   673→   673→              </div>
+   674→   674→              <div className="space-y-2">
+   675→   675→                <Label>Code</Label>
+   676→   676→                <Textarea
+   677→   677→                  value={codeText}
+   678→   678→                  onChange={(e) => setCodeText(e.target.value)}
+   679→   679→                  className="font-mono text-xs bg-slate-950 text-emerald-400 min-h-[260px]"
+   680→   680→                  rows={12}
+   681→   681→                />
+   682→   682→              </div>
+   683→   683→            </div>
+   684→   684→            <DialogFooter>
+   685→   685→              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+   686→   686→                Cancel
+   687→   687→              </Button>
+   688→   688→              <Button onClick={handleCreate}>Create Function</Button>
+   689→   689→            </DialogFooter>
+   690→   690→          </DialogContent>
+   691→   691→        </Dialog>
+   692→   692→      </div>
+   693→   693→
+   694→   694→      <div className="grid gap-4 md:grid-cols-4">
+   695→   695→        <Card>
+   696→   696→          <CardContent className="pt-4">
+   697→   697→            <div className="text-sm text-muted-foreground">Total Functions</div>
+   698→   698→            <div className="text-2xl font-bold">{functions.length}</div>
+   699→   699→          </CardContent>
+   700→   700→        </Card>
+   701→   701→        <Card>
+   702→   702→          <CardContent className="pt-4">
+   703→   703→            <div className="text-sm text-muted-foreground">Active</div>
+   704→   704→            <div className="text-2xl font-bold text-emerald-600">
+   705→   705→              {functions.filter((f) => f.isActive).length}
+   706→   706→            </div>
+   707→   707→          </CardContent>
+   708→   708→        </Card>
+   709→   709→        <Card>
+   710→   710→          <CardContent className="pt-4">
+   711→   711→            <div className="text-sm text-muted-foreground">HTTP Triggers</div>
+   712→   712→            <div className="text-2xl font-bold">
+   713→   713→              {functions.filter((f) => f.triggerType === 'http').length}
+   714→   714→            </div>
+   715→   715→          </CardContent>
+   716→   716→        </Card>
+   717→   717→        <Card>
+   718→   718→          <CardContent className="pt-4">
+   719→   719→            <div className="text-sm text-muted-foreground">Total Runs</div>
+   720→   720→            <div className="text-2xl font-bold">
+   721→   721→              {functions.reduce((s, f) => s + (f.functionRuns?.length ?? 0), 0)}
+   722→   722→            </div>
+   723→   723→          </CardContent>
+   724→   724→        </Card>
+   725→   725→      </div>
+   726→   726→
+   727→   727→      <div className="flex items-center gap-3 flex-wrap">
+   728→   728→        <div className="relative flex-1 max-w-sm">
+   729→   729→          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+   730→   730→          <Input
+   731→   731→            placeholder="Search functions..."
+   732→   732→            value={search}
+   733→   733→            onChange={(e) => setSearch(e.target.value)}
+   734→   734→            className="pl-9"
+   735→   735→          />
+   736→   736→        </div>
+   737→   737→        <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+   738→   738→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+   739→   739→        </Button>
+   740→   740→      </div>
+   741→   741→
+   742→   742→      <div className="grid gap-4 md:grid-cols-2">
+   743→   743→        {filteredFunctions.length === 0 ? (
+   744→   744→          <Card className="md:col-span-2">
+   745→   745→            <CardContent className="py-16 flex flex-col items-center justify-center text-muted-foreground">
+   746→   746→              <Code2 className="h-14 w-14 mb-3 opacity-30" />
+   747→   747→              <p className="text-base font-medium">No functions yet</p>
+   748→   748→              <p className="text-sm mt-1">Deploy your first serverless function to get started.</p>
+   749→   749→              <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+   750→   750→                <Plus className="mr-1 h-4 w-4" /> New Function
+   751→   751→              </Button>
+   752→   752→            </CardContent>
+   753→   753→          </Card>
+   754→   754→        ) : (
+   755→   755→          filteredFunctions.map((fn) => {
+   756→   756→            const TriggerIcon = triggerIcons[fn.triggerType]
+   757→   757→            const lastRun = fn.functionRuns?.[0]
+   758→   758→            const LastStatusIcon = lastRun ? statusIcons[lastRun.status] : null
+   759→   759→            return (
+   760→   760→              <Card
+   761→   761→                key={fn.id}
+   762→   762→                className="cursor-pointer hover:shadow-md hover:border-emerald-200 transition-all"
+   763→   763→                onClick={() => setSelectedFunction(fn)}
+   764→   764→              >
+   765→   765→                <CardHeader className="pb-2">
+   766→   766→                  <div className="flex items-center justify-between">
+   767→   767→                    <div className="flex items-center gap-2">
+   768→   768→                      <div className="rounded-md bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-1.5">
+   769→   769→                        <Code2 className="h-4 w-4 text-emerald-600" />
+   770→   770→                      </div>
+   771→   771→                      <CardTitle className="text-base font-mono">{fn.name}</CardTitle>
+   772→   772→                    </div>
+   773→   773→                    <div className="flex items-center gap-2">
+   774→   774→                      <Switch
+   775→   775→                        checked={fn.isActive}
+   776→   776→                        onCheckedChange={() => void handleToggleActive(fn)}
+   777→   777→                        onClick={(e) => e.stopPropagation()}
+   778→   778→                      />
+   779→   779→                      <DropdownMenu>
+   780→   780→                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+   781→   781→                          <Button variant="ghost" size="icon" className="h-7 w-7">
+   782→   782→                            <MoreHorizontal className="h-3.5 w-3.5" />
+   783→   783→                          </Button>
+   784→   784→                        </DropdownMenuTrigger>
+   785→   785→                        <DropdownMenuContent align="end">
+   786→   786→                          <DropdownMenuItem
+   787→   787→                            onClick={(e) => {
+   788→   788→                              e.stopPropagation()
+   789→   789→                              void handleRun(fn)
+   790→   790→                            }}
+   791→   791→                          >
+   792→   792→                            <Play className="mr-2 h-3.5 w-3.5" /> Run Now
+   793→   793→                          </DropdownMenuItem>
+   794→   794→                          <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+   795→   795→                            <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+   796→   796→                          </DropdownMenuItem>
+   797→   797→                          <DropdownMenuSeparator />
+   798→   798→                          <DropdownMenuItem
+   799→   799→                            className="text-destructive"
+   800→   800→                            onClick={(e) => {
+   801→   801→                              e.stopPropagation()
+   802→   802→                              void handleDelete(fn)
+   803→   803→                            }}
+   804→   804→                          >
+   805→   805→                            <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+   806→   806→                          </DropdownMenuItem>
+   807→   807→                        </DropdownMenuContent>
+   808→   808→                      </DropdownMenu>
+   809→   809→                    </div>
+   810→   810→                  </div>
+   811→   811→                  <CardDescription className="line-clamp-1">{fn.description}</CardDescription>
+   812→   812→                </CardHeader>
+   813→   813→                <CardContent>
+   814→   814→                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+   815→   815→                    <Badge variant="outline" className={`text-xs capitalize ${triggerBadgeColors[fn.triggerType]}`}>
+   816→   816→                      <TriggerIcon className="h-3 w-3 mr-1" />
+   817→   817→                      {fn.triggerType}
+   818→   818→                    </Badge>
+   819→   819→                    <Badge variant="outline" className="text-xs">
+   820→   820→                      {fn.runtime}
+   821→   821→                    </Badge>
+   822→   822→                    <span className="text-xs text-muted-foreground">{fn.timeoutMs / 1000}s timeout</span>
+   823→   823→                    <span className="text-xs text-muted-foreground">·</span>
+   824→   824→                    <span className="text-xs text-muted-foreground">{fn.memoryMb} MB</span>
+   825→   825→                  </div>
+   826→   826→                  <div className="rounded-md bg-slate-950 text-emerald-400 p-2 overflow-hidden">
+   827→   827→                    <pre className="text-xs font-mono line-clamp-3 whitespace-pre-wrap">
+   828→   828→                      {fn.code.slice(0, 180)}
+   829→   829→                      {fn.code.length > 180 ? '...' : ''}
+   830→   830→                    </pre>
+   831→   831→                  </div>
+   832→   832→                  {lastRun && LastStatusIcon && (
+   833→   833→                    <div className="mt-3 flex items-center gap-2 text-xs border-t pt-2">
+   834→   834→                      <LastStatusIcon className={`h-3 w-3 ${statusColors[lastRun.status]}`} />
+   835→   835→                      <span className={`capitalize ${statusColors[lastRun.status]}`}>{lastRun.status}</span>
+   836→   836→                      <span className="text-muted-foreground">
+   837→   837→                        · {lastRun.durationMs ? `${lastRun.durationMs}ms` : 'running'}
+   838→   838→                      </span>
+   839→   839→                      <span className="text-muted-foreground ml-auto">
+   840→   840→                        {new Date(lastRun.startedAt).toLocaleString()}
+   841→   841→                      </span>
+   842→   842→                    </div>
+   843→   843→                  )}
+   844→   844→                </CardContent>
+   845→   845→              </Card>
+   846→   846→            )
+   847→   847→          })
+   848→   848→        )}
+   849→   849→      </div>
+   850→   850→    </motion.div>
+   851→   851→  )
+   852→   852→}
+   853→   853→

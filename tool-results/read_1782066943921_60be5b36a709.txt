@@ -1,0 +1,658 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  FileText,
+     7→  AlertTriangle,
+     8→  AlertCircle,
+     9→  Info,
+    10→  Search,
+    11→  RefreshCw,
+    12→  ChevronDown,
+    13→  ChevronRight,
+    14→  XCircle,
+    15→  Download,
+    16→  Trash2,
+    17→  Code2,
+    18→  Globe,
+    19→  GitBranch,
+    20→  Server,
+    21→  Filter,
+    22→} from 'lucide-react'
+    23→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    24→import { Button } from '@/components/ui/button'
+    25→import { Input } from '@/components/ui/input'
+    26→import { Badge } from '@/components/ui/badge'
+    27→import { Skeleton } from '@/components/ui/skeleton'
+    28→import {
+    29→  Select,
+    30→  SelectContent,
+    31→  SelectItem,
+    32→  SelectTrigger,
+    33→  SelectValue,
+    34→} from '@/components/ui/select'
+    35→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    36→import {
+    37→  AlertDialog,
+    38→  AlertDialogAction,
+    39→  AlertDialogCancel,
+    40→  AlertDialogContent,
+    41→  AlertDialogDescription,
+    42→  AlertDialogFooter,
+    43→  AlertDialogHeader,
+    44→  AlertDialogTitle,
+    45→} from '@/components/ui/alert-dialog'
+    46→import { useToast } from '@/hooks/use-toast'
+    47→import { apiGet } from '@/lib/api-client'
+    48→
+    49→interface SourceErrorItem {
+    50→  id: string
+    51→  sourceId: string | null
+    52→  tableId: string | null
+    53→  tableName: string | null
+    54→  errorType: string // fetch_error, validation_error, transform_error, network_error
+    55→  message: string
+    56→  rawPayload: string | null
+    57→  occurredAt: string
+    58→  source?: { id: string; name: string; sourceType: string; url: string } | null
+    59→  table?: { id: string; name: string } | null
+    60→}
+    61→
+    62→interface SourceErrorsResponse {
+    63→  errors?: SourceErrorItem[]
+    64→  sourceSummary?: Array<{ sourceId: string; source: { name: string; sourceType: string } | null; errorCount: number }>
+    65→  pagination?: { page: number; limit: number; total: number }
+    66→}
+    67→
+    68→interface FunctionErrorItem {
+    69→  id: string
+    70→  functionId: string
+    71→  functionName?: string
+    72→  status: string
+    73→  triggeredBy: string | null
+    74→  errorPayload: string | null
+    75→  durationMs: number | null
+    76→  startedAt: string
+    77→  completedAt: string | null
+    78→  input: string | null
+    79→}
+    80→
+    81→interface FunctionErrorsResponse {
+    82→  errors?: FunctionErrorItem[]
+    83→  functionSummary?: Array<{ functionId: string; func: { name: string; triggerType: string } | null; errorCount: number }>
+    84→  pagination?: { page: number; limit: number; total: number }
+    85→}
+    86→
+    87→const errorTypeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+    88→  fetch_error: AlertTriangle,
+    89→  validation_error: AlertCircle,
+    90→  transform_error: AlertCircle,
+    91→  network_error: XCircle,
+    92→  execution_error: XCircle,
+    93→  timeout: AlertTriangle,
+    94→}
+    95→
+    96→const errorTypeColors: Record<string, string> = {
+    97→  fetch_error: 'text-amber-500',
+    98→  validation_error: 'text-amber-500',
+    99→  transform_error: 'text-amber-500',
+   100→  network_error: 'text-red-500',
+   101→  execution_error: 'text-red-500',
+   102→  timeout: 'text-amber-500',
+   103→}
+   104→
+   105→const errorTypeBadgeColors: Record<string, string> = {
+   106→  fetch_error: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   107→  validation_error: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   108→  transform_error: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   109→  network_error: 'bg-red-500/10 text-red-700 border-red-200',
+   110→  execution_error: 'bg-red-500/10 text-red-700 border-red-200',
+   111→  timeout: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   112→}
+   113→
+   114→const sourceIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+   115→  rest: GitBranch,
+   116→  rss: GitBranch,
+   117→  websocket: GitBranch,
+   118→  scraper: Globe,
+   119→  pipeline: GitBranch,
+   120→  function: Code2,
+   121→  system: Server,
+   122→}
+   123→
+   124→function mapLevel(errorType: string): 'error' | 'warning' | 'info' {
+   125→  if (errorType === 'network_error' || errorType === 'execution_error') return 'error'
+   126→  if (errorType === 'fetch_error' || errorType === 'validation_error' || errorType === 'transform_error' || errorType === 'timeout')
+   127→    return 'warning'
+   128→  return 'info'
+   129→}
+   130→
+   131→function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
+   132→  if (rows.length === 0) return
+   133→  const keys = Object.keys(rows[0])
+   134→  const csv = [
+   135→    keys.join(','),
+   136→    ...rows.map((r) =>
+   137→      keys
+   138→        .map((k) => {
+   139→          const v = r[k]
+   140→          if (v == null) return ''
+   141→          const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
+   142→          return `"${s.replace(/"/g, '""')}"`
+   143→        })
+   144→        .join(','),
+   145→    ),
+   146→  ].join('\n')
+   147→  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+   148→  const url = URL.createObjectURL(blob)
+   149→  const a = document.createElement('a')
+   150→  a.href = url
+   151→  a.download = filename
+   152→  a.click()
+   153→  URL.revokeObjectURL(url)
+   154→}
+   155→
+   156→export function LogsView() {
+   157→  const { toast } = useToast()
+   158→  const [loading, setLoading] = useState(true)
+   159→  const [sourceErrors, setSourceErrors] = useState<SourceErrorItem[]>([])
+   160→  const [sourceErrorsDetailed, setSourceErrorsDetailed] = useState<SourceErrorItem[]>([])
+   161→  const [functionErrors, setFunctionErrors] = useState<FunctionErrorItem[]>([])
+   162→  const [search, setSearch] = useState('')
+   163→  const [levelFilter, setLevelFilter] = useState<string>('all')
+   164→  const [sourceFilter, setSourceFilter] = useState<string>('all')
+   165→  const [dateFrom, setDateFrom] = useState('')
+   166→  const [dateTo, setDateTo] = useState('')
+   167→  const [expandedLog, setExpandedLog] = useState<string | null>(null)
+   168→  const [showClearConfirm, setShowClearConfirm] = useState(false)
+   169→
+   170→  const loadAll = useCallback(async () => {
+   171→    setLoading(true)
+   172→    try {
+   173→      const [se, sed, fe] = await Promise.all([
+   174→        apiGet<SourceErrorItem[]>('/api/logs?limit=100'),
+   175→        apiGet<SourceErrorsResponse>('/api/logs/source-errors?limit=100').catch(() => ({})),
+   176→        apiGet<FunctionErrorsResponse>('/api/logs/function-errors?limit=100').catch(() => ({})),
+   177→      ])
+   178→      setSourceErrors(Array.isArray(se) ? se : [])
+   179→      setSourceErrorsDetailed(Array.isArray(sed?.errors) ? sed.errors : [])
+   180→      setFunctionErrors(Array.isArray(fe?.errors) ? fe.errors : [])
+   181→    } catch (err) {
+   182→      toast({
+   183→        title: 'Failed to load logs',
+   184→        description: err instanceof Error ? err.message : 'Unknown error',
+   185→        variant: 'destructive',
+   186→      })
+   187→    } finally {
+   188→      setLoading(false)
+   189→    }
+   190→  }, [toast])
+   191→
+   192→  useEffect(() => {
+   193→    void loadAll()
+   194→  }, [loadAll])
+   195→
+   196→  const filteredLogs = sourceErrors.filter((log) => {
+   197→    const level = mapLevel(log.errorType)
+   198→    const matchSearch =
+   199→      log.message.toLowerCase().includes(search.toLowerCase()) ||
+   200→      (log.rawPayload ?? '').toLowerCase().includes(search.toLowerCase())
+   201→    const matchLevel = levelFilter === 'all' || level === levelFilter
+   202→    const matchSource = sourceFilter === 'all' || log.source?.sourceType === sourceFilter
+   203→    let matchDate = true
+   204→    if (dateFrom) matchDate = new Date(log.occurredAt) >= new Date(dateFrom)
+   205→    if (dateTo) matchDate = matchDate && new Date(log.occurredAt) <= new Date(dateTo)
+   206→    return matchSearch && matchLevel && matchSource && matchDate
+   207→  })
+   208→
+   209→  const errorCount = sourceErrors.filter((l) => mapLevel(l.errorType) === 'error').length
+   210→  const warningCount = sourceErrors.filter((l) => mapLevel(l.errorType) === 'warning').length
+   211→  const infoCount = sourceErrors.filter((l) => mapLevel(l.errorType) === 'info').length
+   212→
+   213→  const handleExport = () => {
+   214→    if (filteredLogs.length === 0) {
+   215→      toast({ title: 'No logs to export', variant: 'destructive' })
+   216→      return
+   217→    }
+   218→    downloadCsv(
+   219→      `selfbase-logs-${new Date().toISOString().slice(0, 10)}.csv`,
+   220→      filteredLogs.map((l) => ({
+   221→        id: l.id,
+   222→        level: mapLevel(l.errorType),
+   223→        errorType: l.errorType,
+   224→        source: l.source?.sourceType ?? '',
+   225→        sourceName: l.source?.name ?? '',
+   226→        table: l.tableName ?? l.table?.name ?? '',
+   227→        message: l.message,
+   228→        occurredAt: l.occurredAt,
+   229→      })),
+   230→    )
+   231→    toast({ title: 'Logs exported', description: `${filteredLogs.length} entries exported to CSV.` })
+   232→  }
+   233→
+   234→  if (loading) {
+   235→    return (
+   236→      <div className="space-y-6">
+   237→        <Skeleton className="h-8 w-32" />
+   238→        <div className="grid gap-4 md:grid-cols-3">
+   239→          {Array.from({ length: 3 }).map((_, i) => (
+   240→            <Card key={i}>
+   241→              <CardContent className="p-4">
+   242→                <Skeleton className="h-16 w-full" />
+   243→              </CardContent>
+   244→            </Card>
+   245→          ))}
+   246→        </div>
+   247→        <Skeleton className="h-[400px] w-full" />
+   248→      </div>
+   249→    )
+   250→  }
+   251→
+   252→  return (
+   253→    <motion.div
+   254→      initial={{ opacity: 0, y: 8 }}
+   255→      animate={{ opacity: 1, y: 0 }}
+   256→      transition={{ duration: 0.2 }}
+   257→      className="space-y-6"
+   258→    >
+   259→      <div className="flex items-center justify-between flex-wrap gap-2">
+   260→        <div>
+   261→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   262→            Logs
+   263→          </h1>
+   264→          <p className="text-muted-foreground">Error logs, pipeline errors, and system events</p>
+   265→        </div>
+   266→        <div className="flex gap-2">
+   267→          <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+   268→            <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+   269→          </Button>
+   270→          <Button variant="outline" size="sm" onClick={handleExport}>
+   271→            <Download className="h-3.5 w-3.5 mr-1" /> Export CSV
+   272→          </Button>
+   273→          <Button
+   274→            variant="outline"
+   275→            size="sm"
+   276→            className="text-destructive"
+   277→            onClick={() => setShowClearConfirm(true)}
+   278→          >
+   279→            <Trash2 className="h-3.5 w-3.5 mr-1" /> Clear
+   280→          </Button>
+   281→        </div>
+   282→      </div>
+   283→
+   284→      {/* Stats */}
+   285→      <div className="grid gap-4 md:grid-cols-3">
+   286→        <Card className="border-red-200">
+   287→          <CardContent className="pt-4">
+   288→            <div className="flex items-center justify-between">
+   289→              <div>
+   290→                <div className="text-sm text-muted-foreground">Errors</div>
+   291→                <div className="text-2xl font-bold text-red-600">{errorCount}</div>
+   292→              </div>
+   293→              <div className="rounded-md bg-red-500/10 p-2">
+   294→                <XCircle className="h-5 w-5 text-red-500" />
+   295→              </div>
+   296→            </div>
+   297→          </CardContent>
+   298→        </Card>
+   299→        <Card className="border-amber-200">
+   300→          <CardContent className="pt-4">
+   301→            <div className="flex items-center justify-between">
+   302→              <div>
+   303→                <div className="text-sm text-muted-foreground">Warnings</div>
+   304→                <div className="text-2xl font-bold text-amber-600">{warningCount}</div>
+   305→              </div>
+   306→              <div className="rounded-md bg-amber-500/10 p-2">
+   307→                <AlertTriangle className="h-5 w-5 text-amber-500" />
+   308→              </div>
+   309→            </div>
+   310→          </CardContent>
+   311→        </Card>
+   312→        <Card className="border-emerald-200">
+   313→          <CardContent className="pt-4">
+   314→            <div className="flex items-center justify-between">
+   315→              <div>
+   316→                <div className="text-sm text-muted-foreground">Info</div>
+   317→                <div className="text-2xl font-bold text-emerald-600">{infoCount}</div>
+   318→              </div>
+   319→              <div className="rounded-md bg-emerald-500/10 p-2">
+   320→                <Info className="h-5 w-5 text-emerald-500" />
+   321→              </div>
+   322→            </div>
+   323→          </CardContent>
+   324→        </Card>
+   325→      </div>
+   326→
+   327→      <Tabs defaultValue="all" className="space-y-4">
+   328→        <TabsList>
+   329→          <TabsTrigger value="all" className="gap-1.5">
+   330→            <FileText className="h-3.5 w-3.5" /> All Logs
+   331→          </TabsTrigger>
+   332→          <TabsTrigger value="source" className="gap-1.5">
+   333→            <GitBranch className="h-3.5 w-3.5" /> Source Errors
+   334→          </TabsTrigger>
+   335→          <TabsTrigger value="function" className="gap-1.5">
+   336→            <Code2 className="h-3.5 w-3.5" /> Function Errors
+   337→          </TabsTrigger>
+   338→        </TabsList>
+   339→
+   340→        {/* All Logs Tab */}
+   341→        <TabsContent value="all" className="space-y-4">
+   342→          {/* Filters */}
+   343→          <div className="flex items-center gap-3 flex-wrap">
+   344→            <div className="relative flex-1 min-w-[200px] max-w-sm">
+   345→              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+   346→              <Input
+   347→                placeholder="Search logs..."
+   348→                value={search}
+   349→                onChange={(e) => setSearch(e.target.value)}
+   350→                className="pl-9"
+   351→              />
+   352→            </div>
+   353→            <Select value={levelFilter} onValueChange={setLevelFilter}>
+   354→              <SelectTrigger className="w-32">
+   355→                <SelectValue placeholder="Level" />
+   356→              </SelectTrigger>
+   357→              <SelectContent>
+   358→                <SelectItem value="all">All Levels</SelectItem>
+   359→                <SelectItem value="error">Error</SelectItem>
+   360→                <SelectItem value="warning">Warning</SelectItem>
+   361→                <SelectItem value="info">Info</SelectItem>
+   362→              </SelectContent>
+   363→            </Select>
+   364→            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+   365→              <SelectTrigger className="w-36">
+   366→                <SelectValue placeholder="Source" />
+   367→              </SelectTrigger>
+   368→              <SelectContent>
+   369→                <SelectItem value="all">All Sources</SelectItem>
+   370→                <SelectItem value="system">System</SelectItem>
+   371→                <SelectItem value="pipeline">Pipeline</SelectItem>
+   372→                <SelectItem value="scraper">Scraper</SelectItem>
+   373→                <SelectItem value="function">Function</SelectItem>
+   374→                <SelectItem value="api">API</SelectItem>
+   375→              </SelectContent>
+   376→            </Select>
+   377→            <Input
+   378→              type="date"
+   379→              value={dateFrom}
+   380→              onChange={(e) => setDateFrom(e.target.value)}
+   381→              className="w-36"
+   382→            />
+   383→            <Input
+   384→              type="date"
+   385→              value={dateTo}
+   386→              onChange={(e) => setDateTo(e.target.value)}
+   387→              className="w-36"
+   388→            />
+   389→            <Badge variant="secondary">{filteredLogs.length} entries</Badge>
+   390→          </div>
+   391→
+   392→          <Card>
+   393→            <CardContent className="p-0">
+   394→              {filteredLogs.length === 0 ? (
+   395→                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+   396→                  <FileText className="h-12 w-12 mb-3 opacity-30" />
+   397→                  <p className="text-sm">No logs found</p>
+   398→                  <p className="text-xs mt-1">
+   399→                    {sourceErrors.length === 0
+   400→                      ? 'Logs will appear here when errors occur in your pipelines, scrapers, or functions.'
+   401→                      : 'Try adjusting your filters.'}
+   402→                  </p>
+   403→                </div>
+   404→              ) : (
+   405→                <div className="divide-y max-h-[700px] overflow-y-auto">
+   406→                  {filteredLogs.map((log) => {
+   407→                    const level = mapLevel(log.errorType)
+   408→                    const LevelIcon =
+   409→                      level === 'error'
+   410→                        ? XCircle
+   411→                        : level === 'warning'
+   412→                          ? AlertTriangle
+   413→                          : Info
+   414→                    const ErrorTypeIcon = errorTypeIcons[log.errorType] ?? AlertCircle
+   415→                    const isExpanded = expandedLog === log.id
+   416→                    const SourceIcon =
+   417→                      log.source?.sourceType ? sourceIcons[log.source.sourceType] ?? FileText : FileText
+   418→                    return (
+   419→                      <div key={log.id} className="hover:bg-muted/30 transition-colors">
+   420→                        <div
+   421→                          className="flex items-start gap-3 p-4 cursor-pointer"
+   422→                          onClick={() => setExpandedLog(isExpanded ? null : log.id)}
+   423→                        >
+   424→                          <LevelIcon
+   425→                            className={`h-4 w-4 mt-0.5 shrink-0 ${
+   426→                              level === 'error'
+   427→                                ? 'text-red-500'
+   428→                                : level === 'warning'
+   429→                                  ? 'text-amber-500'
+   430→                                  : 'text-emerald-500'
+   431→                            }`}
+   432→                          />
+   433→                          <div className="flex-1 min-w-0">
+   434→                            <div className="flex items-center gap-2 mb-0.5">
+   435→                              <span className="text-sm font-medium">{log.message}</span>
+   436→                            </div>
+   437→                            <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+   438→                              <Badge variant="outline" className={errorTypeBadgeColors[log.errorType] ?? ''}>
+   439→                                <ErrorTypeIcon className="h-2.5 w-2.5 mr-1" />
+   440→                                {log.errorType}
+   441→                              </Badge>
+   442→                              {log.source && (
+   443→                                <Badge variant="outline" className="text-xs gap-1">
+   444→                                  <SourceIcon className="h-2.5 w-2.5" />
+   445→                                  {log.source.sourceType}
+   446→                                </Badge>
+   447→                              )}
+   448→                              {log.source?.name && <span>· {log.source.name}</span>}
+   449→                              {(log.tableName || log.table?.name) && (
+   450→                                <span className="font-mono">· {log.tableName ?? log.table?.name}</span>
+   451→                              )}
+   452→                              <span>· {new Date(log.occurredAt).toLocaleString()}</span>
+   453→                            </div>
+   454→                          </div>
+   455→                          <div className="shrink-0">
+   456→                            {log.rawPayload ? (
+   457→                              isExpanded ? (
+   458→                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+   459→                              ) : (
+   460→                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+   461→                              )
+   462→                            ) : null}
+   463→                          </div>
+   464→                        </div>
+   465→                        {isExpanded && log.rawPayload && (
+   466→                          <div className="px-4 pb-4 pl-11">
+   467→                            <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
+   468→                              {log.rawPayload}
+   469→                            </pre>
+   470→                          </div>
+   471→                        )}
+   472→                      </div>
+   473→                    )
+   474→                  })}
+   475→                </div>
+   476→              )}
+   477→            </CardContent>
+   478→          </Card>
+   479→        </TabsContent>
+   480→
+   481→        {/* Source Errors Tab */}
+   482→        <TabsContent value="source" className="space-y-4">
+   483→          <Card>
+   484→            <CardHeader>
+   485→              <CardTitle className="text-base">Pipeline & Scraper Source Errors</CardTitle>
+   486→              <CardDescription>
+   487→                Errors from data ingestion sources ({sourceErrorsDetailed.length} total)
+   488→              </CardDescription>
+   489→            </CardHeader>
+   490→            <CardContent className="p-0">
+   491→              {sourceErrorsDetailed.length === 0 ? (
+   492→                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+   493→                  <GitBranch className="h-10 w-10 mb-2 opacity-30" />
+   494→                  <p className="text-sm">No source errors recorded</p>
+   495→                </div>
+   496→              ) : (
+   497→                <div className="divide-y max-h-[600px] overflow-y-auto">
+   498→                  {sourceErrorsDetailed.map((log) => {
+   499→                    const ErrorTypeIcon = errorTypeIcons[log.errorType] ?? AlertCircle
+   500→                    const SourceIcon = log.source?.sourceType ? sourceIcons[log.source.sourceType] ?? FileText : FileText
+   501→                    const isExpanded = expandedLog === log.id
+   502→                    return (
+   503→                      <div key={log.id} className="hover:bg-muted/30 transition-colors">
+   504→                        <div
+   505→                          className="flex items-start gap-3 p-4 cursor-pointer"
+   506→                          onClick={() => setExpandedLog(isExpanded ? null : log.id)}
+   507→                        >
+   508→                          <ErrorTypeIcon className={`h-4 w-4 mt-0.5 shrink-0 ${errorTypeColors[log.errorType] ?? 'text-amber-500'}`} />
+   509→                          <div className="flex-1 min-w-0">
+   510→                            <div className="text-sm font-medium">{log.message}</div>
+   511→                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+   512→                              <Badge variant="outline" className={errorTypeBadgeColors[log.errorType] ?? ''}>
+   513→                                {log.errorType}
+   514→                              </Badge>
+   515→                              {log.source && (
+   516→                                <Badge variant="outline" className="text-xs gap-1">
+   517→                                  <SourceIcon className="h-2.5 w-2.5" />
+   518→                                  {log.source.name}
+   519→                                </Badge>
+   520→                              )}
+   521→                              {log.table?.name && (
+   522→                                <span className="font-mono">→ {log.table.name}</span>
+   523→                              )}
+   524→                              <span>· {new Date(log.occurredAt).toLocaleString()}</span>
+   525→                            </div>
+   526→                          </div>
+   527→                          {log.rawPayload && (
+   528→                            <div className="shrink-0">
+   529→                              {isExpanded ? (
+   530→                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+   531→                              ) : (
+   532→                                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+   533→                              )}
+   534→                            </div>
+   535→                          )}
+   536→                        </div>
+   537→                        {isExpanded && log.rawPayload && (
+   538→                          <div className="px-4 pb-4 pl-11">
+   539→                            <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
+   540→                              {log.rawPayload}
+   541→                            </pre>
+   542→                          </div>
+   543→                        )}
+   544→                      </div>
+   545→                    )
+   546→                  })}
+   547→                </div>
+   548→              )}
+   549→            </CardContent>
+   550→          </Card>
+   551→        </TabsContent>
+   552→
+   553→        {/* Function Errors Tab */}
+   554→        <TabsContent value="function" className="space-y-4">
+   555→          <Card>
+   556→            <CardHeader>
+   557→              <CardTitle className="text-base">Function Run Errors</CardTitle>
+   558→              <CardDescription>
+   559→                Failed and timed-out function executions ({functionErrors.length} total)
+   560→              </CardDescription>
+   561→            </CardHeader>
+   562→            <CardContent className="p-0">
+   563→              {functionErrors.length === 0 ? (
+   564→                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+   565→                  <Code2 className="h-10 w-10 mb-2 opacity-30" />
+   566→                  <p className="text-sm">No function errors recorded</p>
+   567→                </div>
+   568→              ) : (
+   569→                <div className="divide-y max-h-[600px] overflow-y-auto">
+   570→                  {functionErrors.map((err) => {
+   571→                    const isExpanded = expandedLog === err.id
+   572→                    const StatusIcon = err.status === 'timeout' ? AlertTriangle : XCircle
+   573→                    return (
+   574→                      <div key={err.id} className="hover:bg-muted/30 transition-colors">
+   575→                        <div
+   576→                          className="flex items-start gap-3 p-4 cursor-pointer"
+   577→                          onClick={() => setExpandedLog(isExpanded ? null : err.id)}
+   578→                        >
+   579→                          <StatusIcon className={`h-4 w-4 mt-0.5 shrink-0 ${err.status === 'timeout' ? 'text-amber-500' : 'text-red-500'}`} />
+   580→                          <div className="flex-1 min-w-0">
+   581→                            <div className="text-sm font-medium">
+   582→                              {err.functionName ?? 'Unknown function'} — {err.status}
+   583→                            </div>
+   584→                            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1 flex-wrap">
+   585→                              <Badge variant="outline" className="text-xs capitalize">
+   586→                                {err.status}
+   587→                              </Badge>
+   588→                              {err.triggeredBy && (
+   589→                                <Badge variant="outline" className="text-xs capitalize">
+   590→                                  via {err.triggeredBy}
+   591→                                </Badge>
+   592→                              )}
+   593→                              {err.durationMs != null && (
+   594→                                <span className="font-mono">· {err.durationMs}ms</span>
+   595→                              )}
+   596→                              <span>· {new Date(err.startedAt).toLocaleString()}</span>
+   597→                            </div>
+   598→                          </div>
+   599→                        </div>
+   600→                        {isExpanded && (err.errorPayload || err.input) && (
+   601→                          <div className="px-4 pb-4 pl-11 space-y-2">
+   602→                            {err.errorPayload && (
+   603→                              <div>
+   604→                                <p className="text-xs text-muted-foreground mb-1">Error:</p>
+   605→                                <pre className="rounded-md bg-slate-950 text-red-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[200px]">
+   606→                                  {err.errorPayload}
+   607→                                </pre>
+   608→                              </div>
+   609→                            )}
+   610→                            {err.input && (
+   611→                              <div>
+   612→                                <p className="text-xs text-muted-foreground mb-1">Input:</p>
+   613→                                <pre className="rounded-md bg-slate-950 text-emerald-400 p-3 text-xs font-mono whitespace-pre-wrap overflow-auto max-h-[150px]">
+   614→                                  {err.input}
+   615→                                </pre>
+   616→                              </div>
+   617→                            )}
+   618→                          </div>
+   619→                        )}
+   620→                      </div>
+   621→                    )
+   622→                  })}
+   623→                </div>
+   624→              )}
+   625→            </CardContent>
+   626→          </Card>
+   627→        </TabsContent>
+   628→      </Tabs>
+   629→
+   630→      <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
+   631→        <AlertDialogContent>
+   632→          <AlertDialogHeader>
+   633→            <AlertDialogTitle>Clear all logs?</AlertDialogTitle>
+   634→            <AlertDialogDescription>
+   635→              This will dismiss all currently loaded log entries from view. The underlying database
+   636→              records are not affected. Use this to clear your current view.
+   637→            </AlertDialogDescription>
+   638→          </AlertDialogHeader>
+   639→          <AlertDialogFooter>
+   640→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   641→            <AlertDialogAction
+   642→              onClick={() => {
+   643→                setSourceErrors([])
+   644→                setSourceErrorsDetailed([])
+   645→                setFunctionErrors([])
+   646→                setShowClearConfirm(false)
+   647→                toast({ title: 'Logs cleared', description: 'Log view has been cleared.' })
+   648→              }}
+   649→            >
+   650→              Clear Logs
+   651→            </AlertDialogAction>
+   652→          </AlertDialogFooter>
+   653→        </AlertDialogContent>
+   654→      </AlertDialog>
+   655→    </motion.div>
+   656→  )
+   657→}
+   658→

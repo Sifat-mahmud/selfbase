@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  GitBranch,
+     7→  Plus,
+     8→  Play,
+     9→  Pause,
+    10→  Pencil,
+    11→  RefreshCw,
+    12→  MoreHorizontal,
+    13→  Trash2,
+    14→  Clock,
+    15→  CheckCircle2,
+    16→  XCircle,
+    17→  AlertTriangle,
+    18→  Globe,
+    19→  Rss,
+    20→  Radio,
+    21→  Code,
+    22→  ArrowRight,
+    23→  ExternalLink,
+    24→  Search,
+    25→  Eye,
+    26→  Activity,
+    27→  BarChart3,
+    28→  TrendingUp,
+    29→  Timer,
+    30→  Database,
+    31→  Copy,
+    32→} from 'lucide-react'
+    33→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    34→import { Button } from '@/components/ui/button'
+    35→import { Input } from '@/components/ui/input'
+    36→import { Badge } from '@/components/ui/badge'
+    37→import { Skeleton } from '@/components/ui/skeleton'
+    38→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    39→import {
+    40→  Table,
+    41→  TableBody,
+    42→  TableCell,
+    43→  TableHead,
+    44→  TableHeader,
+    45→  TableRow,
+    46→} from '@/components/ui/table'
+    47→import {
+    48→  Dialog,
+    49→  DialogContent,
+    50→  DialogDescription,
+    51→  DialogFooter,
+    52→  DialogHeader,
+    53→  DialogTitle,
+    54→  DialogTrigger,
+    55→} from '@/components/ui/dialog'
+    56→import {
+    57→  DropdownMenu,
+    58→  DropdownMenuContent,
+    59→  DropdownMenuItem,
+    60→  DropdownMenuSeparator,
+    61→  DropdownMenuTrigger,
+    62→} from '@/components/ui/dropdown-menu'
+    63→import {
+    64→  Select,
+    65→  SelectContent,
+    66→  SelectItem,
+    67→  SelectTrigger,
+    68→  SelectValue,
+    69→} from '@/components/ui/select'
+    70→import { Label } from '@/components/ui/label'
+    71→import { Textarea } from '@/components/ui/textarea'
+    72→import { Switch } from '@/components/ui/switch'
+    73→import { Separator } from '@/components/ui/separator'
+    74→import {
+    75→  Tooltip,
+    76→  TooltipContent,
+    77→  TooltipTrigger,
+    78→} from '@/components/ui/tooltip'
+    79→import { useToast } from '@/hooks/use-toast'
+    80→import {
+    81→  BarChart,
+    82→  Bar,
+    83→  XAxis,
+    84→  YAxis,
+    85→  CartesianGrid,
+    86→  Tooltip as RTooltip,
+    87→  ResponsiveContainer,
+    88→  PieChart,
+    89→  Pie,
+    90→  Cell,
+    91→  Legend,
+    92→} from 'recharts'
+    93→import { apiGet, apiPost, apiPut, parseJsonField } from '@/lib/api-client'
+    94→
+    95→interface ColumnMapping {
+    96→  src: string
+    97→  target: string
+    98→  type?: string
+    99→  transform?: string
+   100→}
+   101→
+   102→interface PipelineRunItem {
+   103→  id: string
+   104→  sourceId: string
+   105→  status: 'pending' | 'running' | 'success' | 'failed' | 'timeout'
+   106→  startedAt: string
+   107→  completedAt: string | null
+   108→  durationMs: number | null
+   109→  rowsFetched: number
+   110→  rowsWritten: number
+   111→  rowsFailed: number
+   112→  errorPayload?: string | null
+   113→  isManual: boolean
+   114→  source?: { id: string; name: string; sourceType: string; url: string }
+   115→}
+   116→
+   117→interface PipelineSourceItem {
+   118→  id: string
+   119→  name: string
+   120→  description: string | null
+   121→  sourceType: 'rest' | 'rss' | 'websocket' | 'scraper'
+   122→  url: string
+   123→  method: string
+   124→  headers?: string | null
+   125→  isActive: boolean
+   126→  fetchInterval: number
+   127→  jsonPath?: string | null
+   128→  onConflict?: string
+   129→  preRunAction?: string
+   130→  primaryKeyCols?: string
+   131→  targetTableId?: string | null
+   132→  targetTableName?: string | null
+   133→  targetTable?: { name: string; displayName?: string | null } | null
+   134→  columnMappings: string
+   135→  lastRun?: PipelineRunItem | null
+   136→  pipelineRuns?: PipelineRunItem[]
+   137→  createdAt: string
+   138→}
+   139→
+   140→interface PipelineRunsResponse {
+   141→  data?: PipelineRunItem[]
+   142→  meta?: { page: number; limit: number; total: number }
+   143→}
+   144→
+   145→interface PreviewResult {
+   146→  success?: boolean
+   147→  url?: string
+   148→  method?: string
+   149→  statusCode?: number
+   150→  durationMs?: number
+   151→  totalRows?: number
+   152→  previewRows?: Array<Record<string, unknown>>
+   153→  columns?: Array<{ name: string; type: string }>
+   154→  error?: string
+   155→}
+   156→
+   157→const sourceIcons = {
+   158→  rest: Code,
+   159→  rss: Rss,
+   160→  websocket: Radio,
+   161→  scraper: Globe,
+   162→}
+   163→
+   164→const statusIcons = {
+   165→  pending: Clock,
+   166→  running: RefreshCw,
+   167→  success: CheckCircle2,
+   168→  failed: XCircle,
+   169→  timeout: AlertTriangle,
+   170→}
+   171→
+   172→const statusColors = {
+   173→  pending: 'text-amber-500',
+   174→  running: 'text-blue-500',
+   175→  success: 'text-emerald-500',
+   176→  failed: 'text-red-500',
+   177→  timeout: 'text-amber-500',
+   178→}
+   179→
+   180→const statusBadgeColors: Record<string, string> = {
+   181→  pending: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   182→  running: 'bg-blue-500/10 text-blue-700 border-blue-200',
+   183→  success: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+   184→  failed: 'bg-red-500/10 text-red-700 border-red-200',
+   185→  timeout: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   186→}
+   187→
+   188→const sourceTypeBadge: Record<string, string> = {
+   189→  rest: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+   190→  rss: 'bg-teal-500/10 text-teal-700 border-teal-200',
+   191→  websocket: 'bg-amber-500/10 text-amber-700 border-amber-200',
+   192→  scraper: 'bg-purple-500/10 text-purple-700 border-purple-200',
+   193→}
+   194→
+   195→// Theme-aware status colors for chart cells (oklch works in both light & dark mode).
+   196→const STATUS_COLORS: Record<string, string> = {
+   197→  success: 'oklch(0.65 0.17 162)', // emerald
+   198→  failed: 'oklch(0.577 0.245 27.325)', // red
+   199→  running: 'oklch(0.6 0.118 184.704)', // teal/blue
+   200→  pending: 'oklch(0.769 0.188 70.08)', // amber
+   201→  timeout: 'oklch(0.7 0.19 50)', // orange
+   202→}
+   203→
+   204→// Framer Motion variants for staggered analytics card entrance.
+   205→const analyticsContainerVariants = {
+   206→  hidden: { opacity: 0 },
+   207→  visible: {
+   208→    opacity: 1,
+   209→    transition: { staggerChildren: 0.06, delayChildren: 0.05 },
+   210→  },
+   211→}
+   212→
+   213→const analyticsItemVariants = {
+   214→  hidden: { opacity: 0, y: 10 },
+   215→  visible: { opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' as const } },
+   216→}
+   217→
+   218→export function PipelineView() {
+   219→  const { toast } = useToast()
+   220→  const [pipelines, setPipelines] = useState<PipelineSourceItem[]>([])
+   221→  const [allRuns, setAllRuns] = useState<PipelineRunItem[]>([])
+   222→  const [loading, setLoading] = useState(true)
+   223→  const [search, setSearch] = useState('')
+   224→  const [showCreateDialog, setShowCreateDialog] = useState(false)
+   225→  const [selectedPipeline, setSelectedPipeline] = useState<PipelineSourceItem | null>(null)
+   226→  const [previewTarget, setPreviewTarget] = useState<PipelineSourceItem | null>(null)
+   227→  const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
+   228→  const [previewLoading, setPreviewLoading] = useState(false)
+   229→  const [runningId, setRunningId] = useState<string | null>(null)
+   230→
+   231→  // Create form
+   232→  const [newName, setNewName] = useState('')
+   233→  const [newDesc, setNewDesc] = useState('')
+   234→  const [newType, setNewType] = useState<'rest' | 'rss' | 'websocket' | 'scraper'>('rest')
+   235→  const [newUrl, setNewUrl] = useState('')
+   236→  const [newMethod, setNewMethod] = useState('GET')
+   237→  const [newHeaders, setNewHeaders] = useState('{}')
+   238→  const [newJsonPath, setNewJsonPath] = useState('')
+   239→  const [newInterval, setNewInterval] = useState('300')
+   240→  const [newOnConflict, setNewOnConflict] = useState('update')
+   241→  const [newTargetTableId, setNewTargetTableId] = useState('')
+   242→  const [newPreRunAction, setNewPreRunAction] = useState('none')
+   243→  const [newPrimaryKeyCols, setNewPrimaryKeyCols] = useState<string[]>([])
+   244→  const [newMappings, setNewMappings] = useState<ColumnMapping[]>([])
+   245→  // Edit dialog state (mirrors the create form)
+   246→  const [showEditDialog, setShowEditDialog] = useState(false)
+   247→  const [editPipeline, setEditPipeline] = useState<PipelineSourceItem | null>(null)
+   248→  const [editName, setEditName] = useState('')
+   249→  const [editDesc, setEditDesc] = useState('')
+   250→  const [editType, setEditType] = useState<'rest' | 'rss' | 'websocket' | 'scraper'>('rest')
+   251→  const [editUrl, setEditUrl] = useState('')
+   252→  const [editMethod, setEditMethod] = useState('GET')
+   253→  const [editHeaders, setEditHeaders] = useState('{}')
+   254→  const [editJsonPath, setEditJsonPath] = useState('')
+   255→  const [editInterval, setEditInterval] = useState('300')
+   256→  const [editOnConflict, setEditOnConflict] = useState('update')
+   257→  const [editTargetTableId, setEditTargetTableId] = useState('')
+   258→  const [editPreRunAction, setEditPreRunAction] = useState('none')
+   259→  const [editPrimaryKeyCols, setEditPrimaryKeyCols] = useState<string[]>([])
+   260→  const [editMappings, setEditMappings] = useState<ColumnMapping[]>([])
+   261→  const [tables, setTables] = useState<Array<{ id: string; name: string; displayName?: string | null; rowCount?: number; columns: Array<{ id: string; name: string; type: string }> }>>([])
+   262→  // Next-run countdown (seconds remaining until the next scheduled fetch).
+   263→  const [nextRunIn, setNextRunIn] = useState<number | null>(null)
+   264→
+   265→  const loadAll = useCallback(async () => {
+   266→    setLoading(true)
+   267→    try {
+   268→      const [p, r, t] = await Promise.all([
+   269→        apiGet<PipelineSourceItem[]>('/api/pipelines'),
+   270→        apiGet<PipelineRunItem[] | PipelineRunsResponse>('/api/pipelines/runs?limit=100').catch(() => null),
+   271→        apiGet<Array<{ id: string; name: string; displayName?: string | null; columns: Array<{ id: string; name: string; type: string }> }>>('/api/tables').catch(() => []),
+   272→      ])
+   273→      if (Array.isArray(t)) setTables(t)
+   274→      const list = Array.isArray(p) ? p : []
+   275→      // Map targetTable.name -> targetTableName for convenience, normalize columnMappings
+   276→      const normalized = list.map((pl) => ({
+   277→        ...pl,
+   278→        targetTableName: pl.targetTableName ?? pl.targetTable?.name ?? null,
+   279→        lastRun: pl.pipelineRuns && pl.pipelineRuns.length > 0 ? pl.pipelineRuns[0] : null,
+   280→      }))
+   281→      setPipelines(normalized)
+   282→      // apiGet already unwraps `{ success, data }` envelopes, so the result is usually
+   283→      // the raw array. Handle both shapes defensively.
+   284→      const runs = Array.isArray(r) ? r : (r?.data ?? [])
+   285→      setAllRuns(Array.isArray(runs) ? runs : [])
+   286→    } catch (err) {
+   287→      toast({
+   288→        title: 'Failed to load pipelines',
+   289→        description: err instanceof Error ? err.message : 'Unknown error',
+   290→        variant: 'destructive',
+   291→      })
+   292→    } finally {
+   293→      setLoading(false)
+   294→    }
+   295→  }, [toast])
+   296→
+   297→  useEffect(() => {
+   298→    void loadAll()
+   299→  }, [loadAll])
+   300→
+   301→  // Live countdown to the next scheduled run, based on the most recent run
+   302→  // for the currently selected pipeline. Updates every second.
+   303→  useEffect(() => {
+   304→    if (
+   305→      !selectedPipeline ||
+   306→      !selectedPipeline.isActive ||
+   307→      selectedPipeline.fetchInterval <= 0
+   308→    ) {
+   309→      setNextRunIn(null)
+   310→      return
+   311→    }
+   312→    const lastRun = allRuns.find((r) => r.sourceId === selectedPipeline.id)
+   313→    if (!lastRun) {
+   314→      setNextRunIn(null)
+   315→      return
+   316→    }
+   317→    const lastRunTime = new Date(lastRun.startedAt).getTime()
+   318→    const nextRunTime = lastRunTime + selectedPipeline.fetchInterval * 1000
+   319→
+   320→    const updateCountdown = () => {
+   321→      const remaining = Math.max(0, Math.round((nextRunTime - Date.now()) / 1000))
+   322→      setNextRunIn(remaining)
+   323→    }
+   324→    updateCountdown()
+   325→    const interval = setInterval(updateCountdown, 1000)
+   326→    return () => clearInterval(interval)
+   327→  }, [selectedPipeline, allRuns])
+   328→
+   329→  const handleCreate = async () => {
+   330→    if (!newName.trim() || !newUrl.trim()) {
+   331→      toast({ title: 'Name and URL required', variant: 'destructive' })
+   332→      return
+   333→    }
+   334→    try {
+   335→      const payload: Record<string, unknown> = {
+   336→        name: newName.trim(),
+   337→        description: newDesc || null,
+   338→        sourceType: newType,
+   339→        url: newUrl.trim(),
+   340→        method: newMethod,
+   341→        headers: newHeaders || null,
+   342→        jsonPath: newJsonPath || null,
+   343→        fetchInterval: Number(newInterval) || 300,
+   344→        onConflict: newOnConflict,
+   345→        targetTableId: newTargetTableId && newTargetTableId !== '_none' ? newTargetTableId : null,
+   346→        preRunAction: newPreRunAction,
+   347→        primaryKeyCols: JSON.stringify(newPrimaryKeyCols),
+   348→        isActive: true,
+   349→        columnMappings: JSON.stringify(newMappings),
+   350→      }
+   351→      const created = await apiPost<PipelineSourceItem>('/api/pipelines', payload)
+   352→      setPipelines((prev) => [
+   353→        {
+   354→          ...created,
+   355→          targetTableName: created.targetTable?.name ?? null,
+   356→          lastRun: null,
+   357→        },
+   358→        ...prev,
+   359→      ])
+   360→      setShowCreateDialog(false)
+   361→      setNewName('')
+   362→      setNewDesc('')
+   363→      setNewUrl('')
+   364→      setNewMethod('GET')
+   365→      setNewHeaders('{}')
+   366→      setNewJsonPath('')
+   367→      setNewInterval('300')
+   368→      setNewOnConflict('update')
+   369→      setNewTargetTableId('')
+   370→      setNewPreRunAction('none')
+   371→      setNewPrimaryKeyCols([])
+   372→      setNewMappings([])
+   373→      toast({ title: 'Pipeline created', description: `"${created.name}" has been created.` })
+   374→    } catch (err) {
+   375→      toast({
+   376→        title: 'Failed to create pipeline',
+   377→        description: err instanceof Error ? err.message : 'Unknown error',
+   378→        variant: 'destructive',
+   379→      })
+   380→    }
+   381→  }
+   382→
+   383→  const handleToggleActive = async (pipeline: PipelineSourceItem) => {
+   384→    try {
+   385→      await apiPut(`/api/pipelines/${pipeline.id}`, { isActive: !pipeline.isActive })
+   386→      setPipelines((prev) =>
+   387→        prev.map((p) => (p.id === pipeline.id ? { ...p, isActive: !p.isActive } : p)),
+   388→      )
+   389→      toast({ title: `Pipeline ${pipeline.isActive ? 'paused' : 'activated'}` })
+   390→    } catch (err) {
+   391→      toast({
+   392→        title: 'Failed to update pipeline',
+   393→        description: err instanceof Error ? err.message : 'Unknown error',
+   394→        variant: 'destructive',
+   395→      })
+   396→    }
+   397→  }
+   398→
+   399→  const handleRunNow = async (pipeline: PipelineSourceItem) => {
+   400→    setRunningId(pipeline.id)
+   401→    try {
+   402→      const result = await apiPost<{ runId: string; status: string; rowsFetched?: number; rowsWritten?: number; error?: string }>(
+   403→        `/api/pipelines/${pipeline.id}/run`,
+   404→        {},
+   405→      )
+   406→      toast({
+   407→        title: result.status === 'success' ? 'Pipeline run completed' : 'Pipeline run finished',
+   408→        description:
+   409→          result.status === 'success'
+   410→            ? `Fetched ${result.rowsFetched ?? 0} rows, wrote ${result.rowsWritten ?? 0}.`
+   411→            : result.error ?? `Status: ${result.status}`,
+   412→        variant: result.status === 'success' ? 'default' : 'destructive',
+   413→      })
+   414→      await loadAll()
+   415→    } catch (err) {
+   416→      toast({
+   417→        title: 'Pipeline run failed',
+   418→        description: err instanceof Error ? err.message : 'Unknown error',
+   419→        variant: 'destructive',
+   420→      })
+   421→    } finally {
+   422→      setRunningId(null)
+   423→    }
+   424→  }
+   425→
+   426→  const handlePreview = async (pipeline: PipelineSourceItem) => {
+   427→    setPreviewTarget(pipeline)
+   428→    setPreviewResult(null)
+   429→    setPreviewLoading(true)
+   430→    try {
+   431→      const result = await apiPost<PreviewResult>(`/api/pipelines/${pipeline.id}/preview`, {})
+   432→      setPreviewResult(result)
+   433→    } catch (err) {
+   434→      setPreviewResult({
+   435→        success: false,
+   436→        error: err instanceof Error ? err.message : 'Unknown error',
+   437→      })
+   438→    } finally {
+   439→      setPreviewLoading(false)
+   440→    }
+   441→  }
+   442→
+   443→  const openEditDialog = (pipeline: PipelineSourceItem) => {
+   444→    setEditPipeline(pipeline)
+   445→    setEditName(pipeline.name)
+   446→    setEditDesc(pipeline.description || '')
+   447→    setEditType(pipeline.sourceType)
+   448→    setEditUrl(pipeline.url)
+   449→    setEditMethod(pipeline.method || 'GET')
+   450→    setEditHeaders(pipeline.headers || '{}')
+   451→    setEditJsonPath(pipeline.jsonPath || '')
+   452→    setEditInterval(String(pipeline.fetchInterval || 300))
+   453→    setEditOnConflict(pipeline.onConflict || 'update')
+   454→    setEditTargetTableId(pipeline.targetTableId || '')
+   455→    setEditPreRunAction(pipeline.preRunAction || 'none')
+   456→    setEditPrimaryKeyCols(parseJsonField<string[]>(pipeline.primaryKeyCols, []))
+   457→    setEditMappings(parseJsonField<ColumnMapping[]>(pipeline.columnMappings, []))
+   458→    setShowEditDialog(true)
+   459→  }
+   460→
+   461→  // Duplicate a pipeline's configuration into a new (inactive) pipeline.
+   462→  const handleDuplicate = async (pipeline: PipelineSourceItem) => {
+   463→    try {
+   464→      const mappings = parseJsonField<ColumnMapping[]>(pipeline.columnMappings, [])
+   465→      const pkCols = parseJsonField<string[]>(pipeline.primaryKeyCols, [])
+   466→      const payload = {
+   467→        name: `${pipeline.name} (copy)`,
+   468→        description: pipeline.description,
+   469→        sourceType: pipeline.sourceType,
+   470→        url: pipeline.url,
+   471→        method: pipeline.method || 'GET',
+   472→        headers: pipeline.headers || null,
+   473→        jsonPath: pipeline.jsonPath || null,
+   474→        fetchInterval: pipeline.fetchInterval,
+   475→        onConflict: pipeline.onConflict || 'update',
+   476→        preRunAction: pipeline.preRunAction || 'none',
+   477→        primaryKeyCols: JSON.stringify(pkCols),
+   478→        targetTableId: pipeline.targetTableId || null,
+   479→        columnMappings: JSON.stringify(mappings),
+   480→        isActive: false, // Duplicated pipelines start inactive
+   481→      }
+   482→      const created = await apiPost<PipelineSourceItem>('/api/pipelines', payload)
+   483→      const normalized: PipelineSourceItem = {
+   484→        ...created,
+   485→        targetTableName: created.targetTable?.name ?? null,
+   486→        lastRun: null,
+   487→      }
+   488→      setPipelines((prev) => [normalized, ...prev])
+   489→      toast({
+   490→        title: 'Pipeline duplicated',
+   491→        description: `"${created.name}" created (inactive). Activate it when ready.`,
+   492→      })
+   493→      // Navigate to the new pipeline
+   494→      setSelectedPipeline(normalized)
+   495→    } catch (err) {
+   496→      toast({
+   497→        title: 'Failed to duplicate pipeline',
+   498→        description: err instanceof Error ? err.message : 'Unknown error',
+   499→        variant: 'destructive',
+   500→      })
+   501→    }
+   502→  }
+   503→
+   504→  const handleSaveEdit = async () => {
+   505→    if (!editPipeline || !editName.trim() || !editUrl.trim()) {
+   506→      toast({ title: 'Name and URL required', variant: 'destructive' })
+   507→      return
+   508→    }
+   509→    try {
+   510→      const payload: Record<string, unknown> = {
+   511→        name: editName.trim(),
+   512→        description: editDesc || null,
+   513→        sourceType: editType,
+   514→        url: editUrl.trim(),
+   515→        method: editMethod,
+   516→        headers: editHeaders || null,
+   517→        jsonPath: editJsonPath || null,
+   518→        fetchInterval: Number(editInterval) || 300,
+   519→        onConflict: editOnConflict,
+   520→        preRunAction: editPreRunAction,
+   521→        primaryKeyCols: JSON.stringify(editPrimaryKeyCols),
+   522→        targetTableId: editTargetTableId && editTargetTableId !== '_none' ? editTargetTableId : null,
+   523→        columnMappings: JSON.stringify(editMappings),
+   524→      }
+   525→      const updated = await apiPut<PipelineSourceItem>(`/api/pipelines/${editPipeline.id}`, payload)
+   526→      // Update local state
+   527→      setPipelines((prev) =>
+   528→        prev.map((p) =>
+   529→          p.id === editPipeline.id
+   530→            ? { ...p, ...updated, targetTableName: updated.targetTable?.name ?? null }
+   531→            : p,
+   532→        ),
+   533→      )
+   534→      if (selectedPipeline?.id === editPipeline.id) {
+   535→        setSelectedPipeline({
+   536→          ...selectedPipeline,
+   537→          ...updated,
+   538→          targetTableName: updated.targetTable?.name ?? null,
+   539→        })
+   540→      }
+   541→      setShowEditDialog(false)
+   542→      toast({ title: 'Pipeline updated', description: `"${updated.name}" has been saved.` })
+   543→    } catch (err) {
+   544→      toast({
+   545→        title: 'Failed to update pipeline',
+   546→        description: err instanceof Error ? err.message : 'Unknown error',
+   547→        variant: 'destructive',
+   548→      })
+   549→    }
+   550→  }
+   551→
+   552→  const filteredPipelines = pipelines.filter(
+   553→    (p) =>
+   554→      p.name.toLowerCase().includes(search.toLowerCase()) ||
+   555→      (p.description ?? '').toLowerCase().includes(search.toLowerCase()) ||
+   556→      p.url.toLowerCase().includes(search.toLowerCase()),
+   557→  )
+   558→
+   559→  // Build chart data from allRuns grouped by day
+   560→  const chartData = (() => {
+   561→    const map = new Map<string, { day: string; success: number; failed: number; rows: number }>()
+   562→    for (const r of allRuns) {
+   563→      const d = new Date(r.startedAt)
+   564→      const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+   565→      const entry = map.get(key) ?? { day: key, success: 0, failed: 0, rows: 0 }
+   566→      if (r.status === 'success') entry.success += 1
+   567→      if (r.status === 'failed' || r.status === 'timeout') entry.failed += 1
+   568→      entry.rows += r.rowsWritten ?? 0
+   569→      map.set(key, entry)
+   570→    }
+   571→    return Array.from(map.values()).slice(-7)
+   572→  })()
+   573→
+   574→  // ----- Pipeline Analytics (Task 12) -----
+   575→  // Most recent 20 runs, oldest first so the timeline reads left → right.
+   576→  const timelineData = allRuns
+   577→    .slice(0, 20)
+   578→    .reverse()
+   579→    .map((run) => {
+   580→      const d = new Date(run.startedAt)
+   581→      const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+   582→      return {
+   583→        time,
+   584→        duration: run.durationMs ?? 0,
+   585→        status: run.status,
+   586→        rows: run.rowsWritten ?? 0,
+   587→        name: run.source?.name ?? 'Pipeline',
+   588→      }
+   589→    })
+   590→
+   591→  // Status distribution for the donut chart.
+   592→  const statusCounts = allRuns.reduce((acc, run) => {
+   593→    acc[run.status] = (acc[run.status] || 0) + 1
+   594→    return acc
+   595→  }, {} as Record<string, number>)
+   596→
+   597→  const pieData = Object.entries(statusCounts).map(([name, value]) => ({
+   598→    name,
+   599→    value,
+   600→    color: STATUS_COLORS[name] ?? STATUS_COLORS.pending,
+   601→  }))
+   602→
+   603→  // Stat cards
+   604→  const totalRuns = allRuns.length
+   605→  const successCount = allRuns.filter((r) => r.status === 'success').length
+   606→  const successRate = totalRuns > 0 ? Math.round((successCount / totalRuns) * 100) : 0
+   607→  const completedRuns = allRuns.filter((r) => r.durationMs != null)
+   608→  const avgDuration =
+   609→    completedRuns.length > 0
+   610→      ? Math.round(completedRuns.reduce((s, r) => s + (r.durationMs ?? 0), 0) / completedRuns.length)
+   611→      : 0
+   612→  const totalRowsWritten = allRuns.reduce((s, r) => s + (r.rowsWritten ?? 0), 0)
+   613→
+   614→  if (loading) {
+   615→    return (
+   616→      <div className="space-y-6">
+   617→        <div className="flex justify-between">
+   618→          <Skeleton className="h-8 w-48" />
+   619→          <Skeleton className="h-9 w-36" />
+   620→        </div>
+   621→        <div className="grid gap-4 md:grid-cols-2">
+   622→          {Array.from({ length: 4 }).map((_, i) => (
+   623→            <Card key={i}>
+   624→              <CardContent className="p-4">
+   625→                <Skeleton className="h-32 w-full" />
+   626→              </CardContent>
+   627→            </Card>
+   628→          ))}
+   629→        </div>
+   630→      </div>
+   631→    )
+   632→  }
+   633→
+   634→  if (selectedPipeline) {
+   635→    const SourceIcon = sourceIcons[selectedPipeline.sourceType]
+   636→    const lastRun = selectedPipeline.lastRun ?? selectedPipeline.pipelineRuns?.[0] ?? null
+   637→    const LastStatusIcon = lastRun ? statusIcons[lastRun.status] : Clock
+   638→    const mappings = parseJsonField<ColumnMapping[]>(selectedPipeline.columnMappings, [])
+   639→    const sourceRuns = allRuns.filter((r) => r.sourceId === selectedPipeline.id)
+   640→
+   641→    return (
+   642→      <motion.div
+   643→        initial={{ opacity: 0, y: 8 }}
+   644→        animate={{ opacity: 1, y: 0 }}
+   645→        transition={{ duration: 0.2 }}
+   646→        className="space-y-6"
+   647→      >
+   648→        <div className="flex items-center gap-2 flex-wrap">
+   649→          <Button variant="ghost" size="sm" onClick={() => setSelectedPipeline(null)}>
+   650→            <ArrowRight className="h-4 w-4 rotate-180" /> Back
+   651→          </Button>
+   652→          <Separator orientation="vertical" className="h-6" />
+   653→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white">
+   654→            <SourceIcon className="h-5 w-5" />
+   655→          </div>
+   656→          <h1 className="text-2xl font-bold tracking-tight">{selectedPipeline.name}</h1>
+   657→          <Badge variant="outline" className={`capitalize ${sourceTypeBadge[selectedPipeline.sourceType]}`}>
+   658→            {selectedPipeline.sourceType}
+   659→          </Badge>
+   660→          <Badge variant={selectedPipeline.isActive ? 'default' : 'secondary'}>
+   661→            {selectedPipeline.isActive ? 'Active' : 'Paused'}
+   662→          </Badge>
+   663→          <div className="ml-auto flex gap-2">
+   664→            <Button variant="outline" size="sm" onClick={() => openEditDialog(selectedPipeline)}>
+   665→              <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
+   666→            </Button>
+   667→            <Button
+   668→              variant="outline"
+   669→              size="sm"
+   670→              onClick={() => void handleDuplicate(selectedPipeline)}
+   671→            >
+   672→              <Copy className="mr-1 h-3.5 w-3.5" /> Duplicate
+   673→            </Button>
+   674→            <Button variant="outline" size="sm" onClick={() => void handlePreview(selectedPipeline)}>
+   675→              <Eye className="mr-1 h-3.5 w-3.5" /> Preview
+   676→            </Button>
+   677→            <Button
+   678→              size="sm"
+   679→              onClick={() => void handleRunNow(selectedPipeline)}
+   680→              disabled={runningId === selectedPipeline.id}
+   681→            >
+   682→              <Play className="mr-1 h-3.5 w-3.5" />
+   683→              {runningId === selectedPipeline.id ? 'Running...' : 'Run Now'}
+   684→            </Button>
+   685→          </div>
+   686→        </div>
+   687→
+   688→        {/* Config Summary */}
+   689→        <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg bg-emerald-500/5 border border-emerald-200/50 dark:border-emerald-800/30">
+   690→          <div className="flex items-center gap-1.5 text-xs">
+   691→            <Database className="h-3.5 w-3.5 text-emerald-600" />
+   692→            <span className="text-muted-foreground">Target:</span>
+   693→            <span className="font-mono font-medium">{selectedPipeline.targetTableName ?? 'Not set'}</span>
+   694→          </div>
+   695→          <Separator orientation="vertical" className="h-4" />
+   696→          <div className="flex items-center gap-1.5 text-xs">
+   697→            <RefreshCw className="h-3.5 w-3.5 text-teal-600" />
+   698→            <span className="text-muted-foreground">Conflict:</span>
+   699→            <Badge variant="outline" className="text-[10px] capitalize py-0">{selectedPipeline.onConflict}</Badge>
+   700→          </div>
+   701→          {(() => {
+   702→            const pkCols = parseJsonField<string[]>(selectedPipeline.primaryKeyCols, [])
+   703→            return pkCols.length > 0 ? (
+   704→              <>
+   705→                <Separator orientation="vertical" className="h-4" />
+   706→                <div className="flex items-center gap-1.5 text-xs">
+   707→                  <span className="text-muted-foreground">🔑 PK:</span>
+   708→                  <span className="font-mono">{pkCols.join(', ')}</span>
+   709→                </div>
+   710→              </>
+   711→            ) : null
+   712→          })()}
+   713→          {selectedPipeline.preRunAction && selectedPipeline.preRunAction !== 'none' && (
+   714→            <>
+   715→              <Separator orientation="vertical" className="h-4" />
+   716→              <div className="flex items-center gap-1.5 text-xs">
+   717→                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+   718→                <span className="text-muted-foreground">Pre-run:</span>
+   719→                <Badge variant="outline" className="text-[10px] capitalize py-0 text-amber-700 border-amber-300">
+   720→                  {selectedPipeline.preRunAction}
+   721→                </Badge>
+   722→              </div>
+   723→            </>
+   724→          )}
+   725→        </div>
+   726→
+   727→        <div className="grid gap-4 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+   728→          <Card>
+   729→            <CardContent className="pt-4">
+   730→              <div className="text-sm text-muted-foreground">Source Type</div>
+   731→              <div className="text-lg font-bold capitalize">{selectedPipeline.sourceType}</div>
+   732→            </CardContent>
+   733→          </Card>
+   734→          <Card>
+   735→            <CardContent className="pt-4">
+   736→              <div className="text-sm text-muted-foreground">Fetch Interval</div>
+   737→              <div className="text-lg font-bold">
+   738→                {selectedPipeline.fetchInterval > 0 ? `${selectedPipeline.fetchInterval}s` : 'Real-time'}
+   739→              </div>
+   740→            </CardContent>
+   741→          </Card>
+   742→          <Card>
+   743→            <CardContent className="pt-4">
+   744→              <div className="text-sm text-muted-foreground">Target Table</div>
+   745→              <div className="text-lg font-bold font-mono">{selectedPipeline.targetTableName ?? '—'}</div>
+   746→            </CardContent>
+   747→          </Card>
+   748→          <Card>
+   749→            <CardContent className="pt-4">
+   750→              <div className="text-sm text-muted-foreground">Last Run</div>
+   751→              <div className="flex items-center gap-1">
+   752→                {lastRun && <LastStatusIcon className={`h-4 w-4 ${statusColors[lastRun.status]}`} />}
+   753→                <span className="text-lg font-bold capitalize">{lastRun?.status ?? 'Never'}</span>
+   754→              </div>
+   755→              {lastRun?.durationMs != null && (
+   756→                <p className="text-xs text-muted-foreground mt-0.5">{lastRun.durationMs}ms · {lastRun.rowsWritten ?? 0} rows written</p>
+   757→              )}
+   758→            </CardContent>
+   759→          </Card>
+   760→          <Card className="relative overflow-hidden">
+   761→            <CardContent className="pt-4">
+   762→              <div className="text-sm text-muted-foreground">Next Run</div>
+   763→              {nextRunIn !== null && nextRunIn > 0 ? (
+   764→                <>
+   765→                  <div className="text-lg font-bold font-mono text-emerald-600">
+   766→                    {Math.floor(nextRunIn / 60)}m {nextRunIn % 60}s
+   767→                  </div>
+   768→                  <div className="mt-1 h-1 w-full rounded-full bg-muted overflow-hidden">
+   769→                    <div
+   770→                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-1000"
+   771→                      style={{
+   772→                        width: `${Math.min(
+   773→                          100,
+   774→                          ((selectedPipeline.fetchInterval - nextRunIn) /
+   775→                            selectedPipeline.fetchInterval) *
+   776→                            100,
+   777→                        )}%`,
+   778→                      }}
+   779→                    />
+   780→                  </div>
+   781→                </>
+   782→              ) : (
+   783→                <div className="text-lg font-bold text-muted-foreground">
+   784→                  {selectedPipeline?.isActive ? 'Due now' : 'Paused'}
+   785→                </div>
+   786→              )}
+   787→            </CardContent>
+   788→          </Card>
+   789→        </div>
+   790→
+   791→        {/* Source URL & Configuration */}
+   792→        <Card>
+   793→          <CardHeader>
+   794→            <CardTitle className="text-base bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   795→              Source URL &amp; Configuration
+   796→            </CardTitle>
+   797→            <CardDescription>Pipeline source endpoint and extraction settings</CardDescription>
+   798→          </CardHeader>
+   799→          <CardContent className="space-y-4">
+   800→            {/* URL row */}
+   801→            <div className="flex items-center gap-2 p-2 rounded-md bg-muted/30">
+   802→              <Badge variant="outline" className="font-mono">{selectedPipeline.method}</Badge>
+   803→              <code className="text-sm font-mono break-all flex-1">{selectedPipeline.url}</code>
+   804→              <a
+   805→                href={selectedPipeline.url}
+   806→                target="_blank"
+   807→                rel="noopener noreferrer"
+   808→                className="text-muted-foreground hover:text-emerald-600"
+   809→              >
+   810→                <ExternalLink className="h-3.5 w-3.5" />
+   811→              </a>
+   812→            </div>
+   813→
+   814→            {/* Config grid */}
+   815→            <div className="grid gap-3 md:grid-cols-2">
+   816→              {selectedPipeline.jsonPath && (
+   817→                <div className="space-y-1">
+   818→                  <span className="text-xs text-muted-foreground uppercase tracking-wide">JSONPath</span>
+   819→                  <code className="text-sm font-mono block p-2 rounded bg-muted/30">{selectedPipeline.jsonPath}</code>
+   820→                </div>
+   821→              )}
+   822→              <div className="space-y-1">
+   823→                <span className="text-xs text-muted-foreground uppercase tracking-wide">On Conflict</span>
+   824→                <div className="flex items-center gap-2">
+   825→                  <Badge variant="outline" className="capitalize">{selectedPipeline.onConflict}</Badge>
+   826→                  <span className="text-xs text-muted-foreground">
+   827→                    {selectedPipeline.onConflict === 'update' && '— Insert new, update existing by PK'}
+   828→                    {selectedPipeline.onConflict === 'insert' && '— Always insert (no dedup)'}
+   829→                    {selectedPipeline.onConflict === 'replace' && '— Overwrite row on PK match'}
+   830→                    {selectedPipeline.onConflict === 'skip' && '— Skip rows matching PK'}
+   831→                    {selectedPipeline.onConflict === 'truncate' && '— Clear table then insert'}
+   832→                  </span>
+   833→                </div>
+   834→              </div>
+   835→              <div className="space-y-1">
+   836→                <span className="text-xs text-muted-foreground uppercase tracking-wide">Pre-Run Action</span>
+   837→                <Badge variant="outline" className="capitalize">{selectedPipeline.preRunAction || 'none'}</Badge>
+   838→              </div>
+   839→              {(() => {
+   840→                const pkCols = parseJsonField<string[]>(selectedPipeline.primaryKeyCols, [])
+   841→                return pkCols.length > 0 ? (
+   842→                  <div className="space-y-1">
+   843→                    <span className="text-xs text-muted-foreground uppercase tracking-wide">Primary Key Columns</span>
+   844→                    <div className="flex flex-wrap gap-1.5">
+   845→                      {pkCols.map((col) => (
+   846→                        <Badge key={col} variant="secondary" className="gap-1">
+   847→                          <span>🔑</span> {col}
+   848→                        </Badge>
+   849→                      ))}
+   850→                    </div>
+   851→                  </div>
+   852→                ) : null
+   853→              })()}
+   854→            </div>
+   855→          </CardContent>
+   856→        </Card>
+   857→
+   858→        <Card>
+   859→          <CardHeader>
+   860→            <CardTitle className="text-base">Table Mapping &amp; Conflict Resolution</CardTitle>
+   861→            <CardDescription>How fetched data is written to the target table</CardDescription>
+   862→          </CardHeader>
+   863→          <CardContent className="space-y-4">
+   864→            <div className="grid gap-3 md:grid-cols-2">
+   865→              <div>
+   866→                <div className="text-sm text-muted-foreground">Target Table</div>
+   867→                <div className="text-base font-bold font-mono">{selectedPipeline.targetTableName ?? 'Not configured'}</div>
+   868→              </div>
+   869→              <div>
+   870→                <div className="text-sm text-muted-foreground">Pre-Run Action</div>
+   871→                <Badge variant="outline" className="capitalize">
+   872→                  {selectedPipeline.preRunAction || 'none'}
+   873→                </Badge>
+   874→              </div>
+   875→            </div>
+   876→
+   877→            <Separator />
+   878→
+   879→            <div className="grid gap-3 md:grid-cols-2">
+   880→              <div>
+   881→                <div className="text-sm text-muted-foreground">On Conflict</div>
+   882→                <Badge variant="outline" className="capitalize">
+   883→                  {selectedPipeline.onConflict || 'update'}
+   884→                </Badge>
+   885→                <p className="text-xs text-muted-foreground mt-1">
+   886→                  {selectedPipeline.onConflict === 'update' && 'Insert new rows, update existing rows matching primary key'}
+   887→                  {selectedPipeline.onConflict === 'insert' && 'Always insert new rows (no dedup)'}
+   888→                  {selectedPipeline.onConflict === 'replace' && 'Overwrite entire row when primary key matches'}
+   889→                  {selectedPipeline.onConflict === 'skip' && 'Skip rows where primary key already exists'}
+   890→                  {selectedPipeline.onConflict === 'truncate' && 'Clear table then insert all rows'}
+   891→                  {!selectedPipeline.onConflict && 'Insert new rows, update existing rows matching primary key'}
+   892→                </p>
+   893→              </div>
+   894→              <div>
+   895→                <div className="text-sm text-muted-foreground">Primary Key Columns</div>
+   896→                <div className="flex flex-wrap gap-1.5 mt-1">
+   897→                  {(() => {
+   898→                    const pkCols = parseJsonField<string[]>(selectedPipeline.primaryKeyCols, [])
+   899→                    return pkCols.length > 0
+   900→                      ? pkCols.map(col => (
+   901→                        <Badge key={col} variant="secondary" className="gap-1">
+   902→                          <span>🔑</span> {col}
+   903→                        </Badge>
+   904→                      ))
+   905→                      : <span className="text-xs text-muted-foreground">None — all rows inserted</span>
+   906→                  })()}
+   907→                </div>
+   908→              </div>
+   909→            </div>
+   910→          </CardContent>
+   911→        </Card>
+   912→
+   913→        <Card>
+   914→          <CardHeader>
+   915→            <CardTitle className="text-base">Column Mappings</CardTitle>
+   916→            <CardDescription>Source-to-target field mappings</CardDescription>
+   917→          </CardHeader>
+   918→          <CardContent>
+   919→            {mappings.length === 0 ? (
+   920→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   921→                <GitBranch className="h-10 w-10 mb-2 opacity-40" />
+   922→                <p className="text-sm">No column mappings configured</p>
+   923→              </div>
+   924→            ) : (
+   925→              <Table>
+   926→                <TableHeader>
+   927→                  <TableRow>
+   928→                    <TableHead>Source Field</TableHead>
+   929→                    <TableHead className="w-8" />
+   930→                    <TableHead>Target Column</TableHead>
+   931→                    <TableHead>Type</TableHead>
+   932→                    <TableHead>Transform</TableHead>
+   933→                  </TableRow>
+   934→                </TableHeader>
+   935→                <TableBody>
+   936→                  {mappings.map((m, i) => (
+   937→                    <TableRow key={i} className="hover:bg-muted/40">
+   938→                      <TableCell className="font-mono text-sm">{m.src}</TableCell>
+   939→                      <TableCell>
+   940→                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+   941→                      </TableCell>
+   942→                      <TableCell className="font-mono text-sm font-medium">{m.target}</TableCell>
+   943→                      <TableCell>
+   944→                        {m.type && (
+   945→                          <Badge variant="outline" className="font-mono text-xs">
+   946→                            {m.type}
+   947→                          </Badge>
+   948→                        )}
+   949→                      </TableCell>
+   950→                      <TableCell className="text-sm text-muted-foreground">{m.transform ?? '—'}</TableCell>
+   951→                    </TableRow>
+   952→                  ))}
+   953→                </TableBody>
+   954→              </Table>
+   955→            )}
+   956→          </CardContent>
+   957→        </Card>
+   958→
+   959→        <Card>
+   960→          <CardHeader>
+   961→            <CardTitle className="text-base">Run History</CardTitle>
+   962→            <CardDescription>Recent pipeline executions ({sourceRuns.length} total)</CardDescription>
+   963→          </CardHeader>
+   964→          <CardContent>
+   965→            {sourceRuns.length === 0 ? (
+   966→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   967→                <Clock className="h-10 w-10 mb-2 opacity-40" />
+   968→                <p className="text-sm">No runs yet</p>
+   969→                <p className="text-xs mt-1">Click "Run Now" to trigger a pipeline execution.</p>
+   970→              </div>
+   971→            ) : (
+   972→              <div className="rounded-md border max-h-96 overflow-y-auto">
+   973→                <Table>
+   974→                  <TableHeader className="sticky top-0 bg-background">
+   975→                    <TableRow>
+   976→                      <TableHead>Status</TableHead>
+   977→                      <TableHead>Started</TableHead>
+   978→                      <TableHead>Duration</TableHead>
+   979→                      <TableHead>Fetched</TableHead>
+   980→                      <TableHead>Written</TableHead>
+   981→                      <TableHead>Failed</TableHead>
+   982→                      <TableHead>Trigger</TableHead>
+   983→                    </TableRow>
+   984→                  </TableHeader>
+   985→                  <TableBody>
+   986→                    {sourceRuns.slice(0, 30).map((run) => {
+   987→                      const RunIcon = statusIcons[run.status]
+   988→                      return (
+   989→                        <TableRow key={run.id} className="hover:bg-muted/40">
+   990→                          <TableCell>
+   991→                            <div className="flex items-center gap-1.5">
+   992→                              <RunIcon className={`h-3.5 w-3.5 ${statusColors[run.status]}`} />
+   993→                              <span className={`text-sm capitalize font-medium ${statusColors[run.status]}`}>
+   994→                                {run.status}
+   995→                              </span>
+   996→                            </div>
+   997→                          </TableCell>
+   998→                          <TableCell className="text-xs text-muted-foreground">
+   999→                            {new Date(run.startedAt).toLocaleString()}
+  1000→                          </TableCell>
+  1001→                          <TableCell className="font-mono text-xs">
+  1002→                            {run.durationMs ? `${run.durationMs}ms` : '—'}
+  1003→                          </TableCell>
+  1004→                          <TableCell>{run.rowsFetched.toLocaleString()}</TableCell>
+  1005→                          <TableCell>{run.rowsWritten.toLocaleString()}</TableCell>
+  1006→                          <TableCell className={run.rowsFailed > 0 ? 'text-red-600' : ''}>
+  1007→                            {run.rowsFailed}
+  1008→                          </TableCell>
+  1009→                          <TableCell>
+  1010→                            <Badge variant="outline" className="text-xs">
+  1011→                              {run.isManual ? 'Manual' : 'Scheduled'}
+  1012→                            </Badge>
+  1013→                          </TableCell>
+  1014→                        </TableRow>
+  1015→                      )
+  1016→                    })}
+  1017→                  </TableBody>
+  1018→                </Table>
+  1019→              </div>
+  1020→            )}
+  1021→          </CardContent>
+  1022→        </Card>
+  1023→
+  1024→        {/* Preview Dialog */}
+  1025→        <Dialog open={!!previewTarget} onOpenChange={(open) => !open && setPreviewTarget(null)}>
+  1026→          <DialogContent className="max-w-5xl">
+  1027→            <DialogHeader>
+  1028→              <DialogTitle className="flex items-center gap-2">
+  1029→                <Eye className="h-4 w-4 text-emerald-600" />
+  1030→                Preview: {previewTarget?.name}
+  1031→              </DialogTitle>
+  1032→              <DialogDescription>
+  1033→                Dry-run fetch — no rows are written to the database.
+  1034→              </DialogDescription>
+  1035→            </DialogHeader>
+  1036→            {previewLoading ? (
+  1037→              <div className="space-y-2">
+  1038→                {Array.from({ length: 5 }).map((_, i) => (
+  1039→                  <Skeleton key={i} className="h-8 w-full" />
+  1040→                ))}
+  1041→              </div>
+  1042→            ) : previewResult ? (
+  1043→              <div className="space-y-4">
+  1044→                {previewResult.error ? (
+  1045→                  <div className="rounded-md bg-red-500/10 border border-red-200 p-3 text-sm text-red-700">
+  1046→                    {previewResult.error}
+  1047→                  </div>
+  1048→                ) : (
+  1049→                  <>
+  1050→                    <div className="flex flex-wrap gap-3 text-xs">
+  1051→                      <Badge variant="outline">Status: {previewResult.statusCode ?? '—'}</Badge>
+  1052→                      <Badge variant="outline">Duration: {previewResult.durationMs ?? 0}ms</Badge>
+  1053→                      <Badge variant="outline">Total rows: {previewResult.totalRows ?? 0}</Badge>
+  1054→                      <Badge variant="outline">Preview rows: {previewResult.previewRows?.length ?? 0}</Badge>
+  1055→                    </div>
+  1056→                    <div className="rounded-md border max-h-[50vh] overflow-auto">
+  1057→                      <Table>
+  1058→                        <TableHeader className="sticky top-0 bg-background">
+  1059→                          <TableRow>
+  1060→                            {(previewResult.columns ?? []).map((c) => (
+  1061→                              <TableHead key={c.name} className="font-mono text-xs">
+  1062→                                {c.name}
+  1063→                                <span className="text-muted-foreground ml-1">({c.type})</span>
+  1064→                              </TableHead>
+  1065→                            ))}
+  1066→                          </TableRow>
+  1067→                        </TableHeader>
+  1068→                        <TableBody>
+  1069→                          {(previewResult.previewRows ?? []).length === 0 ? (
+  1070→                            <TableRow>
+  1071→                              <TableCell
+  1072→                                colSpan={(previewResult.columns ?? []).length || 1}
+  1073→                                className="text-center text-muted-foreground py-8"
+  1074→                              >
+  1075→                                No rows returned
+  1076→                              </TableCell>
+  1077→                            </TableRow>
+  1078→                          ) : (
+  1079→                            (previewResult.previewRows ?? []).map((row, i) => (
+  1080→                              <TableRow key={i}>
+  1081→                                {(previewResult.columns ?? []).map((c) => (
+  1082→                                  <TableCell key={c.name} className="font-mono text-xs">
+  1083→                                    {row[c.name] !== undefined && row[c.name] !== null
+  1084→                                      ? String(row[c.name]).slice(0, 80)
+  1085→                                      : '—'}
+  1086→                                  </TableCell>
+  1087→                                ))}
+  1088→                              </TableRow>
+  1089→                            ))
+  1090→                          )}
+  1091→                        </TableBody>
+  1092→                      </Table>
+  1093→                    </div>
+  1094→                  </>
+  1095→                )}
+  1096→              </div>
+  1097→            ) : null}
+  1098→          </DialogContent>
+  1099→        </Dialog>
+  1100→      </motion.div>
+  1101→    )
+  1102→  }
+  1103→
+  1104→  return (
+  1105→    <motion.div
+  1106→      initial={{ opacity: 0, y: 8 }}
+  1107→      animate={{ opacity: 1, y: 0 }}
+  1108→      transition={{ duration: 0.2 }}
+  1109→      className="space-y-6"
+  1110→    >
+  1111→      <div className="flex items-center justify-between flex-wrap gap-2">
+  1112→        <div>
+  1113→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+  1114→            Pipeline Studio
+  1115→          </h1>
+  1116→          <p className="text-muted-foreground">Configure and manage data source ingestion</p>
+  1117→        </div>
+  1118→        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+  1119→          <DialogTrigger asChild>
+  1120→            <Button>
+  1121→              <Plus className="mr-1 h-4 w-4" /> New Pipeline
+  1122→            </Button>
+  1123→          </DialogTrigger>
+  1124→          <DialogContent className="max-w-2xl">
+  1125→            <DialogHeader>
+  1126→              <DialogTitle>Create Pipeline Source</DialogTitle>
+  1127→              <DialogDescription>Configure a new data ingestion pipeline</DialogDescription>
+  1128→            </DialogHeader>
+  1129→            <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto">
+  1130→              <div className="grid gap-3 md:grid-cols-2">
+  1131→                <div className="space-y-2">
+  1132→                  <Label>Name</Label>
+  1133→                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="My Pipeline" />
+  1134→                </div>
+  1135→                <div className="space-y-2">
+  1136→                  <Label>Source Type</Label>
+  1137→                  <Select value={newType} onValueChange={(v) => setNewType(v as typeof newType)}>
+  1138→                    <SelectTrigger>
+  1139→                      <SelectValue />
+  1140→                    </SelectTrigger>
+  1141→                    <SelectContent>
+  1142→                      <SelectItem value="rest">REST API</SelectItem>
+  1143→                      <SelectItem value="rss">RSS Feed</SelectItem>
+  1144→                      <SelectItem value="websocket">WebSocket</SelectItem>
+  1145→                      <SelectItem value="scraper">Web Scraper</SelectItem>
+  1146→                    </SelectContent>
+  1147→                  </Select>
+  1148→                </div>
+  1149→              </div>
+  1150→              <div className="space-y-2">
+  1151→                <Label>Description</Label>
+  1152→                <Input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Brief description" />
+  1153→              </div>
+  1154→              <div className="grid gap-3 md:grid-cols-3">
+  1155→                <div className="space-y-2 md:col-span-2">
+  1156→                  <Label>URL</Label>
+  1157→                  <Input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://api.example.com/data" />
+  1158→                </div>
+  1159→                <div className="space-y-2">
+  1160→                  <Label>Method</Label>
+  1161→                  <Select value={newMethod} onValueChange={setNewMethod}>
+  1162→                    <SelectTrigger>
+  1163→                      <SelectValue />
+  1164→                    </SelectTrigger>
+  1165→                    <SelectContent>
+  1166→                      <SelectItem value="GET">GET</SelectItem>
+  1167→                      <SelectItem value="POST">POST</SelectItem>
+  1168→                      <SelectItem value="PUT">PUT</SelectItem>
+  1169→                      <SelectItem value="DELETE">DELETE</SelectItem>
+  1170→                    </SelectContent>
+  1171→                  </Select>
+  1172→                </div>
+  1173→              </div>
+  1174→              <div className="grid gap-3 md:grid-cols-2">
+  1175→                <div className="space-y-2">
+  1176→                  <Label>JSONPath (optional)</Label>
+  1177→                  <Input value={newJsonPath} onChange={(e) => setNewJsonPath(e.target.value)} placeholder="data.items" />
+  1178→                </div>
+  1179→                <div className="space-y-2">
+  1180→                  <Label>Fetch Interval (sec)</Label>
+  1181→                  <Input type="number" value={newInterval} onChange={(e) => setNewInterval(e.target.value)} />
+  1182→                </div>
+  1183→              </div>
+  1184→              <div className="space-y-2">
+  1185→                <Label>Target Table</Label>
+  1186→                <Select value={newTargetTableId} onValueChange={(v) => {
+  1187→                  setNewTargetTableId(v)
+  1188→                  setNewPrimaryKeyCols([])
+  1189→                }}>
+  1190→                  <SelectTrigger>
+  1191→                    <SelectValue placeholder="Select target table..." />
+  1192→                  </SelectTrigger>
+  1193→                  <SelectContent>
+  1194→                    <SelectItem value="_none">None (preview only)</SelectItem>
+  1195→                    {tables.map((t) => (
+  1196→                      <SelectItem key={t.id} value={t.id}>
+  1197→                        <span className="font-medium">{t.displayName || t.name}</span>
+  1198→                        <span className="ml-2 text-xs text-muted-foreground">
+  1199→                          ({(t.rowCount ?? 0).toLocaleString()} rows · {t.columns?.length || 0} cols)
+  1200→                        </span>
+  1201→                      </SelectItem>
+  1202→                    ))}
+  1203→                  </SelectContent>
+  1204→                </Select>
+  1205→                <p className="text-xs text-muted-foreground">
+  1206→                  Fetched data will be written to this table. Leave empty for preview-only mode.
+  1207→                </p>
+  1208→              </div>
+  1209→              <div className="space-y-2">
+  1210→                <Label>Pre-Run Action</Label>
+  1211→                <Select value={newPreRunAction} onValueChange={setNewPreRunAction}>
+  1212→                  <SelectTrigger>
+  1213→                    <SelectValue />
+  1214→                  </SelectTrigger>
+  1215→                  <SelectContent>
+  1216→                    <SelectItem value="none">None — Keep existing data</SelectItem>
+  1217→                    <SelectItem value="truncate">Truncate — Delete all rows before insert</SelectItem>
+  1218→                    <SelectItem value="archive">Archive — Archive old data before insert</SelectItem>
+  1219→                  </SelectContent>
+  1220→                </Select>
+  1221→                <p className="text-xs text-muted-foreground">
+  1222→                  What to do with existing table data before writing new rows.
+  1223→                </p>
+  1224→              </div>
+  1225→              <div className="space-y-2">
+  1226→                <Label>On Conflict (Duplicate Rows)</Label>
+  1227→                <Select value={newOnConflict} onValueChange={setNewOnConflict}>
+  1228→                  <SelectTrigger>
+  1229→                    <SelectValue />
+  1230→                  </SelectTrigger>
+  1231→                  <SelectContent>
+  1232→                    <SelectItem value="update">Upsert — Insert new, update existing</SelectItem>
+  1233→                    <SelectItem value="insert">Insert Only — Always insert new rows</SelectItem>
+  1234→                    <SelectItem value="replace">Replace — Overwrite entire row</SelectItem>
+  1235→                    <SelectItem value="skip">Skip — Skip rows that already exist</SelectItem>
+  1236→                    <SelectItem value="truncate">Truncate — Clear table then insert all</SelectItem>
+  1237→                  </SelectContent>
+  1238→                </Select>
+  1239→                <p className="text-xs text-muted-foreground">
+  1240→                  How to handle rows where the primary key matches an existing row.
+  1241→                </p>
+  1242→              </div>
+  1243→              {newTargetTableId && newTargetTableId !== '_none' && (newOnConflict === 'update' || newOnConflict === 'replace' || newOnConflict === 'skip') && (
+  1244→                <div className="space-y-2">
+  1245→                  <Label>Primary Key Columns</Label>
+  1246→                  <p className="text-xs text-muted-foreground">
+  1247→                    Select which columns uniquely identify a row. Used for upsert, replace, and skip logic.
+  1248→                  </p>
+  1249→                  <div className="flex flex-wrap gap-2">
+  1250→                    {(() => {
+  1251→                      const selectedTable = tables.find(t => t.id === newTargetTableId)
+  1252→                      const availableCols = selectedTable?.columns || []
+  1253→                      const mappingTargets = newMappings.map(m => m.target).filter(Boolean)
+  1254→                      const allCols = [...new Set([...availableCols.map(c => c.name), ...mappingTargets])]
+  1255→                      return allCols.map(colName => (
+  1256→                        <Badge
+  1257→                          key={colName}
+  1258→                          variant={newPrimaryKeyCols.includes(colName) ? 'default' : 'outline'}
+  1259→                          className="cursor-pointer select-none"
+  1260→                          onClick={() => {
+  1261→                            setNewPrimaryKeyCols(prev =>
+  1262→                              prev.includes(colName)
+  1263→                                ? prev.filter(c => c !== colName)
+  1264→                                : [...prev, colName]
+  1265→                            )
+  1266→                          }}
+  1267→                        >
+  1268→                          {newPrimaryKeyCols.includes(colName) && <span className="mr-1">🔑</span>}
+  1269→                          {colName}
+  1270→                        </Badge>
+  1271→                      ))
+  1272→                    })()}
+  1273→                  </div>
+  1274→                  {newPrimaryKeyCols.length === 0 && (
+  1275→                    <p className="text-xs text-amber-600 flex items-center gap-1">
+  1276→                      <AlertTriangle className="h-3 w-3" />
+  1277→                      No primary key selected — all rows will be inserted (no upsert/skip).
+  1278→                    </p>
+  1279→                  )}
+  1280→                </div>
+  1281→              )}
+  1282→              <div className="space-y-2">
+  1283→                <Label>Headers (JSON)</Label>
+  1284→                <Textarea
+  1285→                  value={newHeaders}
+  1286→                  onChange={(e) => setNewHeaders(e.target.value)}
+  1287→                  className="font-mono text-xs"
+  1288→                  rows={3}
+  1289→                  placeholder='{"Authorization": "Bearer ..."}'
+  1290→                />
+  1291→              </div>
+  1292→              <div className="space-y-2">
+  1293→                <div className="flex items-center justify-between">
+  1294→                  <Label>Column Mappings</Label>
+  1295→                  <Button
+  1296→                    type="button"
+  1297→                    variant="outline"
+  1298→                    size="sm"
+  1299→                    onClick={() =>
+  1300→                      setNewMappings((prev) => [
+  1301→                        ...prev,
+  1302→                        { src: '', target: '', type: 'TEXT' },
+  1303→                      ])
+  1304→                    }
+  1305→                  >
+  1306→                    <Plus className="mr-1 h-3.5 w-3.5" /> Add Mapping
+  1307→                  </Button>
+  1308→                </div>
+  1309→                <div className="rounded-md border">
+  1310→                  <Table>
+  1311→                    <TableHeader>
+  1312→                      <TableRow>
+  1313→                        <TableHead>Source</TableHead>
+  1314→                        <TableHead>Target</TableHead>
+  1315→                        <TableHead>Type</TableHead>
+  1316→                        <TableHead className="w-8" />
+  1317→                      </TableRow>
+  1318→                    </TableHeader>
+  1319→                    <TableBody>
+  1320→                      {newMappings.length === 0 ? (
+  1321→                        <TableRow>
+  1322→                          <TableCell colSpan={4} className="text-center text-muted-foreground text-xs py-4">
+  1323→                            No mappings — source rows will be written as-is.
+  1324→                          </TableCell>
+  1325→                        </TableRow>
+  1326→                      ) : (
+  1327→                        newMappings.map((m, i) => (
+  1328→                          <TableRow key={i}>
+  1329→                            <TableCell>
+  1330→                              <Input
+  1331→                                value={m.src}
+  1332→                                onChange={(e) => {
+  1333→                                  const v = e.target.value
+  1334→                                  setNewMappings((prev) =>
+  1335→                                    prev.map((x, idx) => (idx === i ? { ...x, src: v } : x)),
+  1336→                                  )
+  1337→                                }}
+  1338→                                className="h-8 font-mono text-xs"
+  1339→                              />
+  1340→                            </TableCell>
+  1341→                            <TableCell>
+  1342→                              <Input
+  1343→                                value={m.target}
+  1344→                                onChange={(e) => {
+  1345→                                  const v = e.target.value
+  1346→                                  setNewMappings((prev) =>
+  1347→                                    prev.map((x, idx) => (idx === i ? { ...x, target: v } : x)),
+  1348→                                  )
+  1349→                                }}
+  1350→                                className="h-8 font-mono text-xs"
+  1351→                              />
+  1352→                            </TableCell>
+  1353→                            <TableCell>
+  1354→                              <Select
+  1355→                                value={m.type ?? 'TEXT'}
+  1356→                                onValueChange={(v) =>
+  1357→                                  setNewMappings((prev) =>
+  1358→                                    prev.map((x, idx) => (idx === i ? { ...x, type: v } : x)),
+  1359→                                  )
+  1360→                                }
+  1361→                              >
+  1362→                                <SelectTrigger className="h-8 text-xs">
+  1363→                                  <SelectValue />
+  1364→                                </SelectTrigger>
+  1365→                                <SelectContent>
+  1366→                                  {['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON'].map((t) => (
+  1367→                                    <SelectItem key={t} value={t}>
+  1368→                                      {t}
+  1369→                                    </SelectItem>
+  1370→                                  ))}
+  1371→                                </SelectContent>
+  1372→                              </Select>
+  1373→                            </TableCell>
+  1374→                            <TableCell>
+  1375→                              <Button
+  1376→                                variant="ghost"
+  1377→                                size="icon"
+  1378→                                className="h-7 w-7 text-destructive"
+  1379→                                onClick={() =>
+  1380→                                  setNewMappings((prev) => prev.filter((_, idx) => idx !== i))
+  1381→                                }
+  1382→                              >
+  1383→                                <Trash2 className="h-3.5 w-3.5" />
+  1384→                              </Button>
+  1385→                            </TableCell>
+  1386→                          </TableRow>
+  1387→                        ))
+  1388→                      )}
+  1389→                    </TableBody>
+  1390→                  </Table>
+  1391→                </div>
+  1392→              </div>
+  1393→            </div>
+  1394→            <DialogFooter>
+  1395→              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+  1396→                Cancel
+  1397→              </Button>
+  1398→              <Button onClick={handleCreate}>Create Pipeline</Button>
+  1399→            </DialogFooter>
+  1400→          </DialogContent>
+  1401→        </Dialog>
+  1402→
+  1403→        {/* Edit Pipeline Dialog */}
+  1404→        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+  1405→          <DialogContent className="max-w-2xl">
+  1406→            <DialogHeader>
+  1407→              <DialogTitle>Edit Pipeline Source</DialogTitle>
+  1408→              <DialogDescription>Modify pipeline configuration</DialogDescription>
+  1409→            </DialogHeader>
+  1410→            <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto scrollbar-thin">
+  1411→              <div className="grid gap-3 md:grid-cols-2">
+  1412→                <div className="space-y-2">
+  1413→                  <Label>Name</Label>
+  1414→                  <Input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="My Pipeline" />
+  1415→                </div>
+  1416→                <div className="space-y-2">
+  1417→                  <Label>Source Type</Label>
+  1418→                  <Select value={editType} onValueChange={(v) => setEditType(v as typeof editType)}>
+  1419→                    <SelectTrigger>
+  1420→                      <SelectValue />
+  1421→                    </SelectTrigger>
+  1422→                    <SelectContent>
+  1423→                      <SelectItem value="rest">REST API</SelectItem>
+  1424→                      <SelectItem value="rss">RSS Feed</SelectItem>
+  1425→                      <SelectItem value="websocket">WebSocket</SelectItem>
+  1426→                      <SelectItem value="scraper">Web Scraper</SelectItem>
+  1427→                    </SelectContent>
+  1428→                  </Select>
+  1429→                </div>
+  1430→              </div>
+  1431→              <div className="space-y-2">
+  1432→                <Label>Description</Label>
+  1433→                <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Brief description" />
+  1434→              </div>
+  1435→              <div className="grid gap-3 md:grid-cols-3">
+  1436→                <div className="space-y-2 md:col-span-2">
+  1437→                  <Label>URL</Label>
+  1438→                  <Input value={editUrl} onChange={(e) => setEditUrl(e.target.value)} placeholder="https://api.example.com/data" />
+  1439→                </div>
+  1440→                <div className="space-y-2">
+  1441→                  <Label>Method</Label>
+  1442→                  <Select value={editMethod} onValueChange={setEditMethod}>
+  1443→                    <SelectTrigger>
+  1444→                      <SelectValue />
+  1445→                    </SelectTrigger>
+  1446→                    <SelectContent>
+  1447→                      <SelectItem value="GET">GET</SelectItem>
+  1448→                      <SelectItem value="POST">POST</SelectItem>
+  1449→                      <SelectItem value="PUT">PUT</SelectItem>
+  1450→                      <SelectItem value="DELETE">DELETE</SelectItem>
+  1451→                    </SelectContent>
+  1452→                  </Select>
+  1453→                </div>
+  1454→              </div>
+  1455→              <div className="grid gap-3 md:grid-cols-2">
+  1456→                <div className="space-y-2">
+  1457→                  <Label>JSONPath (optional)</Label>
+  1458→                  <Input value={editJsonPath} onChange={(e) => setEditJsonPath(e.target.value)} placeholder="data.items" />
+  1459→                </div>
+  1460→                <div className="space-y-2">
+  1461→                  <Label>Fetch Interval (sec)</Label>
+  1462→                  <Input type="number" value={editInterval} onChange={(e) => setEditInterval(e.target.value)} />
+  1463→                </div>
+  1464→              </div>
+  1465→              <div className="space-y-2">
+  1466→                <Label>Target Table</Label>
+  1467→                <Select value={editTargetTableId || '_none'} onValueChange={(v) => {
+  1468→                  setEditTargetTableId(v)
+  1469→                  setEditPrimaryKeyCols([])
+  1470→                }}>
+  1471→                  <SelectTrigger>
+  1472→                    <SelectValue placeholder="Select target table..." />
+  1473→                  </SelectTrigger>
+  1474→                  <SelectContent>
+  1475→                    <SelectItem value="_none">None (preview only)</SelectItem>
+  1476→                    {tables.map((t) => (
+  1477→                      <SelectItem key={t.id} value={t.id}>
+  1478→                        <span className="font-medium">{t.displayName || t.name}</span>
+  1479→                        <span className="ml-2 text-xs text-muted-foreground">
+  1480→                          ({(t.rowCount ?? 0).toLocaleString()} rows · {t.columns?.length || 0} cols)
+  1481→                        </span>
+  1482→                      </SelectItem>
+  1483→                    ))}
+  1484→                  </SelectContent>
+  1485→                </Select>
+  1486→                <p className="text-xs text-muted-foreground">
+  1487→                  Fetched data will be written to this table. Leave empty for preview-only mode.
+  1488→                </p>
+  1489→              </div>
+  1490→              <div className="space-y-2">
+  1491→                <Label>Pre-Run Action</Label>
+  1492→                <Select value={editPreRunAction} onValueChange={setEditPreRunAction}>
+  1493→                  <SelectTrigger>
+  1494→                    <SelectValue />
+  1495→                  </SelectTrigger>
+  1496→                  <SelectContent>
+  1497→                    <SelectItem value="none">None — Keep existing data</SelectItem>
+  1498→                    <SelectItem value="truncate">Truncate — Delete all rows before insert</SelectItem>
+  1499→                    <SelectItem value="archive">Archive — Archive old data before insert</SelectItem>
+  1500→                  </SelectContent>
+  1501→                </Select>
+  1502→                <p className="text-xs text-muted-foreground">
+  1503→                  What to do with existing table data before writing new rows.
+  1504→                </p>
+  1505→              </div>
+  1506→              <div className="space-y-2">
+  1507→                <Label>On Conflict (Duplicate Rows)</Label>
+  1508→                <Select value={editOnConflict} onValueChange={setEditOnConflict}>
+  1509→                  <SelectTrigger>
+  1510→                    <SelectValue />
+  1511→                  </SelectTrigger>
+  1512→                  <SelectContent>
+  1513→                    <SelectItem value="update">Upsert — Insert new, update existing</SelectItem>
+  1514→                    <SelectItem value="insert">Insert Only — Always insert new rows</SelectItem>
+  1515→                    <SelectItem value="replace">Replace — Overwrite entire row</SelectItem>
+  1516→                    <SelectItem value="skip">Skip — Skip rows that already exist</SelectItem>
+  1517→                    <SelectItem value="truncate">Truncate — Clear table then insert all</SelectItem>
+  1518→                  </SelectContent>
+  1519→                </Select>
+  1520→                <p className="text-xs text-muted-foreground">
+  1521→                  How to handle rows where the primary key matches an existing row.
+  1522→                </p>
+  1523→              </div>
+  1524→              {editTargetTableId && editTargetTableId !== '_none' && (editOnConflict === 'update' || editOnConflict === 'replace' || editOnConflict === 'skip') && (
+  1525→                <div className="space-y-2">
+  1526→                  <Label>Primary Key Columns</Label>
+  1527→                  <p className="text-xs text-muted-foreground">
+  1528→                    Select which columns uniquely identify a row. Used for upsert, replace, and skip logic.
+  1529→                  </p>
+  1530→                  <div className="flex flex-wrap gap-2">
+  1531→                    {(() => {
+  1532→                      const selectedTable = tables.find((t) => t.id === editTargetTableId)
+  1533→                      const availableCols = selectedTable?.columns || []
+  1534→                      const mappingTargets = editMappings.map((m) => m.target).filter(Boolean)
+  1535→                      const allCols = [...new Set([...availableCols.map((c) => c.name), ...mappingTargets])]
+  1536→                      return allCols.map((colName) => (
+  1537→                        <Badge
+  1538→                          key={colName}
+  1539→                          variant={editPrimaryKeyCols.includes(colName) ? 'default' : 'outline'}
+  1540→                          className="cursor-pointer select-none"
+  1541→                          onClick={() => {
+  1542→                            setEditPrimaryKeyCols((prev) =>
+  1543→                              prev.includes(colName)
+  1544→                                ? prev.filter((c) => c !== colName)
+  1545→                                : [...prev, colName],
+  1546→                            )
+  1547→                          }}
+  1548→                        >
+  1549→                          {editPrimaryKeyCols.includes(colName) && <span className="mr-1">🔑</span>}
+  1550→                          {colName}
+  1551→                        </Badge>
+  1552→                      ))
+  1553→                    })()}
+  1554→                  </div>
+  1555→                  {editPrimaryKeyCols.length === 0 && (
+  1556→                    <p className="text-xs text-amber-600 flex items-center gap-1">
+  1557→                      <AlertTriangle className="h-3 w-3" />
+  1558→                      No primary key selected — all rows will be inserted (no upsert/skip).
+  1559→                    </p>
+  1560→                  )}
+  1561→                </div>
+  1562→              )}
+  1563→              <div className="space-y-2">
+  1564→                <Label>Headers (JSON)</Label>
+  1565→                <Textarea
+  1566→                  value={editHeaders}
+  1567→                  onChange={(e) => setEditHeaders(e.target.value)}
+  1568→                  className="font-mono text-xs"
+  1569→                  rows={3}
+  1570→                  placeholder='{"Authorization": "Bearer ..."}'
+  1571→                />
+  1572→              </div>
+  1573→              <div className="space-y-2">
+  1574→                <div className="flex items-center justify-between">
+  1575→                  <Label>Column Mappings</Label>
+  1576→                  <Button
+  1577→                    type="button"
+  1578→                    variant="outline"
+  1579→                    size="sm"
+  1580→                    onClick={() =>
+  1581→                      setEditMappings((prev) => [
+  1582→                        ...prev,
+  1583→                        { src: '', target: '', type: 'TEXT' },
+  1584→                      ])
+  1585→                    }
+  1586→                  >
+  1587→                    <Plus className="mr-1 h-3.5 w-3.5" /> Add Mapping
+  1588→                  </Button>
+  1589→                </div>
+  1590→                <div className="rounded-md border">
+  1591→                  <Table>
+  1592→                    <TableHeader>
+  1593→                      <TableRow>
+  1594→                        <TableHead>Source</TableHead>
+  1595→                        <TableHead>Target</TableHead>
+  1596→                        <TableHead>Type</TableHead>
+  1597→                        <TableHead className="w-8" />
+  1598→                      </TableRow>
+  1599→                    </TableHeader>
+  1600→                    <TableBody>
+  1601→                      {editMappings.length === 0 ? (
+  1602→                        <TableRow>
+  1603→                          <TableCell colSpan={4} className="text-center text-muted-foreground text-xs py-4">
+  1604→                            No mappings — source rows will be written as-is.
+  1605→                          </TableCell>
+  1606→                        </TableRow>
+  1607→                      ) : (
+  1608→                        editMappings.map((m, i) => (
+  1609→                          <TableRow key={i}>
+  1610→                            <TableCell>
+  1611→                              <Input
+  1612→                                value={m.src}
+  1613→                                onChange={(e) => {
+  1614→                                  const v = e.target.value
+  1615→                                  setEditMappings((prev) =>
+  1616→                                    prev.map((x, idx) => (idx === i ? { ...x, src: v } : x)),
+  1617→                                  )
+  1618→                                }}
+  1619→                                className="h-8 font-mono text-xs"
+  1620→                              />
+  1621→                            </TableCell>
+  1622→                            <TableCell>
+  1623→                              <Input
+  1624→                                value={m.target}
+  1625→                                onChange={(e) => {
+  1626→                                  const v = e.target.value
+  1627→                                  setEditMappings((prev) =>
+  1628→                                    prev.map((x, idx) => (idx === i ? { ...x, target: v } : x)),
+  1629→                                  )
+  1630→                                }}
+  1631→                                className="h-8 font-mono text-xs"
+  1632→                              />
+  1633→                            </TableCell>
+  1634→                            <TableCell>
+  1635→                              <Select
+  1636→                                value={m.type ?? 'TEXT'}
+  1637→                                onValueChange={(v) =>
+  1638→                                  setEditMappings((prev) =>
+  1639→                                    prev.map((x, idx) => (idx === i ? { ...x, type: v } : x)),
+  1640→                                  )
+  1641→                                }
+  1642→                              >
+  1643→                                <SelectTrigger className="h-8 text-xs">
+  1644→                                  <SelectValue />
+  1645→                                </SelectTrigger>
+  1646→                                <SelectContent>
+  1647→                                  {['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON'].map((t) => (
+  1648→                                    <SelectItem key={t} value={t}>
+  1649→                                      {t}
+  1650→                                    </SelectItem>
+  1651→                                  ))}
+  1652→                                </SelectContent>
+  1653→                              </Select>
+  1654→                            </TableCell>
+  1655→                            <TableCell>
+  1656→                              <Button
+  1657→                                variant="ghost"
+  1658→                                size="icon"
+  1659→                                className="h-7 w-7 text-destructive"
+  1660→                                onClick={() =>
+  1661→                                  setEditMappings((prev) => prev.filter((_, idx) => idx !== i))
+  1662→                                }
+  1663→                              >
+  1664→                                <Trash2 className="h-3.5 w-3.5" />
+  1665→                              </Button>
+  1666→                            </TableCell>
+  1667→                          </TableRow>
+  1668→                        ))
+  1669→                      )}
+  1670→                    </TableBody>
+  1671→                  </Table>
+  1672→                </div>
+  1673→              </div>
+  1674→            </div>
+  1675→            <DialogFooter>
+  1676→              <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+  1677→                Cancel
+  1678→              </Button>
+  1679→              <Button onClick={handleSaveEdit}>Save Changes</Button>
+  1680→            </DialogFooter>
+  1681→          </DialogContent>
+  1682→        </Dialog>
+  1683→      </div>
+  1684→
+  1685→      <div className="grid gap-4 md:grid-cols-4">
+  1686→        <Card>
+  1687→          <CardContent className="pt-4">
+  1688→            <div className="text-sm text-muted-foreground">Total Pipelines</div>
+  1689→            <div className="text-2xl font-bold">{pipelines.length}</div>
+  1690→          </CardContent>
+  1691→        </Card>
+  1692→        <Card>
+  1693→          <CardContent className="pt-4">
+  1694→            <div className="text-sm text-muted-foreground">Active</div>
+  1695→            <div className="text-2xl font-bold text-emerald-600">
+  1696→              {pipelines.filter((p) => p.isActive).length}
+  1697→            </div>
+  1698→          </CardContent>
+  1699→        </Card>
+  1700→        <Card>
+  1701→          <CardContent className="pt-4">
+  1702→            <div className="text-sm text-muted-foreground">Failed (recent)</div>
+  1703→            <div className="text-2xl font-bold text-red-600">
+  1704→              {allRuns.filter((r) => r.status === 'failed').length}
+  1705→            </div>
+  1706→          </CardContent>
+  1707→        </Card>
+  1708→        <Card>
+  1709→          <CardContent className="pt-4">
+  1710→            <div className="text-sm text-muted-foreground">Total Rows Written</div>
+  1711→            <div className="text-2xl font-bold">
+  1712→              {allRuns.reduce((s, r) => s + (r.rowsWritten ?? 0), 0).toLocaleString()}
+  1713→            </div>
+  1714→          </CardContent>
+  1715→        </Card>
+  1716→      </div>
+  1717→
+  1718→      {chartData.length > 0 && (
+  1719→        <Card>
+  1720→          <CardHeader>
+  1721→            <CardTitle className="text-base">Pipeline Runs & Rows Written</CardTitle>
+  1722→            <CardDescription>Rows written per day across all pipelines</CardDescription>
+  1723→          </CardHeader>
+  1724→          <CardContent>
+  1725→            <div className="h-[200px]">
+  1726→              <ResponsiveContainer width="100%" height="100%">
+  1727→                <BarChart data={chartData}>
+  1728→                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+  1729→                  <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+  1730→                  <YAxis tick={{ fontSize: 11 }} />
+  1731→                  <RTooltip
+  1732→                    contentStyle={{
+  1733→                      backgroundColor: 'hsl(var(--popover))',
+  1734→                      border: '1px solid hsl(var(--border))',
+  1735→                      borderRadius: '8px',
+  1736→                      fontSize: '12px',
+  1737→                    }}
+  1738→                  />
+  1739→                  <Bar dataKey="rows" fill="#10b981" radius={[4, 4, 0, 0]} name="Rows Written" />
+  1740→                </BarChart>
+  1741→              </ResponsiveContainer>
+  1742→            </div>
+  1743→          </CardContent>
+  1744→        </Card>
+  1745→      )}
+  1746→
+  1747→      <div className="flex items-center gap-3 flex-wrap">
+  1748→        <div className="relative flex-1 max-w-sm">
+  1749→          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+  1750→          <Input
+  1751→            placeholder="Search pipelines..."
+  1752→            value={search}
+  1753→            onChange={(e) => setSearch(e.target.value)}
+  1754→            className="pl-9"
+  1755→          />
+  1756→        </div>
+  1757→        <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+  1758→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+  1759→        </Button>
+  1760→      </div>
+  1761→
+  1762→      <div className="grid gap-4 md:grid-cols-2">
+  1763→        {filteredPipelines.length === 0 ? (
+  1764→          <Card className="md:col-span-2">
+  1765→            <CardContent className="py-16 flex flex-col items-center justify-center text-muted-foreground">
+  1766→              <GitBranch className="h-14 w-14 mb-3 opacity-30" />
+  1767→              <p className="text-base font-medium">No pipelines yet</p>
+  1768→              <p className="text-sm mt-1">Create a pipeline source to start ingesting data.</p>
+  1769→              <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+  1770→                <Plus className="mr-1 h-4 w-4" /> New Pipeline
+  1771→              </Button>
+  1772→            </CardContent>
+  1773→          </Card>
+  1774→        ) : (
+  1775→          filteredPipelines.map((pipeline) => {
+  1776→            const SourceIcon = sourceIcons[pipeline.sourceType]
+  1777→            const lastRun = pipeline.lastRun ?? pipeline.pipelineRuns?.[0] ?? null
+  1778→            const StatusIcon = lastRun ? statusIcons[lastRun.status] : Clock
+  1779→            return (
+  1780→              <Card
+  1781→                key={pipeline.id}
+  1782→                className="cursor-pointer hover:shadow-md hover:border-emerald-200 transition-all"
+  1783→                onClick={() => setSelectedPipeline(pipeline)}
+  1784→              >
+  1785→                <CardHeader className="pb-2">
+  1786→                  <div className="flex items-center justify-between">
+  1787→                    <div className="flex items-center gap-2">
+  1788→                      <div className="rounded-md bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-1.5">
+  1789→                        <SourceIcon className="h-4 w-4 text-emerald-600" />
+  1790→                      </div>
+  1791→                      <CardTitle className="text-base">{pipeline.name}</CardTitle>
+  1792→                    </div>
+  1793→                    <DropdownMenu>
+  1794→                      <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+  1795→                        <Button variant="ghost" size="icon" className="h-7 w-7">
+  1796→                          <MoreHorizontal className="h-3.5 w-3.5" />
+  1797→                        </Button>
+  1798→                      </DropdownMenuTrigger>
+  1799→                      <DropdownMenuContent align="end">
+  1800→                        <DropdownMenuItem
+  1801→                          onClick={(e) => {
+  1802→                            e.stopPropagation()
+  1803→                            void handleRunNow(pipeline)
+  1804→                          }}
+  1805→                        >
+  1806→                          <Play className="mr-2 h-3.5 w-3.5" /> Run Now
+  1807→                        </DropdownMenuItem>
+  1808→                        <DropdownMenuItem
+  1809→                          onClick={(e) => {
+  1810→                            e.stopPropagation()
+  1811→                            void handlePreview(pipeline)
+  1812→                          }}
+  1813→                        >
+  1814→                          <Eye className="mr-2 h-3.5 w-3.5" /> Preview
+  1815→                        </DropdownMenuItem>
+  1816→                        <DropdownMenuItem
+  1817→                          onClick={(e) => {
+  1818→                            e.stopPropagation()
+  1819→                            void handleToggleActive(pipeline)
+  1820→                          }}
+  1821→                        >
+  1822→                          {pipeline.isActive ? (
+  1823→                            <>
+  1824→                              <Pause className="mr-2 h-3.5 w-3.5" /> Pause
+  1825→                            </>
+  1826→                          ) : (
+  1827→                            <>
+  1828→                              <Play className="mr-2 h-3.5 w-3.5" /> Activate
+  1829→                            </>
+  1830→                          )}
+  1831→                        </DropdownMenuItem>
+  1832→                        <DropdownMenuSeparator />
+  1833→                        <DropdownMenuItem className="text-destructive" onClick={(e) => e.stopPropagation()}>
+  1834→                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+  1835→                        </DropdownMenuItem>
+  1836→                      </DropdownMenuContent>
+  1837→                    </DropdownMenu>
+  1838→                  </div>
+  1839→                  <CardDescription className="line-clamp-1">{pipeline.description}</CardDescription>
+  1840→                </CardHeader>
+  1841→                <CardContent>
+  1842→                  <div className="flex items-center justify-between mb-3">
+  1843→                    <div className="flex items-center gap-2">
+  1844→                      <Badge variant="outline" className={`capitalize ${sourceTypeBadge[pipeline.sourceType]}`}>
+  1845→                        {pipeline.sourceType}
+  1846→                      </Badge>
+  1847→                      {pipeline.isActive ? (
+  1848→                        <Badge className="bg-emerald-500/10 text-emerald-600 border-0">Active</Badge>
+  1849→                      ) : (
+  1850→                        <Badge variant="secondary">Paused</Badge>
+  1851→                      )}
+  1852→                      {pipeline.isActive && pipeline.fetchInterval > 0 && pipeline.lastRun &&
+  1853→                        (() => {
+  1854→                          const lastRunTime = new Date(pipeline.lastRun.startedAt).getTime()
+  1855→                          const nextRunTime = lastRunTime + pipeline.fetchInterval * 1000
+  1856→                          const isOverdue = Date.now() > nextRunTime
+  1857→                          return (
+  1858→                            isOverdue && (
+  1859→                              <Badge
+  1860→                                variant="outline"
+  1861→                                className="text-[10px] text-amber-700 border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800"
+  1862→                              >
+  1863→                                Overdue
+  1864→                              </Badge>
+  1865→                            )
+  1866→                          )
+  1867→                        })()}
+  1868→                    </div>
+  1869→                    {lastRun && (
+  1870→                      <Tooltip>
+  1871→                        <TooltipTrigger asChild>
+  1872→                          <div className="flex items-center gap-1">
+  1873→                            <StatusIcon className={`h-3.5 w-3.5 ${statusColors[lastRun.status]}`} />
+  1874→                            <span className={`text-xs font-medium capitalize ${statusColors[lastRun.status]}`}>
+  1875→                              {lastRun.status}
+  1876→                            </span>
+  1877→                          </div>
+  1878→                        </TooltipTrigger>
+  1879→                        <TooltipContent>
+  1880→                          {lastRun.durationMs ? `${lastRun.durationMs}ms` : 'In progress'} · {new Date(lastRun.startedAt).toLocaleString()}
+  1881→                        </TooltipContent>
+  1882→                      </Tooltip>
+  1883→                    )}
+  1884→                  </div>
+  1885→                  <div className="grid grid-cols-3 gap-2 text-center">
+  1886→                    <div className="rounded-md bg-muted/50 p-2">
+  1887→                      <div className="text-xs text-muted-foreground">Fetched</div>
+  1888→                      <div className="text-sm font-bold">{lastRun?.rowsFetched.toLocaleString() ?? '—'}</div>
+  1889→                    </div>
+  1890→                    <div className="rounded-md bg-muted/50 p-2">
+  1891→                      <div className="text-xs text-muted-foreground">Written</div>
+  1892→                      <div className="text-sm font-bold">{lastRun?.rowsWritten.toLocaleString() ?? '—'}</div>
+  1893→                    </div>
+  1894→                    <div className="rounded-md bg-muted/50 p-2">
+  1895→                      <div className="text-xs text-muted-foreground">Failed</div>
+  1896→                      <div className="text-sm font-bold text-red-500">{lastRun?.rowsFailed ?? '—'}</div>
+  1897→                    </div>
+  1898→                  </div>
+  1899→                  {pipeline.targetTableName && (
+  1900→                    <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+  1901→                      <ArrowRight className="h-3 w-3" />
+  1902→                      <span className="font-mono">{pipeline.targetTableName}</span>
+  1903→                      <span className="mx-1">·</span>
+  1904→                      <span>{pipeline.fetchInterval > 0 ? `Every ${pipeline.fetchInterval}s` : 'Real-time'}</span>
+  1905→                    </div>
+  1906→                  )}
+  1907→                </CardContent>
+  1908→              </Card>
+  1909→            )
+  1910→          })
+  1911→        )}
+  1912→      </div>
+  1913→
+  1914→      {/* Pipeline Analytics — run history timeline + status distribution */}
+  1915→      <motion.div
+  1916→        initial={{ opacity: 0, y: 12 }}
+  1917→        animate={{ opacity: 1, y: 0 }}
+  1918→        transition={{ duration: 0.3, delay: 0.1 }}
+  1919→        className="space-y-4"
+  1920→      >
+  1921→        <div className="flex items-center gap-3 pt-2">
+  1922→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white shadow-sm">
+  1923→            <Activity className="h-5 w-5" />
+  1924→          </div>
+  1925→          <div>
+  1926→            <h2 className="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+  1927→              Pipeline Analytics
+  1928→            </h2>
+  1929→            <p className="text-sm text-muted-foreground">
+  1930→              Run history and performance metrics across all pipelines
+  1931→            </p>
+  1932→          </div>
+  1933→        </div>
+  1934→
+  1935→        {/* Stat cards row */}
+  1936→        <motion.div
+  1937→          variants={analyticsContainerVariants}
+  1938→          initial="hidden"
+  1939→          animate="visible"
+  1940→          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
+  1941→        >
+  1942→          <motion.div variants={analyticsItemVariants}>
+  1943→            <Card className="overflow-hidden relative">
+  1944→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1945→              <CardContent className="pt-5">
+  1946→                <div className="flex items-center justify-between">
+  1947→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1948→                    Total Runs
+  1949→                  </div>
+  1950→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1951→                    <BarChart3 className="h-3.5 w-3.5 text-emerald-600" />
+  1952→                  </div>
+  1953→                </div>
+  1954→                <div className="mt-2 text-2xl font-bold">{totalRuns.toLocaleString()}</div>
+  1955→                <div className="text-xs text-muted-foreground mt-0.5">
+  1956→                  {successCount} successful · {totalRuns - successCount} other
+  1957→                </div>
+  1958→              </CardContent>
+  1959→            </Card>
+  1960→          </motion.div>
+  1961→
+  1962→          <motion.div variants={analyticsItemVariants}>
+  1963→            <Card className="overflow-hidden relative">
+  1964→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1965→              <CardContent className="pt-5">
+  1966→                <div className="flex items-center justify-between">
+  1967→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1968→                    Success Rate
+  1969→                  </div>
+  1970→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1971→                    <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
+  1972→                  </div>
+  1973→                </div>
+  1974→                <div className="mt-2 text-2xl font-bold text-emerald-600">{successRate}%</div>
+  1975→                <div className="text-xs text-muted-foreground mt-0.5">
+  1976→                  {totalRuns > 0 ? `${successCount} of ${totalRuns} runs` : 'No runs yet'}
+  1977→                </div>
+  1978→              </CardContent>
+  1979→            </Card>
+  1980→          </motion.div>
+  1981→
+  1982→          <motion.div variants={analyticsItemVariants}>
+  1983→            <Card className="overflow-hidden relative">
+  1984→              <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500 opacity-60" />
+  1985→              <CardContent className="pt-5">
+  1986→                <div className="flex items-center justify-between">
+  1987→                  <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+  1988→                    Avg Duration
+  1989→                  </div>
+  1990→                  <div className="rounded-md bg-emerald-500/10 p-1.5">
+  1991→                    <Timer className="h-3.5 w-3.5 text-emerald-600" />
+  1992→                  </div>
+  1993→                </div>
+  1994→                <div className="mt-2 text-2xl font-bold">
+  1995→                  {avgDuration > 0 ? `${avgDuration.toLocaleString()}ms` : '—'}
+  1996→                </div>
+  1997→                <div className="text-xs text-muted-foreground mt-0.5">
+  1998→                  {completedRuns.length > 0
+  1999→                    ? `across ${completedRuns.length} completed runs`
+  2000→                    : 'no completed runs'}
+
+[showing lines 1-2000 of 2195; use offset=2001 with limit to continue reading]

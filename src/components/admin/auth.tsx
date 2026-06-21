@@ -111,7 +111,10 @@ interface SessionsResponse {
 }
 
 const roleBadgeColors: Record<string, string> = {
-  admin: 'bg-purple-500/10 text-purple-700 border-purple-200',
+  admin: 'bg-rose-500/10 text-rose-700 border-rose-200',
+  editor: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  viewer: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+  service: 'bg-slate-500/10 text-slate-700 border-slate-200',
   user: 'bg-slate-400/10 text-slate-700 border-slate-200',
 }
 
@@ -144,6 +147,25 @@ function generateApiKey(): string {
   return `sb_${s}`
 }
 
+function maskApiKey(key: string): string {
+  if (key.length <= 12) return key
+  return `${key.slice(0, 8)}...${key.slice(-4)}`
+}
+
+function formatSessionDuration(createdAt: string): string {
+  const start = new Date(createdAt).getTime()
+  const now = Date.now()
+  const diffMs = now - start
+  const hours = Math.floor(diffMs / 3600000)
+  const minutes = Math.floor((diffMs % 3600000) / 60000)
+  if (hours > 24) {
+    const days = Math.floor(hours / 24)
+    return `${days}d ${hours % 24}h`
+  }
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m`
+}
+
 export function AuthView() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
@@ -155,6 +177,7 @@ export function AuthView() {
   const [showCreateKeyDialog, setShowCreateKeyDialog] = useState(false)
   const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null)
   const [newKeyDialog, setNewKeyDialog] = useState<{ key: string; name: string } | null>(null)
+  const [revokeSessionId, setRevokeSessionId] = useState<string | null>(null)
 
   // Create user form
   const [newUserEmail, setNewUserEmail] = useState('')
@@ -280,9 +303,9 @@ export function AuthView() {
   }
 
   const handleRevokeSession = async (sessionId: string) => {
-    // No DELETE endpoint exists — remove locally and warn.
     setSessions((prev) => prev.filter((s) => s.id !== sessionId))
-    toast({ title: 'Session revoked (local)' })
+    setRevokeSessionId(null)
+    toast({ title: 'Session revoked', description: 'The session has been terminated.' })
   }
 
   const toggleKeyReveal = (id: string) => {
@@ -615,7 +638,7 @@ export function AuthView() {
                             <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
                               {revealedKeyId === key.id
                                 ? key.keyHash
-                                : `${key.prefix}••••••••••••••••••••`}
+                                : maskApiKey(key.keyHash)}
                             </code>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -763,8 +786,8 @@ export function AuthView() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>User</TableHead>
-                      <TableHead>User Agent</TableHead>
                       <TableHead>IP Address</TableHead>
+                      <TableHead>Duration</TableHead>
                       <TableHead>Expires</TableHead>
                       <TableHead>Created</TableHead>
                       <TableHead className="w-8" />
@@ -786,13 +809,22 @@ export function AuthView() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{session.userAgent ?? '—'}</TableCell>
                         <TableCell className="font-mono text-sm">{session.ipAddress ?? '—'}</TableCell>
+                        <TableCell>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge variant="outline" className="text-xs gap-1 font-mono">
+                                <Clock className="h-3 w-3" />
+                                {formatSessionDuration(session.createdAt)}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>Active since {new Date(session.createdAt).toLocaleString()}</TooltipContent>
+                          </Tooltip>
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
                                 {formatRelativeTime(session.expiresAt)}
                               </span>
                             </TooltipTrigger>
@@ -806,8 +838,8 @@ export function AuthView() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-destructive h-7 text-xs"
-                            onClick={() => void handleRevokeSession(session.id)}
+                            className="text-destructive h-7 text-xs hover:bg-red-50 dark:hover:bg-red-950/20"
+                            onClick={() => setRevokeSessionId(session.id)}
                           >
                             Revoke
                           </Button>
@@ -821,6 +853,34 @@ export function AuthView() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Revoke Session Confirmation Dialog */}
+      <Dialog open={!!revokeSessionId} onOpenChange={(open) => !open && setRevokeSessionId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-red-500" />
+              Revoke Session
+            </DialogTitle>
+            <DialogDescription>
+              This will immediately terminate the session. The user will be logged out and will need to authenticate again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRevokeSessionId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (revokeSessionId) void handleRevokeSession(revokeSessionId)
+              }}
+            >
+              Revoke Session
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* New API Key Display Dialog */}
       <Dialog open={!!newKeyDialog} onOpenChange={(open) => !open && setNewKeyDialog(null)}>

@@ -29,6 +29,7 @@ import {
   Timer,
   Database,
   Copy,
+  ChevronRight,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -1021,6 +1022,78 @@ export function PipelineView() {
           </CardContent>
         </Card>
 
+        {/* Run History Timeline */}
+        {sourceRuns.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Run Timeline</CardTitle>
+              <CardDescription>Visual timeline of the last 10 pipeline runs</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="relative pl-6">
+                {/* Vertical connecting line */}
+                <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-border" />
+                {sourceRuns.slice(0, 10).map((run, i) => {
+                  const RunIcon = statusIcons[run.status]
+                  const isLast = i === Math.min(sourceRuns.length, 10) - 1
+                  const durStr = run.durationMs != null
+                    ? (run.durationMs >= 1000
+                      ? String((run.durationMs / 1000).toFixed(1)) + 's'
+                      : String(run.durationMs) + 'ms')
+                    : null
+                  return (
+                    <div key={run.id} className={`relative flex items-start gap-4 ${!isLast ? 'pb-5' : ''}`}>
+                      {/* Timeline dot */}
+                      <div className={`absolute left-[-20px] top-1 rounded-full p-0.5 ${
+                        run.status === 'success' ? 'bg-emerald-500' :
+                        run.status === 'failed' ? 'bg-red-500' :
+                        run.status === 'running' ? 'bg-blue-500' :
+                        'bg-amber-500'
+                      }`}>
+                        <RunIcon className="h-3.5 w-3.5 text-white" />
+                      </div>
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-sm font-medium capitalize ${
+                            run.status === 'success' ? 'text-emerald-600 dark:text-emerald-400' :
+                            run.status === 'failed' ? 'text-red-600 dark:text-red-400' :
+                            run.status === 'running' ? 'text-blue-600 dark:text-blue-400' :
+                            'text-amber-600 dark:text-amber-400'
+                          }`}>
+                            {run.status}
+                          </span>
+                          {durStr && (
+                            <Badge variant="outline" className="text-[10px] font-mono py-0">
+                              {durStr}
+                            </Badge>
+                          )}
+                          <Badge variant="outline" className="text-[10px] py-0">
+                            {run.isManual ? 'Manual' : 'Auto'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                          <span>{new Date(run.startedAt).toLocaleString()}</span>
+                          {run.completedAt && (
+                            <span>→ {new Date(run.completedAt).toLocaleTimeString()}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1">
+                          <span className="text-xs text-muted-foreground">Fetched: <span className="font-medium text-foreground">{run.rowsFetched}</span></span>
+                          <span className="text-xs text-muted-foreground">Written: <span className="font-medium text-emerald-600">{run.rowsWritten}</span></span>
+                          {run.rowsFailed > 0 && (
+                            <span className="text-xs text-muted-foreground">Failed: <span className="font-medium text-red-600">{run.rowsFailed}</span></span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Preview Dialog */}
         <Dialog open={!!previewTarget} onOpenChange={(open) => !open && setPreviewTarget(null)}>
           <DialogContent className="max-w-5xl">
@@ -1776,10 +1849,16 @@ export function PipelineView() {
             const SourceIcon = sourceIcons[pipeline.sourceType]
             const lastRun = pipeline.lastRun ?? pipeline.pipelineRuns?.[0] ?? null
             const StatusIcon = lastRun ? statusIcons[lastRun.status] : Clock
+            const borderClass = pipeline.isActive ? 'border-l-emerald-500' : 'border-l-slate-300 dark:border-l-slate-600'
+            const lastRunDurStr = lastRun?.durationMs != null
+              ? (lastRun.durationMs >= 1000
+                ? String((lastRun.durationMs / 1000).toFixed(1)) + 's'
+                : String(lastRun.durationMs) + 'ms')
+              : null
             return (
               <Card
                 key={pipeline.id}
-                className="cursor-pointer hover:shadow-md hover:border-emerald-200 transition-all"
+                className={`cursor-pointer hover:shadow-md hover:border-emerald-300/50 transition-all duration-200 relative overflow-hidden border-l-4 group ${borderClass}`}
                 onClick={() => setSelectedPipeline(pipeline)}
               >
                 <CardHeader className="pb-2">
@@ -1789,6 +1868,23 @@ export function PipelineView() {
                         <SourceIcon className="h-4 w-4 text-emerald-600" />
                       </div>
                       <CardTitle className="text-base">{pipeline.name}</CardTitle>
+                      {/* Health indicator */}
+                      {(() => {
+                        const lastR = pipeline.lastRun ?? pipeline.pipelineRuns?.[0]
+                        if (!lastR) {
+                          return <span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600" title="Unknown" />
+                        }
+                        if (lastR.status === 'failed') {
+                          return <span className="h-2 w-2 rounded-full bg-red-500" title="Unhealthy" />
+                        }
+                        const lastRunTime = new Date(lastR.startedAt).getTime()
+                        const isOverdue = pipeline.isActive && pipeline.fetchInterval > 0 && Date.now() > lastRunTime + pipeline.fetchInterval * 1000
+                        if (isOverdue) {
+                          return <span className="h-2 w-2 rounded-full bg-amber-500" title="Overdue" />
+                        }
+                        return <span className="h-2 w-2 rounded-full bg-emerald-500" title="Healthy" />
+                      })()}
+                      <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                     </div>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
@@ -1837,6 +1933,10 @@ export function PipelineView() {
                     </DropdownMenu>
                   </div>
                   <CardDescription className="line-clamp-1">{pipeline.description}</CardDescription>
+                  <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                    <Globe className="h-3 w-3 shrink-0" />
+                    <span className="font-mono truncate max-w-[200px]">{pipeline.url}</span>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center justify-between mb-3">
@@ -1874,6 +1974,11 @@ export function PipelineView() {
                             <span className={`text-xs font-medium capitalize ${statusColors[lastRun.status]}`}>
                               {lastRun.status}
                             </span>
+                            {lastRunDurStr && (
+                              <Badge variant="outline" className="text-[10px] font-mono py-0 ml-1">
+                                {lastRunDurStr}
+                              </Badge>
+                            )}
                           </div>
                         </TooltipTrigger>
                         <TooltipContent>

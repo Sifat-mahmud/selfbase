@@ -1,0 +1,1867 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  Database,
+     7→  Plus,
+     8→  Search,
+     9→  MoreHorizontal,
+    10→  Pencil,
+    11→  Trash2,
+    12→  Eye,
+    13→  Columns3,
+    14→  ArrowUpDown,
+    15→  ArrowUp,
+    16→  ArrowDown,
+    17→  Download,
+    18→  ChevronRight,
+    19→  Shield,
+    20→  Radio,
+    21→  Brain,
+    22→  Copy,
+    23→  Lock,
+    24→  Table as TableIcon,
+    25→  ArrowUpRight,
+    26→  ArrowDownRight,
+    27→  RefreshCw,
+    28→  Check,
+    29→  X,
+    30→  Loader2,
+    31→} from 'lucide-react'
+    32→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    33→import { Button } from '@/components/ui/button'
+    34→import { Input } from '@/components/ui/input'
+    35→import { Badge } from '@/components/ui/badge'
+    36→import { Skeleton } from '@/components/ui/skeleton'
+    37→import { Separator } from '@/components/ui/separator'
+    38→import { Textarea } from '@/components/ui/textarea'
+    39→import { Label } from '@/components/ui/label'
+    40→import { Switch } from '@/components/ui/switch'
+    41→import {
+    42→  Table,
+    43→  TableBody,
+    44→  TableCell,
+    45→  TableHead,
+    46→  TableHeader,
+    47→  TableRow,
+    48→} from '@/components/ui/table'
+    49→import {
+    50→  Dialog,
+    51→  DialogContent,
+    52→  DialogDescription,
+    53→  DialogFooter,
+    54→  DialogHeader,
+    55→  DialogTitle,
+    56→  DialogTrigger,
+    57→} from '@/components/ui/dialog'
+    58→import {
+    59→  DropdownMenu,
+    60→  DropdownMenuContent,
+    61→  DropdownMenuItem,
+    62→  DropdownMenuSeparator,
+    63→  DropdownMenuTrigger,
+    64→} from '@/components/ui/dropdown-menu'
+    65→import {
+    66→  Select,
+    67→  SelectContent,
+    68→  SelectItem,
+    69→  SelectTrigger,
+    70→  SelectValue,
+    71→} from '@/components/ui/select'
+    72→import {
+    73→  AlertDialog,
+    74→  AlertDialogAction,
+    75→  AlertDialogCancel,
+    76→  AlertDialogContent,
+    77→  AlertDialogDescription,
+    78→  AlertDialogFooter,
+    79→  AlertDialogHeader,
+    80→  AlertDialogTitle,
+    81→} from '@/components/ui/alert-dialog'
+    82→import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+    83→import { Checkbox } from '@/components/ui/checkbox'
+    84→import { useToast } from '@/hooks/use-toast'
+    85→import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client'
+    86→
+    87→interface ColumnItem {
+    88→  id: string
+    89→  name: string
+    90→  type: string
+    91→  nullable: boolean
+    92→  isPrimaryKey: boolean
+    93→  isUnique: boolean
+    94→  isIndexed: boolean
+    95→  defaultValue: string | null
+    96→  order: number
+    97→}
+    98→
+    99→interface SbTableItem {
+   100→  id: string
+   101→  name: string
+   102→  displayName: string | null
+   103→  description: string | null
+   104→  priority: number
+   105→  rowCount: number
+   106→  isSystem: boolean
+   107→  enableRealtime: boolean
+   108→  enableEmbedding: boolean
+   109→  rlsEnabled: boolean
+   110→  versionHash: string
+   111→  createdAt: string
+   112→  updatedAt?: string
+   113→  columns: ColumnItem[]
+   114→}
+   115→
+   116→interface SbRowItem {
+   117→  id: string
+   118→  tableId: string
+   119→  data: string
+   120→  version: number
+   121→  createdAt: string
+   122→  updatedAt: string
+   123→}
+   124→
+   125→const priorityColors: Record<number, string> = {
+   126→  1: 'bg-red-500/10 text-red-600 border-red-200',
+   127→  2: 'bg-amber-500/10 text-amber-600 border-amber-200',
+   128→  3: 'bg-blue-500/10 text-blue-600 border-blue-200',
+   129→  4: 'bg-slate-400/10 text-slate-600 border-slate-200',
+   130→}
+   131→
+   132→const priorityLabels: Record<number, string> = {
+   133→  1: 'P1 · Critical',
+   134→  2: 'P2 · Normal',
+   135→  3: 'P3 · Low',
+   136→  4: 'P4 · Deferred',
+   137→}
+   138→
+   139→const columnTypes = ['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'TIMESTAMP', 'JSON']
+   140→
+   141→const emptyTrend = (rowCount: number) => {
+   142→  // Demo trend derived from row count for visual interest.
+   143→  // Real trend would require an API endpoint.
+   144→  if (rowCount === 0) return { delta: 0, direction: 'none' as const }
+   145→  const delta = Math.round((rowCount % 13) - 5)
+   146→  return { delta: Math.abs(delta), direction: delta >= 0 ? ('up' as const) : ('down' as const) }
+   147→}
+   148→
+   149→const NEW_ROW_ID = '__new__'
+   150→
+   151→/**
+   152→ * Render a type-aware editor cell for inline editing.
+   153→ * - BOOLEAN  -> Switch
+   154→ * - INTEGER/DECIMAL -> number Input
+   155→ * - JSON/TIMESTAMP -> wider Input
+   156→ * - TEXT/default  -> Input
+   157→ */
+   158→function renderCellInput(
+   159→  col: ColumnItem,
+   160→  value: unknown,
+   161→  onChange: (v: unknown) => void,
+   162→  disabled?: boolean,
+   163→) {
+   164→  const typeUpper = col.type.toUpperCase()
+   165→  if (typeUpper === 'BOOLEAN') {
+   166→    return (
+   167→      <Switch
+   168→        checked={Boolean(value)}
+   169→        onCheckedChange={(v) => onChange(v)}
+   170→        disabled={disabled}
+   171→        aria-label={col.name}
+   172→      />
+   173→    )
+   174→  }
+   175→  if (typeUpper === 'INTEGER' || typeUpper === 'DECIMAL') {
+   176→    return (
+   177→      <Input
+   178→        type="number"
+   179→        value={value === null || value === undefined ? '' : String(value)}
+   180→        onChange={(e) => {
+   181→          const raw = e.target.value
+   182→          if (raw === '') {
+   183→            onChange(null)
+   184→          } else if (typeUpper === 'INTEGER') {
+   185→            const n = parseInt(raw, 10)
+   186→            onChange(Number.isNaN(n) ? null : n)
+   187→          } else {
+   188→            const n = parseFloat(raw)
+   189→            onChange(Number.isNaN(n) ? null : n)
+   190→          }
+   191→        }}
+   192→        disabled={disabled}
+   193→        className="h-8 font-mono text-xs min-w-[80px]"
+   194→        aria-label={col.name}
+   195→      />
+   196→    )
+   197→  }
+   198→  if (typeUpper === 'JSON' || typeUpper === 'TIMESTAMP') {
+   199→    return (
+   200→      <Input
+   201→        value={value === null || value === undefined ? '' : String(value)}
+   202→        onChange={(e) => onChange(e.target.value)}
+   203→        disabled={disabled}
+   204→        className="h-8 font-mono text-xs min-w-[140px]"
+   205→        placeholder={typeUpper === 'JSON' ? '{...}' : '2024-01-01T00:00:00Z'}
+   206→        aria-label={col.name}
+   207→      />
+   208→    )
+   209→  }
+   210→  return (
+   211→    <Input
+   212→      value={value === null || value === undefined ? '' : String(value)}
+   213→      onChange={(e) => onChange(e.target.value)}
+   214→      disabled={disabled}
+   215→      className="h-8 font-mono text-xs min-w-[100px]"
+   216→      aria-label={col.name}
+   217→    />
+   218→  )
+   219→}
+   220→
+   221→export function TablesView() {
+   222→  const { toast } = useToast()
+   223→  const [tables, setTables] = useState<SbTableItem[]>([])
+   224→  const [loading, setLoading] = useState(true)
+   225→  const [search, setSearch] = useState('')
+   226→  const [selectedTable, setSelectedTable] = useState<SbTableItem | null>(null)
+   227→  const [showCreateDialog, setShowCreateDialog] = useState(false)
+   228→  const [showColumnDialog, setShowColumnDialog] = useState(false)
+   229→  const [deleteTarget, setDeleteTarget] = useState<SbTableItem | null>(null)
+   230→  const [showDataDialog, setShowDataDialog] = useState(false)
+   231→  const [dataRows, setDataRows] = useState<SbRowItem[]>([])
+   232→  const [dataLoading, setDataLoading] = useState(false)
+   233→
+   234→  // Inline row editing state
+   235→  const [editingRowId, setEditingRowId] = useState<string | null>(null) // null | row.id | NEW_ROW_ID
+   236→  const [editBuffer, setEditBuffer] = useState<Record<string, unknown>>({})
+   237→  const [rowSaving, setRowSaving] = useState(false)
+   238→  // Bulk selection state
+   239→  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set())
+   240→  // Row delete confirmation
+   241→  const [deleteRowTarget, setDeleteRowTarget] = useState<SbRowItem | null>(null)
+   242→  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+   243→  const [bulkDeleting, setBulkDeleting] = useState(false)
+   244→
+   245→  // View Data dialog: client-side search/sort
+   246→  const [searchQuery, setSearchQuery] = useState('')
+   247→  const [sortColumn, setSortColumn] = useState<string | null>(null)
+   248→  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+   249→
+   250→  // New table form
+   251→  const [newTableName, setNewTableName] = useState('')
+   252→  const [newTableDesc, setNewTableDesc] = useState('')
+   253→  const [newTablePriority, setNewTablePriority] = useState(2)
+   254→  const [newColumns, setNewColumns] = useState<ColumnItem[]>([
+   255→    { id: 'c-init', name: 'id', type: 'TEXT', nullable: false, isPrimaryKey: true, isUnique: true, isIndexed: true, defaultValue: null, order: 0 },
+   256→  ])
+   257→
+   258→  // New column form
+   259→  const [newColumnName, setNewColumnName] = useState('')
+   260→  const [newColumnType, setNewColumnType] = useState('TEXT')
+   261→
+   262→  const [sortField, setSortField] = useState<'name' | 'rowCount' | 'priority'>('name')
+   263→  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+   264→
+   265→  const loadTables = useCallback(async () => {
+   266→    setLoading(true)
+   267→    try {
+   268→      const data = await apiGet<SbTableItem[]>('/api/tables')
+   269→      setTables(Array.isArray(data) ? data : [])
+   270→    } catch (err) {
+   271→      toast({
+   272→        title: 'Failed to load tables',
+   273→        description: err instanceof Error ? err.message : 'Unknown error',
+   274→        variant: 'destructive',
+   275→      })
+   276→    } finally {
+   277→      setLoading(false)
+   278→    }
+   279→  }, [toast])
+   280→
+   281→  useEffect(() => {
+   282→    loadTables()
+   283→  }, [loadTables])
+   284→
+   285→  const filteredTables = tables
+   286→    .filter(
+   287→      (t) =>
+   288→        t.name.toLowerCase().includes(search.toLowerCase()) ||
+   289→        (t.displayName ?? '').toLowerCase().includes(search.toLowerCase()),
+   290→    )
+   291→    .sort((a, b) => {
+   292→      const dir = sortDir === 'asc' ? 1 : -1
+   293→      if (sortField === 'name') return a.name.localeCompare(b.name) * dir
+   294→      if (sortField === 'rowCount') return (a.rowCount - b.rowCount) * dir
+   295→      return (a.priority - b.priority) * dir
+   296→    })
+   297→
+   298→  const handleSort = (field: 'name' | 'rowCount' | 'priority') => {
+   299→    if (sortField === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+   300→    else {
+   301→      setSortField(field)
+   302→      setSortDir('asc')
+   303→    }
+   304→  }
+   305→
+   306→  const handleCreateTable = async () => {
+   307→    if (!newTableName.trim()) {
+   308→      toast({ title: 'Name required', variant: 'destructive' })
+   309→      return
+   310→    }
+   311→    try {
+   312→      const created = await apiPost<SbTableItem>('/api/tables', {
+   313→        name: newTableName.trim().toLowerCase().replace(/\s+/g, '_'),
+   314→        displayName: newTableName.trim(),
+   315→        description: newTableDesc || null,
+   316→        priority: newTablePriority,
+   317→      })
+   318→      setTables((prev) => [created, ...prev])
+   319→      setShowCreateDialog(false)
+   320→      setNewTableName('')
+   321→      setNewTableDesc('')
+   322→      setNewTablePriority(2)
+   323→      setNewColumns([
+   324→        { id: 'c-init', name: 'id', type: 'TEXT', nullable: false, isPrimaryKey: true, isUnique: true, isIndexed: true, defaultValue: null, order: 0 },
+   325→      ])
+   326→      toast({
+   327→        title: 'Table created',
+   328→        description: `"${created.name}" has been created successfully.`,
+   329→      })
+   330→    } catch (err) {
+   331→      toast({
+   332→        title: 'Failed to create table',
+   333→        description: err instanceof Error ? err.message : 'Unknown error',
+   334→        variant: 'destructive',
+   335→      })
+   336→    }
+   337→  }
+   338→
+   339→  const handleDeleteTable = async (table: SbTableItem) => {
+   340→    try {
+   341→      await apiDelete(`/api/tables/${table.id}`)
+   342→      setTables((prev) => prev.filter((t) => t.id !== table.id))
+   343→      if (selectedTable?.id === table.id) setSelectedTable(null)
+   344→      toast({
+   345→        title: 'Table deleted',
+   346→        description: `"${table.name}" has been removed.`,
+   347→        variant: 'destructive',
+   348→      })
+   349→    } catch (err) {
+   350→      toast({
+   351→        title: 'Failed to delete table',
+   352→        description: err instanceof Error ? err.message : 'Unknown error',
+   353→        variant: 'destructive',
+   354→      })
+   355→    } finally {
+   356→      setDeleteTarget(null)
+   357→    }
+   358→  }
+   359→
+   360→  const [addColumnLoading, setAddColumnLoading] = useState(false)
+   361→
+   362→  const handleAddColumn = async () => {
+   363→    if (!selectedTable || !newColumnName.trim()) return
+   364→    setAddColumnLoading(true)
+   365→    try {
+   366→      const created = await apiPost<ColumnItem>(`/api/tables/${selectedTable.id}/columns`, {
+   367→        name: newColumnName.trim().toLowerCase().replace(/\s+/g, '_'),
+   368→        type: newColumnType,
+   369→        nullable: true,
+   370→        isPrimaryKey: false,
+   371→        isUnique: false,
+   372→        isIndexed: false,
+   373→        defaultValue: null,
+   374→        order: selectedTable.columns.length,
+   375→      })
+   376→      const updatedCol = { ...created, id: created.id || `c${Date.now()}` }
+   377→      setTables((prev) =>
+   378→        prev.map((t) => (t.id === selectedTable.id ? { ...t, columns: [...t.columns, updatedCol] } : t)),
+   379→      )
+   380→      setSelectedTable((prev) => (prev ? { ...prev, columns: [...prev.columns, updatedCol] } : prev))
+   381→      setShowColumnDialog(false)
+   382→      setNewColumnName('')
+   383→      setNewColumnType('TEXT')
+   384→      toast({ title: 'Column added', description: `"${updatedCol.name}" added to ${selectedTable.name}` })
+   385→    } catch (err) {
+   386→      toast({
+   387→        title: 'Failed to add column',
+   388→        description: err instanceof Error ? err.message : 'Unknown error',
+   389→        variant: 'destructive',
+   390→      })
+   391→    } finally {
+   392→      setAddColumnLoading(false)
+   393→    }
+   394→  }
+   395→
+   396→  const handleViewData = async (table: SbTableItem) => {
+   397→    setShowDataDialog(true)
+   398→    setDataLoading(true)
+   399→    // Reset any in-progress edit/selection/search/sort state when opening a fresh view
+   400→    setEditingRowId(null)
+   401→    setEditBuffer({})
+   402→    setSelectedRowIds(new Set())
+   403→    setSearchQuery('')
+   404→    setSortColumn(null)
+   405→    setSortDirection('asc')
+   406→    try {
+   407→      const rows = await apiGet<SbRowItem[]>(`/api/tables/${table.id}/rows`)
+   408→      setDataRows(Array.isArray(rows) ? rows : [])
+   409→    } catch (err) {
+   410→      toast({
+   411→        title: 'Failed to load rows',
+   412→        description: err instanceof Error ? err.message : 'Unknown error',
+   413→        variant: 'destructive',
+   414→      })
+   415→      setDataRows([])
+   416→    } finally {
+   417→      setDataLoading(false)
+   418→    }
+   419→  }
+   420→
+   421→  // Reload rows for the currently selected table without resetting the dialog state
+   422→  const refreshRows = useCallback(async () => {
+   423→    if (!selectedTable) return
+   424→    setDataLoading(true)
+   425→    try {
+   426→      const rows = await apiGet<SbRowItem[]>(`/api/tables/${selectedTable.id}/rows`)
+   427→      setDataRows(Array.isArray(rows) ? rows : [])
+   428→    } catch (err) {
+   429→      toast({
+   430→        title: 'Failed to load rows',
+   431→        description: err instanceof Error ? err.message : 'Unknown error',
+   432→        variant: 'destructive',
+   433→      })
+   434→    } finally {
+   435→      setDataLoading(false)
+   436→    }
+   437→  }, [selectedTable, toast])
+   438→
+   439→  // Keep the displayed row count in sync after add/delete operations
+   440→  const adjustRowCount = useCallback(
+   441→    (delta: number) => {
+   442→      if (!selectedTable) return
+   443→      const newCount = Math.max(0, selectedTable.rowCount + delta)
+   444→      setSelectedTable((prev) => (prev ? { ...prev, rowCount: newCount } : prev))
+   445→      setTables((prev) =>
+   446→        prev.map((t) => (t.id === selectedTable.id ? { ...t, rowCount: newCount } : t)),
+   447→      )
+   448→    },
+   449→    [selectedTable],
+   450→  )
+   451→
+   452→  function startEdit(row: SbRowItem) {
+   453→    let parsed: Record<string, unknown> = {}
+   454→    try {
+   455→      parsed = JSON.parse(row.data)
+   456→    } catch {
+   457→      parsed = {}
+   458→    }
+   459→    setEditingRowId(row.id)
+   460→    setEditBuffer(parsed)
+   461→  }
+   462→
+   463→  function cancelEdit() {
+   464→    setEditingRowId(null)
+   465→    setEditBuffer({})
+   466→  }
+   467→
+   468→  async function saveEdit(row: SbRowItem) {
+   469→    if (!selectedTable) return
+   470→    setRowSaving(true)
+   471→    try {
+   472→      await apiPut(`/api/tables/${selectedTable.id}/rows/${row.id}`, editBuffer)
+   473→      toast({ title: 'Row updated', description: 'Changes saved successfully' })
+   474→      setEditingRowId(null)
+   475→      setEditBuffer({})
+   476→      await refreshRows()
+   477→    } catch (e) {
+   478→      toast({
+   479→        title: 'Update failed',
+   480→        description: e instanceof Error ? e.message : 'Unknown error',
+   481→        variant: 'destructive',
+   482→      })
+   483→    } finally {
+   484→      setRowSaving(false)
+   485→    }
+   486→  }
+   487→
+   488→  function startAddRow() {
+   489→    if (!selectedTable) return
+   490→    const buf: Record<string, unknown> = {}
+   491→    selectedTable.columns.forEach((c) => {
+   492→      const t = c.type.toUpperCase()
+   493→      if (t === 'BOOLEAN') buf[c.name] = false
+   494→      else if (t === 'INTEGER' || t === 'DECIMAL') buf[c.name] = null
+   495→      else buf[c.name] = ''
+   496→    })
+   497→    setEditBuffer(buf)
+   498→    setEditingRowId(NEW_ROW_ID)
+   499→  }
+   500→
+   501→  async function saveNewRow() {
+   502→    if (!selectedTable) return
+   503→    setRowSaving(true)
+   504→    try {
+   505→      await apiPost(`/api/tables/${selectedTable.id}/rows`, { data: editBuffer })
+   506→      toast({ title: 'Row added', description: 'New row created successfully' })
+   507→      setEditingRowId(null)
+   508→      setEditBuffer({})
+   509→      adjustRowCount(1)
+   510→      await refreshRows()
+   511→    } catch (e) {
+   512→      toast({
+   513→        title: 'Add failed',
+   514→        description: e instanceof Error ? e.message : 'Unknown error',
+   515→        variant: 'destructive',
+   516→      })
+   517→    } finally {
+   518→      setRowSaving(false)
+   519→    }
+   520→  }
+   521→
+   522→  async function handleDeleteRow(row: SbRowItem) {
+   523→    if (!selectedTable) return
+   524→    try {
+   525→      await apiDelete(`/api/tables/${selectedTable.id}/rows/${row.id}`)
+   526→      toast({ title: 'Row deleted', description: 'Row removed successfully' })
+   527→      setSelectedRowIds((prev) => {
+   528→        const next = new Set(prev)
+   529→        next.delete(row.id)
+   530→        return next
+   531→      })
+   532→      adjustRowCount(-1)
+   533→      await refreshRows()
+   534→    } catch (e) {
+   535→      toast({
+   536→        title: 'Delete failed',
+   537→        description: e instanceof Error ? e.message : 'Unknown error',
+   538→        variant: 'destructive',
+   539→      })
+   540→    } finally {
+   541→      setDeleteRowTarget(null)
+   542→    }
+   543→  }
+   544→
+   545→  async function handleBulkDelete() {
+   546→    if (!selectedTable || selectedRowIds.size === 0) return
+   547→    setBulkDeleting(true)
+   548→    let okCount = 0
+   549→    let failCount = 0
+   550→    try {
+   551→      const ids = Array.from(selectedRowIds)
+   552→      await Promise.all(
+   553→        ids.map(async (id) => {
+   554→          try {
+   555→            await apiDelete(`/api/tables/${selectedTable.id}/rows/${id}`)
+   556→            okCount += 1
+   557→          } catch {
+   558→            failCount += 1
+   559→          }
+   560→        }),
+   561→      )
+   562→      if (okCount > 0) adjustRowCount(-okCount)
+   563→      setSelectedRowIds(new Set())
+   564→      await refreshRows()
+   565→      if (failCount === 0) {
+   566→        toast({
+   567→          title: 'Rows deleted',
+   568→          description: `${okCount} row${okCount !== 1 ? 's' : ''} removed`,
+   569→        })
+   570→      } else {
+   571→        toast({
+   572→          title: 'Bulk delete partial',
+   573→          description: `${okCount} deleted, ${failCount} failed`,
+   574→          variant: 'destructive',
+   575→        })
+   576→      }
+   577→    } finally {
+   578→      setBulkDeleting(false)
+   579→      setBulkDeleteOpen(false)
+   580→    }
+   581→  }
+   582→
+   583→  function toggleRowSelection(rowId: string) {
+   584→    setSelectedRowIds((prev) => {
+   585→      const next = new Set(prev)
+   586→      if (next.has(rowId)) next.delete(rowId)
+   587→      else next.add(rowId)
+   588→      return next
+   589→    })
+   590→  }
+   591→
+   592→  function toggleSelectAll() {
+   593→    setSelectedRowIds((prev) => {
+   594→      if (sortedRows.length > 0 && prev.size === sortedRows.length) return new Set()
+   595→      return new Set(sortedRows.map((r) => r.id))
+   596→    })
+   597→  }
+   598→
+   599→  function toggleSort(colName: string) {
+   600→    if (sortColumn === colName) {
+   601→      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))
+   602→    } else {
+   603→      setSortColumn(colName)
+   604→      setSortDirection('asc')
+   605→    }
+   606→  }
+   607→
+   608→  // Client-side filter: any cell value contains the query (case-insensitive)
+   609→  const filteredRows = useMemo(() => {
+   610→    if (!searchQuery.trim()) return dataRows
+   611→    const q = searchQuery.toLowerCase()
+   612→    return dataRows.filter((row) => {
+   613→      try {
+   614→        const parsed = JSON.parse(row.data)
+   615→        return Object.values(parsed).some(
+   616→          (v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q),
+   617→        )
+   618→      } catch {
+   619→        return false
+   620→      }
+   621→    })
+   622→  }, [dataRows, searchQuery])
+   623→
+   624→  // Client-side sort: applied after filter
+   625→  const sortedRows = useMemo(() => {
+   626→    if (!sortColumn) return filteredRows
+   627→    return [...filteredRows].sort((a, b) => {
+   628→      let av: unknown = undefined
+   629→      let bv: unknown = undefined
+   630→      try {
+   631→        av = JSON.parse(a.data)[sortColumn]
+   632→      } catch {
+   633→        av = undefined
+   634→      }
+   635→      try {
+   636→        bv = JSON.parse(b.data)[sortColumn]
+   637→      } catch {
+   638→        bv = undefined
+   639→      }
+   640→      if (av === null || av === undefined) return 1
+   641→      if (bv === null || bv === undefined) return -1
+   642→      if (typeof av === 'number' && typeof bv === 'number') {
+   643→        return sortDirection === 'asc' ? av - bv : bv - av
+   644→      }
+   645→      const cmp = String(av).localeCompare(String(bv))
+   646→      return sortDirection === 'asc' ? cmp : -cmp
+   647→    })
+   648→  }, [filteredRows, sortColumn, sortDirection])
+   649→
+   650→  function downloadBlob(blob: Blob, filename: string) {
+   651→    const url = URL.createObjectURL(blob)
+   652→    const a = document.createElement('a')
+   653→    a.href = url
+   654→    a.download = filename
+   655→    document.body.appendChild(a)
+   656→    a.click()
+   657→    document.body.removeChild(a)
+   658→    URL.revokeObjectURL(url)
+   659→  }
+   660→
+   661→  function exportData(format: 'csv' | 'json', selectedOnly = false) {
+   662→    if (!selectedTable) return
+   663→    const rowsToExport = selectedOnly
+   664→      ? dataRows.filter((r) => selectedRowIds.has(r.id))
+   665→      : dataRows
+   666→    const parsedRows = rowsToExport.map((r) => {
+   667→      try {
+   668→        return JSON.parse(r.data)
+   669→      } catch {
+   670→        return {}
+   671→      }
+   672→    })
+   673→    const safeName = selectedTable.name.replace(/[^a-z0-9_-]/gi, '_')
+   674→    if (format === 'json') {
+   675→      const blob = new Blob([JSON.stringify(parsedRows, null, 2)], {
+   676→        type: 'application/json',
+   677→      })
+   678→      downloadBlob(blob, `${safeName}.json`)
+   679→      toast({
+   680→        title: 'Exported JSON',
+   681→        description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}.json`,
+   682→      })
+   683→      return
+   684→    }
+   685→    const headers = selectedTable.columns.map((c) => c.name)
+   686→    const csvLines = [headers.join(',')]
+   687→    for (const row of parsedRows) {
+   688→      const values = headers.map((h) => {
+   689→        const v = row[h]
+   690→        if (v === null || v === undefined) return ''
+   691→        const s = String(v)
+   692→        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+   693→          return `"${s.replace(/"/g, '""')}"`
+   694→        }
+   695→        return s
+   696→      })
+   697→      csvLines.push(values.join(','))
+   698→    }
+   699→    const blob = new Blob([csvLines.join('\n')], { type: 'text/csv' })
+   700→    downloadBlob(blob, `${safeName}.csv`)
+   701→    toast({
+   702→      title: 'Exported CSV',
+   703→      description: `${parsedRows.length} row${parsedRows.length !== 1 ? 's' : ''} → ${safeName}.csv`,
+   704→    })
+   705→  }
+   706→
+   707→  if (loading) {
+   708→    return (
+   709→      <div className="space-y-6">
+   710→        <div className="flex justify-between">
+   711→          <Skeleton className="h-8 w-40" />
+   712→          <Skeleton className="h-9 w-32" />
+   713→        </div>
+   714→        <div className="grid gap-4 md:grid-cols-3">
+   715→          {Array.from({ length: 6 }).map((_, i) => (
+   716→            <Card key={i}>
+   717→              <CardContent className="p-4">
+   718→                <Skeleton className="h-20 w-full" />
+   719→              </CardContent>
+   720→            </Card>
+   721→          ))}
+   722→        </div>
+   723→      </div>
+   724→    )
+   725→  }
+   726→
+   727→  // Detail view
+   728→  if (selectedTable) {
+   729→    return (
+   730→      <motion.div
+   731→        initial={{ opacity: 0, y: 8 }}
+   732→        animate={{ opacity: 1, y: 0 }}
+   733→        transition={{ duration: 0.2 }}
+   734→        className="space-y-6"
+   735→      >
+   736→        <div className="flex items-center gap-2 flex-wrap">
+   737→          <Button variant="ghost" size="sm" onClick={() => setSelectedTable(null)}>
+   738→            <ChevronRight className="h-4 w-4 rotate-180" />
+   739→            Back
+   740→          </Button>
+   741→          <Separator orientation="vertical" className="h-6" />
+   742→          <div className="rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 p-2 text-white">
+   743→            <Database className="h-5 w-5" />
+   744→          </div>
+   745→          <h1 className="text-2xl font-bold tracking-tight">
+   746→            {selectedTable.displayName || selectedTable.name}
+   747→          </h1>
+   748→          <Badge variant="outline" className="ml-2 font-mono text-xs">
+   749→            {selectedTable.name}
+   750→          </Badge>
+   751→          {selectedTable.isSystem && (
+   752→            <Badge variant="secondary" className="gap-1">
+   753→              <Lock className="h-3 w-3" /> System
+   754→            </Badge>
+   755→          )}
+   756→          <Badge variant="outline" className={priorityColors[selectedTable.priority]}>
+   757→            {priorityLabels[selectedTable.priority]}
+   758→          </Badge>
+   759→          <div className="ml-auto flex gap-2">
+   760→            <Button variant="outline" size="sm" onClick={() => handleViewData(selectedTable)}>
+   761→              <Eye className="mr-1 h-3.5 w-3.5" /> View Data
+   762→            </Button>
+   763→            <Button
+   764→              variant="outline"
+   765→              size="sm"
+   766→              onClick={() => {
+   767→                void loadTables()
+   768→                const fresh = tables.find((t) => t.id === selectedTable.id)
+   769→                if (fresh) setSelectedTable(fresh)
+   770→              }}
+   771→            >
+   772→              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+   773→            </Button>
+   774→            <Button
+   775→              variant="outline"
+   776→              size="sm"
+   777→              className="text-destructive hover:bg-destructive/10"
+   778→              onClick={() => setDeleteTarget(selectedTable)}
+   779→            >
+   780→              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Table
+   781→            </Button>
+   782→          </div>
+   783→        </div>
+   784→
+   785→        <div className="grid gap-4 md:grid-cols-4">
+   786→          <Card>
+   787→            <CardContent className="pt-4">
+   788→              <div className="text-sm text-muted-foreground">Rows</div>
+   789→              <div className="text-2xl font-bold">{selectedTable.rowCount.toLocaleString()}</div>
+   790→            </CardContent>
+   791→          </Card>
+   792→          <Card>
+   793→            <CardContent className="pt-4">
+   794→              <div className="text-sm text-muted-foreground">Columns</div>
+   795→              <div className="text-2xl font-bold">{selectedTable.columns.length}</div>
+   796→            </CardContent>
+   797→          </Card>
+   798→          <Card>
+   799→            <CardContent className="pt-4">
+   800→              <div className="text-sm text-muted-foreground">Version</div>
+   801→              <div className="text-lg font-bold font-mono">{selectedTable.versionHash}</div>
+   802→            </CardContent>
+   803→          </Card>
+   804→          <Card>
+   805→            <CardContent className="pt-4">
+   806→              <div className="text-sm text-muted-foreground">Priority</div>
+   807→              <div className="text-lg font-bold">{priorityLabels[selectedTable.priority]}</div>
+   808→            </CardContent>
+   809→          </Card>
+   810→        </div>
+   811→
+   812→        <Card>
+   813→          <CardHeader>
+   814→            <CardTitle className="text-base bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   815→              Features
+   816→            </CardTitle>
+   817→            <CardDescription>Table-level feature flags</CardDescription>
+   818→          </CardHeader>
+   819→          <CardContent>
+   820→            <div className="flex flex-wrap gap-6">
+   821→              <div className="flex items-center gap-2">
+   822→                <Switch checked={selectedTable.enableRealtime} />
+   823→                <Label className="flex items-center gap-1">
+   824→                  <Radio className="h-3.5 w-3.5 text-emerald-600" /> Realtime
+   825→                </Label>
+   826→              </div>
+   827→              <div className="flex items-center gap-2">
+   828→                <Switch checked={selectedTable.enableEmbedding} />
+   829→                <Label className="flex items-center gap-1">
+   830→                  <Brain className="h-3.5 w-3.5 text-emerald-600" /> Embeddings
+   831→                </Label>
+   832→              </div>
+   833→              <div className="flex items-center gap-2">
+   834→                <Switch checked={selectedTable.rlsEnabled} />
+   835→                <Label className="flex items-center gap-1">
+   836→                  <Shield className="h-3.5 w-3.5 text-emerald-600" /> Row-Level Security
+   837→                </Label>
+   838→              </div>
+   839→            </div>
+   840→          </CardContent>
+   841→        </Card>
+   842→
+   843→        <Card>
+   844→          <CardHeader className="flex flex-row items-center justify-between">
+   845→            <div>
+   846→              <CardTitle className="text-base">Columns</CardTitle>
+   847→              <CardDescription>Schema definition for this table</CardDescription>
+   848→            </div>
+   849→            <Dialog open={showColumnDialog} onOpenChange={setShowColumnDialog}>
+   850→              <DialogTrigger asChild>
+   851→                <Button size="sm">
+   852→                  <Plus className="mr-1 h-4 w-4" /> Add Column
+   853→                </Button>
+   854→              </DialogTrigger>
+   855→              <DialogContent>
+   856→                <DialogHeader>
+   857→                  <DialogTitle>Add Column</DialogTitle>
+   858→                  <DialogDescription>Add a new column to {selectedTable.name}</DialogDescription>
+   859→                </DialogHeader>
+   860→                <div className="space-y-4 py-2">
+   861→                  <div className="space-y-2">
+   862→                    <Label>Column Name</Label>
+   863→                    <Input
+   864→                      value={newColumnName}
+   865→                      onChange={(e) => setNewColumnName(e.target.value)}
+   866→                      placeholder="column_name"
+   867→                    />
+   868→                  </div>
+   869→                  <div className="space-y-2">
+   870→                    <Label>Type</Label>
+   871→                    <Select value={newColumnType} onValueChange={setNewColumnType}>
+   872→                      <SelectTrigger>
+   873→                        <SelectValue />
+   874→                      </SelectTrigger>
+   875→                      <SelectContent>
+   876→                        {columnTypes.map((t) => (
+   877→                          <SelectItem key={t} value={t}>
+   878→                            {t}
+   879→                          </SelectItem>
+   880→                        ))}
+   881→                      </SelectContent>
+   882→                    </Select>
+   883→                  </div>
+   884→                </div>
+   885→                <DialogFooter>
+   886→                  <Button variant="outline" onClick={() => setShowColumnDialog(false)}>
+   887→                    Cancel
+   888→                  </Button>
+   889→                  <Button onClick={() => void handleAddColumn()} disabled={addColumnLoading}>Add Column</Button>
+   890→                </DialogFooter>
+   891→              </DialogContent>
+   892→            </Dialog>
+   893→          </CardHeader>
+   894→          <CardContent>
+   895→            {selectedTable.columns.length === 0 ? (
+   896→              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   897→                <Columns3 className="h-10 w-10 mb-2 opacity-40" />
+   898→                <p className="text-sm">No columns defined yet</p>
+   899→                <Button variant="outline" size="sm" className="mt-2" onClick={() => setShowColumnDialog(true)}>
+   900→                  <Plus className="mr-1 h-3.5 w-3.5" /> Add first column
+   901→                </Button>
+   902→              </div>
+   903→            ) : (
+   904→              <Table>
+   905→                <TableHeader>
+   906→                  <TableRow>
+   907→                    <TableHead className="w-8">#</TableHead>
+   908→                    <TableHead>Name</TableHead>
+   909→                    <TableHead>Type</TableHead>
+   910→                    <TableHead>Nullable</TableHead>
+   911→                    <TableHead>Primary Key</TableHead>
+   912→                    <TableHead>Unique</TableHead>
+   913→                    <TableHead>Indexed</TableHead>
+   914→                    <TableHead>Default</TableHead>
+   915→                    <TableHead className="w-8" />
+   916→                  </TableRow>
+   917→                </TableHeader>
+   918→                <TableBody>
+   919→                  {selectedTable.columns.map((col, i) => (
+   920→                    <TableRow key={col.id} className="hover:bg-muted/40 transition-colors">
+   921→                      <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+   922→                      <TableCell className="font-mono font-medium">{col.name}</TableCell>
+   923→                      <TableCell>
+   924→                        <Badge variant="outline" className="font-mono text-xs">
+   925→                          {col.type}
+   926→                        </Badge>
+   927→                      </TableCell>
+   928→                      <TableCell>
+   929→                        {col.nullable ? (
+   930→                          <span className="text-emerald-500">✓</span>
+   931→                        ) : (
+   932→                          <span className="text-muted-foreground">—</span>
+   933→                        )}
+   934→                      </TableCell>
+   935→                      <TableCell>{col.isPrimaryKey ? <span>🔑</span> : <span className="text-muted-foreground">—</span>}</TableCell>
+   936→                      <TableCell>
+   937→                        {col.isUnique ? (
+   938→                          <span className="text-emerald-500">✓</span>
+   939→                        ) : (
+   940→                          <span className="text-muted-foreground">—</span>
+   941→                        )}
+   942→                      </TableCell>
+   943→                      <TableCell>
+   944→                        {col.isIndexed ? (
+   945→                          <span className="text-emerald-500">✓</span>
+   946→                        ) : (
+   947→                          <span className="text-muted-foreground">—</span>
+   948→                        )}
+   949→                      </TableCell>
+   950→                      <TableCell className="font-mono text-xs text-muted-foreground">
+   951→                        {col.defaultValue ?? '—'}
+   952→                      </TableCell>
+   953→                      <TableCell>
+   954→                        <DropdownMenu>
+   955→                          <DropdownMenuTrigger asChild>
+   956→                            <Button variant="ghost" size="icon" className="h-7 w-7">
+   957→                              <MoreHorizontal className="h-3.5 w-3.5" />
+   958→                            </Button>
+   959→                          </DropdownMenuTrigger>
+   960→                          <DropdownMenuContent align="end">
+   961→                            <DropdownMenuItem>
+   962→                              <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+   963→                            </DropdownMenuItem>
+   964→                            <DropdownMenuItem>
+   965→                              <Copy className="mr-2 h-3.5 w-3.5" /> Duplicate
+   966→                            </DropdownMenuItem>
+   967→                            <DropdownMenuSeparator />
+   968→                            <DropdownMenuItem className="text-destructive">
+   969→                              <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+   970→                            </DropdownMenuItem>
+   971→                          </DropdownMenuContent>
+   972→                        </DropdownMenu>
+   973→                      </TableCell>
+   974→                    </TableRow>
+   975→                  ))}
+   976→                </TableBody>
+   977→              </Table>
+   978→            )}
+   979→          </CardContent>
+   980→        </Card>
+   981→
+   982→        {/* View Data Dialog */}
+   983→        <Dialog
+   984→          open={showDataDialog}
+   985→          onOpenChange={(open) => {
+   986→            setShowDataDialog(open)
+   987→            if (!open) {
+   988→              setEditingRowId(null)
+   989→              setEditBuffer({})
+   990→              setSelectedRowIds(new Set())
+   991→              setSearchQuery('')
+   992→              setSortColumn(null)
+   993→              setSortDirection('asc')
+   994→            }
+   995→          }}
+   996→        >
+   997→          <DialogContent className="max-w-5xl">
+   998→            <DialogHeader>
+   999→              <DialogTitle className="flex items-center gap-2">
+  1000→                <TableIcon className="h-4 w-4 text-emerald-600" />
+  1001→                {selectedTable.name} — Rows
+  1002→                <Badge variant="secondary" className="ml-1">
+  1003→                  {dataRows.length} row{dataRows.length !== 1 ? 's' : ''}
+  1004→                </Badge>
+  1005→              </DialogTitle>
+  1006→              <DialogDescription>
+  1007→                Inline-edit cells, add new rows, or delete with confirmation. Search,
+  1008→                sort, and export the currently loaded rows client-side.
+  1009→              </DialogDescription>
+  1010→              {/* Toolbar: search (flex-1) | Export dropdown | Add Row */}
+  1011→              <div className="flex items-center gap-2 flex-wrap pt-2">
+  1012→                <div className="relative flex-1 min-w-[200px]">
+  1013→                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+  1014→                  <Input
+  1015→                    placeholder="Search rows by any cell value..."
+  1016→                    value={searchQuery}
+  1017→                    onChange={(e) => setSearchQuery(e.target.value)}
+  1018→                    className="pl-9 h-9"
+  1019→                    aria-label="Search rows"
+  1020→                  />
+  1021→                </div>
+  1022→                <DropdownMenu>
+  1023→                  <DropdownMenuTrigger asChild>
+  1024→                    <Button variant="outline" size="sm" disabled={dataRows.length === 0}>
+  1025→                      <Download className="mr-1 h-3.5 w-3.5" /> Export
+  1026→                    </Button>
+  1027→                  </DropdownMenuTrigger>
+  1028→                  <DropdownMenuContent align="end" className="w-52">
+  1029→                    <DropdownMenuItem
+  1030→                      onClick={() => exportData('csv')}
+  1031→                      disabled={dataRows.length === 0}
+  1032→                    >
+  1033→                      <Download className="mr-2 h-3.5 w-3.5" /> Export as CSV
+  1034→                    </DropdownMenuItem>
+  1035→                    <DropdownMenuItem
+  1036→                      onClick={() => exportData('json')}
+  1037→                      disabled={dataRows.length === 0}
+  1038→                    >
+  1039→                      <Download className="mr-2 h-3.5 w-3.5" /> Export as JSON
+  1040→                    </DropdownMenuItem>
+  1041→                    <DropdownMenuSeparator />
+  1042→                    <DropdownMenuItem
+  1043→                      onClick={() => exportData('csv', true)}
+  1044→                      disabled={selectedRowIds.size === 0}
+  1045→                    >
+  1046→                      <Download className="mr-2 h-3.5 w-3.5" /> Export Selected as CSV
+  1047→                      <span className="ml-auto text-xs text-muted-foreground">
+  1048→                        {selectedRowIds.size > 0 ? selectedRowIds.size : '—'}
+  1049→                      </span>
+  1050→                    </DropdownMenuItem>
+  1051→                    <DropdownMenuItem
+  1052→                      onClick={() => exportData('json', true)}
+  1053→                      disabled={selectedRowIds.size === 0}
+  1054→                    >
+  1055→                      <Download className="mr-2 h-3.5 w-3.5" /> Export Selected as JSON
+  1056→                      <span className="ml-auto text-xs text-muted-foreground">
+  1057→                        {selectedRowIds.size > 0 ? selectedRowIds.size : '—'}
+  1058→                      </span>
+  1059→                    </DropdownMenuItem>
+  1060→                  </DropdownMenuContent>
+  1061→                </DropdownMenu>
+  1062→                {selectedRowIds.size > 0 && (
+  1063→                  <Button
+  1064→                    variant="outline"
+  1065→                    size="sm"
+  1066→                    className="text-destructive hover:bg-destructive/10"
+  1067→                    onClick={() => setBulkDeleteOpen(true)}
+  1068→                    disabled={editingRowId !== null}
+  1069→                  >
+  1070→                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Selected
+  1071→                    <Badge variant="secondary" className="ml-1.5">
+  1072→                      {selectedRowIds.size}
+  1073→                    </Badge>
+  1074→                  </Button>
+  1075→                )}
+  1076→                <Button
+  1077→                  size="sm"
+  1078→                  onClick={() => startAddRow()}
+  1079→                  disabled={editingRowId !== null}
+  1080→                >
+  1081→                  <Plus className="mr-1 h-3.5 w-3.5" /> Add Row
+  1082→                </Button>
+  1083→              </div>
+  1084→              {/* Filter / sort status line */}
+  1085→              {(searchQuery.trim() || sortColumn) && (
+  1086→                <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
+  1087→                  <span>
+  1088→                    Showing <span className="font-medium text-foreground">{sortedRows.length}</span> of{' '}
+  1089→                    <span className="font-medium text-foreground">{dataRows.length}</span> row{dataRows.length !== 1 ? 's' : ''}
+  1090→                  </span>
+  1091→                  {sortColumn && (
+  1092→                    <Badge variant="outline" className="text-xs gap-1 font-mono">
+  1093→                      <ArrowUpDown className="h-3 w-3" />
+  1094→                      {sortColumn}
+  1095→                      <span className="text-emerald-600 dark:text-emerald-400">
+  1096→                        {sortDirection === 'asc' ? '↑' : '↓'}
+  1097→                      </span>
+  1098→                      <button
+  1099→                        type="button"
+  1100→                        className="ml-1 text-muted-foreground hover:text-foreground"
+  1101→                        onClick={() => {
+  1102→                          setSortColumn(null)
+  1103→                          setSortDirection('asc')
+  1104→                        }}
+  1105→                        aria-label="Clear sort"
+  1106→                      >
+  1107→                        <X className="h-3 w-3" />
+  1108→                      </button>
+  1109→                    </Badge>
+  1110→                  )}
+  1111→                  {searchQuery.trim() && (
+  1112→                    <button
+  1113→                      type="button"
+  1114→                      className="text-muted-foreground hover:text-foreground"
+  1115→                      onClick={() => setSearchQuery('')}
+  1116→                      aria-label="Clear search"
+  1117→                    >
+  1118→                      <X className="h-3 w-3 inline mr-1" />
+  1119→                      clear search
+  1120→                    </button>
+  1121→                  )}
+  1122→                </div>
+  1123→              )}
+  1124→            </DialogHeader>
+  1125→
+  1126→            {selectedRowIds.size > 0 && (
+  1127→              <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-500/5 px-3 py-2 text-sm dark:border-emerald-900 dark:bg-emerald-500/10">
+  1128→                <span className="font-medium text-emerald-700 dark:text-emerald-400">
+  1129→                  {selectedRowIds.size} selected
+  1130→                </span>
+  1131→                <span className="text-muted-foreground">
+  1132→                  of {sortedRows.length} visible row{sortedRows.length !== 1 ? 's' : ''}
+  1133→                  {sortedRows.length !== dataRows.length && (
+  1134→                    <span className="text-muted-foreground/70"> (filtered from {dataRows.length})</span>
+  1135→                  )}
+  1136→                </span>
+  1137→                <Button
+  1138→                  variant="ghost"
+  1139→                  size="sm"
+  1140→                  className="ml-auto h-7 px-2 text-xs"
+  1141→                  onClick={() => setSelectedRowIds(new Set())}
+  1142→                >
+  1143→                  Clear
+  1144→                </Button>
+  1145→              </div>
+  1146→            )}
+  1147→
+  1148→            <div className="max-h-[60vh] overflow-auto rounded-md border">
+  1149→              {dataLoading ? (
+  1150→                <div className="space-y-2 p-4">
+  1151→                  {Array.from({ length: 5 }).map((_, i) => (
+  1152→                    <Skeleton key={i} className="h-8 w-full" />
+  1153→                  ))}
+  1154→                </div>
+  1155→              ) : sortedRows.length === 0 && editingRowId !== NEW_ROW_ID ? (
+  1156→                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+  1157→                  <Database className="h-10 w-10 mb-2 opacity-40" />
+  1158→                  <p className="text-sm">
+  1159→                    {searchQuery.trim() ? 'No rows match your search' : 'No rows yet'}
+  1160→                  </p>
+  1161→                  <p className="text-xs">
+  1162→                    {searchQuery.trim()
+  1163→                      ? 'Try a different search term or clear the search.'
+  1164→                      : 'Insert data via the data API or add a row manually.'}
+  1165→                  </p>
+  1166→                  {searchQuery.trim() ? (
+  1167→                    <Button
+  1168→                      variant="outline"
+  1169→                      size="sm"
+  1170→                      className="mt-3"
+  1171→                      onClick={() => setSearchQuery('')}
+  1172→                    >
+  1173→                      <X className="mr-1 h-3.5 w-3.5" /> Clear search
+  1174→                    </Button>
+  1175→                  ) : (
+  1176→                    <Button variant="outline" size="sm" className="mt-3" onClick={() => startAddRow()}>
+  1177→                      <Plus className="mr-1 h-3.5 w-3.5" /> Add first row
+  1178→                    </Button>
+  1179→                  )}
+  1180→                </div>
+  1181→              ) : (
+  1182→                <Table>
+  1183→                  <TableHeader className="sticky top-0 bg-background z-10">
+  1184→                    <TableRow>
+  1185→                      <TableHead className="w-10">
+  1186→                        <Checkbox
+  1187→                          checked={
+  1188→                            sortedRows.length > 0 && selectedRowIds.size === sortedRows.length
+  1189→                          }
+  1190→                          onCheckedChange={toggleSelectAll}
+  1191→                          aria-label="Select all rows"
+  1192→                          disabled={editingRowId !== null || sortedRows.length === 0}
+  1193→                        />
+  1194→                      </TableHead>
+  1195→                      <TableHead className="w-10">#</TableHead>
+  1196→                      {selectedTable.columns.map((c) => {
+  1197→                        const isSorted = sortColumn === c.name
+  1198→                        return (
+  1199→                          <TableHead key={c.id} className="font-mono text-xs">
+  1200→                            <button
+  1201→                              type="button"
+  1202→                              onClick={() => toggleSort(c.name)}
+  1203→                              className="inline-flex items-center gap-1 rounded hover:text-foreground transition-colors -ml-0.5"
+  1204→                              aria-label={`Sort by ${c.name}`}
+  1205→                            >
+  1206→                              <span>{c.name}</span>
+  1207→                              <span className="text-muted-foreground/70">({c.type})</span>
+  1208→                              {isSorted ? (
+  1209→                                sortDirection === 'asc' ? (
+  1210→                                  <ArrowUp className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+  1211→                                ) : (
+  1212→                                  <ArrowDown className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+  1213→                                )
+  1214→                              ) : (
+  1215→                                <ArrowUpDown className="h-3 w-3 text-muted-foreground/50" />
+  1216→                              )}
+  1217→                            </button>
+  1218→                          </TableHead>
+  1219→                        )
+  1220→                      })}
+  1221→                      <TableHead>Version</TableHead>
+  1222→                      <TableHead className="w-32 text-right">Actions</TableHead>
+  1223→                    </TableRow>
+  1224→                  </TableHeader>
+  1225→                  <TableBody>
+  1226→                    {editingRowId === NEW_ROW_ID && (
+  1227→                      <motion.tr
+  1228→                        initial={{ opacity: 0, y: -6 }}
+  1229→                        animate={{ opacity: 1, y: 0 }}
+  1230→                        transition={{ duration: 0.18 }}
+  1231→                        className="border-b bg-emerald-500/5 hover:bg-emerald-500/10"
+  1232→                      >
+  1233→                        <TableCell />
+  1234→                        <TableCell className="text-emerald-600 font-bold">+</TableCell>
+  1235→                        {selectedTable.columns.map((c) => (
+  1236→                          <TableCell key={c.id}>
+  1237→                            {renderCellInput(c, editBuffer[c.name], (v) =>
+  1238→                              setEditBuffer((prev) => ({ ...prev, [c.name]: v })),
+  1239→                            )}
+  1240→                          </TableCell>
+  1241→                        ))}
+  1242→                        <TableCell>
+  1243→                          <Badge
+  1244→                            variant="outline"
+  1245→                            className="text-xs text-emerald-600 border-emerald-300 dark:border-emerald-800"
+  1246→                          >
+  1247→                            new
+  1248→                          </Badge>
+  1249→                        </TableCell>
+  1250→                        <TableCell className="text-right">
+  1251→                          <div className="flex justify-end gap-1">
+  1252→                            <Button
+  1253→                              size="sm"
+  1254→                              variant="ghost"
+  1255→                              className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-500/10"
+  1256→                              onClick={() => void saveNewRow()}
+  1257→                              disabled={rowSaving}
+  1258→                              title="Save new row"
+  1259→                              aria-label="Save new row"
+  1260→                            >
+  1261→                              {rowSaving ? (
+  1262→                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1263→                              ) : (
+  1264→                                <Check className="h-3.5 w-3.5" />
+  1265→                              )}
+  1266→                            </Button>
+  1267→                            <Button
+  1268→                              size="sm"
+  1269→                              variant="ghost"
+  1270→                              className="h-7 w-7 p-0"
+  1271→                              onClick={() => cancelEdit()}
+  1272→                              disabled={rowSaving}
+  1273→                              title="Cancel"
+  1274→                              aria-label="Cancel add row"
+  1275→                            >
+  1276→                              <X className="h-3.5 w-3.5" />
+  1277→                            </Button>
+  1278→                          </div>
+  1279→                        </TableCell>
+  1280→                      </motion.tr>
+  1281→                    )}
+  1282→                    {sortedRows.map((row, i) => {
+  1283→                      let parsed: Record<string, unknown> = {}
+  1284→                      try {
+  1285→                        parsed = JSON.parse(row.data)
+  1286→                      } catch {
+  1287→                        parsed = {}
+  1288→                      }
+  1289→                      const isEditing = editingRowId === row.id
+  1290→                      const isSelected = selectedRowIds.has(row.id)
+  1291→                      return (
+  1292→                        <motion.tr
+  1293→                          key={row.id}
+  1294→                          initial={false}
+  1295→                          animate={{ opacity: 1 }}
+  1296→                          exit={{ opacity: 0 }}
+  1297→                          className={`border-b transition-colors duration-200 hover:bg-muted/40 ${
+  1298→                            isEditing
+  1299→                              ? 'bg-emerald-500/10 dark:bg-emerald-500/15'
+  1300→                              : isSelected
+  1301→                                ? 'bg-muted/50'
+  1302→                                : ''
+  1303→                          }`}
+  1304→                        >
+  1305→                          <TableCell>
+  1306→                            <Checkbox
+  1307→                              checked={isSelected}
+  1308→                              onCheckedChange={() => toggleRowSelection(row.id)}
+  1309→                              aria-label={`Select row ${i + 1}`}
+  1310→                              disabled={isEditing || editingRowId !== null}
+  1311→                            />
+  1312→                          </TableCell>
+  1313→                          <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+  1314→                          {selectedTable.columns.map((c) => (
+  1315→                            <TableCell key={c.id} className="font-mono text-xs">
+  1316→                              {isEditing ? (
+  1317→                                renderCellInput(c, editBuffer[c.name], (v) =>
+  1318→                                  setEditBuffer((prev) => ({ ...prev, [c.name]: v })),
+  1319→                                )
+  1320→                              ) : parsed[c.name] !== undefined && parsed[c.name] !== null ? (
+  1321→                                c.type.toUpperCase() === 'BOOLEAN' ? (
+  1322→                                  <span
+  1323→                                    className={
+  1324→                                      parsed[c.name]
+  1325→                                        ? 'text-emerald-600 dark:text-emerald-400'
+  1326→                                        : 'text-muted-foreground'
+  1327→                                    }
+  1328→                                  >
+  1329→                                    {parsed[c.name] ? 'true' : 'false'}
+  1330→                                  </span>
+  1331→                                ) : (
+  1332→                                  String(parsed[c.name]).slice(0, 60)
+  1333→                                )
+  1334→                              ) : (
+  1335→                                <span className="text-muted-foreground">—</span>
+  1336→                              )}
+  1337→                            </TableCell>
+  1338→                          ))}
+  1339→                          <TableCell>
+  1340→                            <Badge variant="outline" className="text-xs">
+  1341→                              v{row.version}
+  1342→                            </Badge>
+  1343→                          </TableCell>
+  1344→                          <TableCell className="text-right">
+  1345→                            {isEditing ? (
+  1346→                              <div className="flex justify-end gap-1">
+  1347→                                <Button
+  1348→                                  size="sm"
+  1349→                                  variant="ghost"
+  1350→                                  className="h-7 w-7 p-0 text-emerald-600 hover:bg-emerald-500/10"
+  1351→                                  onClick={() => void saveEdit(row)}
+  1352→                                  disabled={rowSaving}
+  1353→                                  title="Save changes"
+  1354→                                  aria-label="Save changes"
+  1355→                                >
+  1356→                                  {rowSaving ? (
+  1357→                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+  1358→                                  ) : (
+  1359→                                    <Check className="h-3.5 w-3.5" />
+  1360→                                  )}
+  1361→                                </Button>
+  1362→                                <Button
+  1363→                                  size="sm"
+  1364→                                  variant="ghost"
+  1365→                                  className="h-7 w-7 p-0"
+  1366→                                  onClick={() => cancelEdit()}
+  1367→                                  disabled={rowSaving}
+  1368→                                  title="Cancel edit"
+  1369→                                  aria-label="Cancel edit"
+  1370→                                >
+  1371→                                  <X className="h-3.5 w-3.5" />
+  1372→                                </Button>
+  1373→                              </div>
+  1374→                            ) : (
+  1375→                              <div className="flex justify-end gap-1">
+  1376→                                <Button
+  1377→                                  size="sm"
+  1378→                                  variant="ghost"
+  1379→                                  className="h-7 w-7 p-0"
+  1380→                                  onClick={() => startEdit(row)}
+  1381→                                  disabled={editingRowId !== null}
+  1382→                                  title="Edit row"
+  1383→                                  aria-label={`Edit row ${i + 1}`}
+  1384→                                >
+  1385→                                  <Pencil className="h-3.5 w-3.5" />
+  1386→                                </Button>
+  1387→                                <Button
+  1388→                                  size="sm"
+  1389→                                  variant="ghost"
+  1390→                                  className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+  1391→                                  onClick={() => setDeleteRowTarget(row)}
+  1392→                                  disabled={editingRowId !== null}
+  1393→                                  title="Delete row"
+  1394→                                  aria-label={`Delete row ${i + 1}`}
+  1395→                                >
+  1396→                                  <Trash2 className="h-3.5 w-3.5" />
+  1397→                                </Button>
+  1398→                              </div>
+  1399→                            )}
+  1400→                          </TableCell>
+  1401→                        </motion.tr>
+  1402→                      )
+  1403→                    })}
+  1404→                  </TableBody>
+  1405→                </Table>
+  1406→              )}
+  1407→            </div>
+  1408→          </DialogContent>
+  1409→        </Dialog>
+  1410→
+  1411→        {/* Row Delete Confirmation */}
+  1412→        <AlertDialog
+  1413→          open={!!deleteRowTarget}
+  1414→          onOpenChange={(open) => !open && setDeleteRowTarget(null)}
+  1415→        >
+  1416→          <AlertDialogContent>
+  1417→            <AlertDialogHeader>
+  1418→              <AlertDialogTitle>Delete this row?</AlertDialogTitle>
+  1419→              <AlertDialogDescription>
+  1420→                This action cannot be undone. The row will be permanently removed from
+  1421→                {' '}{selectedTable?.name}. Row version{' '}
+  1422→                <span className="font-mono">v{deleteRowTarget?.version}</span> will be discarded.
+  1423→              </AlertDialogDescription>
+  1424→            </AlertDialogHeader>
+  1425→            <AlertDialogFooter>
+  1426→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1427→              <AlertDialogAction
+  1428→                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1429→                onClick={() => deleteRowTarget && void handleDeleteRow(deleteRowTarget)}
+  1430→              >
+  1431→                Delete Row
+  1432→              </AlertDialogAction>
+  1433→            </AlertDialogFooter>
+  1434→          </AlertDialogContent>
+  1435→        </AlertDialog>
+  1436→
+  1437→        {/* Bulk Delete Confirmation */}
+  1438→        <AlertDialog
+  1439→          open={bulkDeleteOpen}
+  1440→          onOpenChange={(open) => !open && !bulkDeleting && setBulkDeleteOpen(false)}
+  1441→        >
+  1442→          <AlertDialogContent>
+  1443→            <AlertDialogHeader>
+  1444→              <AlertDialogTitle>Delete {selectedRowIds.size} selected row{selectedRowIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+  1445→              <AlertDialogDescription>
+  1446→                This action cannot be undone. All {selectedRowIds.size} selected rows in
+  1447→                {' '}{selectedTable?.name} will be permanently removed.
+  1448→              </AlertDialogDescription>
+  1449→            </AlertDialogHeader>
+  1450→            <AlertDialogFooter>
+  1451→              <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+  1452→              <AlertDialogAction
+  1453→                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1454→                disabled={bulkDeleting}
+  1455→                onClick={() => void handleBulkDelete()}
+  1456→              >
+  1457→                {bulkDeleting ? (
+  1458→                  <>
+  1459→                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Deleting...
+  1460→                  </>
+  1461→                ) : (
+  1462→                  `Delete ${selectedRowIds.size} Row${selectedRowIds.size !== 1 ? 's' : ''}`
+  1463→                )}
+  1464→              </AlertDialogAction>
+  1465→            </AlertDialogFooter>
+  1466→          </AlertDialogContent>
+  1467→        </AlertDialog>
+  1468→
+  1469→        {/* Delete Confirmation */}
+  1470→        <AlertDialog
+  1471→          open={!!deleteTarget}
+  1472→          onOpenChange={(open) => !open && setDeleteTarget(null)}
+  1473→        >
+  1474→          <AlertDialogContent>
+  1475→            <AlertDialogHeader>
+  1476→              <AlertDialogTitle>Delete table "{deleteTarget?.name}"?</AlertDialogTitle>
+  1477→              <AlertDialogDescription>
+  1478→                This action cannot be undone. All columns and rows in this table will be permanently
+  1479→                removed from your SelfBase instance.
+  1480→              </AlertDialogDescription>
+  1481→            </AlertDialogHeader>
+  1482→            <AlertDialogFooter>
+  1483→              <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1484→              <AlertDialogAction
+  1485→                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1486→                onClick={() => deleteTarget && handleDeleteTable(deleteTarget)}
+  1487→              >
+  1488→                Delete Table
+  1489→              </AlertDialogAction>
+  1490→            </AlertDialogFooter>
+  1491→          </AlertDialogContent>
+  1492→        </AlertDialog>
+  1493→      </motion.div>
+  1494→    )
+  1495→  }
+  1496→
+  1497→  // List view
+  1498→  return (
+  1499→    <motion.div
+  1500→      initial={{ opacity: 0, y: 8 }}
+  1501→      animate={{ opacity: 1, y: 0 }}
+  1502→      transition={{ duration: 0.2 }}
+  1503→      className="space-y-6"
+  1504→    >
+  1505→      <div className="flex items-center justify-between flex-wrap gap-2">
+  1506→        <div>
+  1507→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+  1508→            Tables
+  1509→          </h1>
+  1510→          <p className="text-muted-foreground">Manage your database schema and data · {tables.length} table{tables.length !== 1 ? 's' : ''}</p>
+  1511→        </div>
+  1512→        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+  1513→          <DialogTrigger asChild>
+  1514→            <Button>
+  1515→              <Plus className="mr-1 h-4 w-4" /> New Table
+  1516→            </Button>
+  1517→          </DialogTrigger>
+  1518→          <DialogContent className="max-w-2xl">
+  1519→            <DialogHeader>
+  1520→              <DialogTitle>Create Table</DialogTitle>
+  1521→              <DialogDescription>Define a new table in your SelfBase schema</DialogDescription>
+  1522→            </DialogHeader>
+  1523→            <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
+  1524→              <div className="space-y-2">
+  1525→                <Label>Table Name</Label>
+  1526→                <Input
+  1527→                  value={newTableName}
+  1528→                  onChange={(e) => setNewTableName(e.target.value)}
+  1529→                  placeholder="my_table"
+  1530→                />
+  1531→              </div>
+  1532→              <div className="space-y-2">
+  1533→                <Label>Description</Label>
+  1534→                <Textarea
+  1535→                  value={newTableDesc}
+  1536→                  onChange={(e) => setNewTableDesc(e.target.value)}
+  1537→                  placeholder="What is this table for?"
+  1538→                />
+  1539→              </div>
+  1540→              <div className="space-y-2">
+  1541→                <Label>Priority</Label>
+  1542→                <Select
+  1543→                  value={String(newTablePriority)}
+  1544→                  onValueChange={(v) => setNewTablePriority(Number(v))}
+  1545→                >
+  1546→                  <SelectTrigger>
+  1547→                    <SelectValue />
+  1548→                  </SelectTrigger>
+  1549→                  <SelectContent>
+  1550→                    <SelectItem value="1">P1 — Critical</SelectItem>
+  1551→                    <SelectItem value="2">P2 — Normal</SelectItem>
+  1552→                    <SelectItem value="3">P3 — Low</SelectItem>
+  1553→                    <SelectItem value="4">P4 — Deferred</SelectItem>
+  1554→                  </SelectContent>
+  1555→                </Select>
+  1556→              </div>
+  1557→              <div className="space-y-2">
+  1558→                <div className="flex items-center justify-between">
+  1559→                  <Label>Columns</Label>
+  1560→                  <Button
+  1561→                    type="button"
+  1562→                    variant="outline"
+  1563→                    size="sm"
+  1564→                    onClick={() =>
+  1565→                      setNewColumns((prev) => [
+  1566→                        ...prev,
+  1567→                        {
+  1568→                          id: `c-${Date.now()}`,
+  1569→                          name: `col_${prev.length}`,
+  1570→                          type: 'TEXT',
+  1571→                          nullable: true,
+  1572→                          isPrimaryKey: false,
+  1573→                          isUnique: false,
+  1574→                          isIndexed: false,
+  1575→                          defaultValue: null,
+  1576→                          order: prev.length,
+  1577→                        },
+  1578→                      ])
+  1579→                    }
+  1580→                  >
+  1581→                    <Plus className="mr-1 h-3.5 w-3.5" /> Add
+  1582→                  </Button>
+  1583→                </div>
+  1584→                <div className="rounded-md border">
+  1585→                  <Table>
+  1586→                    <TableHeader>
+  1587→                      <TableRow>
+  1588→                        <TableHead>Name</TableHead>
+  1589→                        <TableHead>Type</TableHead>
+  1590→                        <TableHead className="w-8" />
+  1591→                      </TableRow>
+  1592→                    </TableHeader>
+  1593→                    <TableBody>
+  1594→                      {newColumns.map((col, i) => (
+  1595→                        <TableRow key={col.id}>
+  1596→                          <TableCell>
+  1597→                            <Input
+  1598→                              value={col.name}
+  1599→                              onChange={(e) => {
+  1600→                                const v = e.target.value
+  1601→                                setNewColumns((prev) =>
+  1602→                                  prev.map((c, idx) => (idx === i ? { ...c, name: v } : c)),
+  1603→                                )
+  1604→                              }}
+  1605→                              className="h-8 font-mono text-xs"
+  1606→                            />
+  1607→                          </TableCell>
+  1608→                          <TableCell>
+  1609→                            <Select
+  1610→                              value={col.type}
+  1611→                              onValueChange={(v) =>
+  1612→                                setNewColumns((prev) =>
+  1613→                                  prev.map((c, idx) => (idx === i ? { ...c, type: v } : c)),
+  1614→                                )
+  1615→                              }
+  1616→                            >
+  1617→                              <SelectTrigger className="h-8 text-xs">
+  1618→                                <SelectValue />
+  1619→                              </SelectTrigger>
+  1620→                              <SelectContent>
+  1621→                                {columnTypes.map((t) => (
+  1622→                                  <SelectItem key={t} value={t}>
+  1623→                                    {t}
+  1624→                                  </SelectItem>
+  1625→                                ))}
+  1626→                              </SelectContent>
+  1627→                            </Select>
+  1628→                          </TableCell>
+  1629→                          <TableCell>
+  1630→                            <Button
+  1631→                              variant="ghost"
+  1632→                              size="icon"
+  1633→                              className="h-7 w-7 text-destructive"
+  1634→                              disabled={newColumns.length === 1}
+  1635→                              onClick={() =>
+  1636→                                setNewColumns((prev) => prev.filter((_, idx) => idx !== i))
+  1637→                              }
+  1638→                            >
+  1639→                              <Trash2 className="h-3.5 w-3.5" />
+  1640→                            </Button>
+  1641→                          </TableCell>
+  1642→                        </TableRow>
+  1643→                      ))}
+  1644→                    </TableBody>
+  1645→                  </Table>
+  1646→                </div>
+  1647→              </div>
+  1648→            </div>
+  1649→            <DialogFooter>
+  1650→              <Button variant="outline" onClick={() => setShowCreateDialog(false)}>
+  1651→                Cancel
+  1652→              </Button>
+  1653→              <Button onClick={handleCreateTable}>Create Table</Button>
+  1654→            </DialogFooter>
+  1655→          </DialogContent>
+  1656→        </Dialog>
+  1657→      </div>
+  1658→
+  1659→      <div className="flex items-center gap-3 flex-wrap">
+  1660→        <div className="relative flex-1 max-w-sm">
+  1661→          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+  1662→          <Input
+  1663→            placeholder="Search tables..."
+  1664→            value={search}
+  1665→            onChange={(e) => setSearch(e.target.value)}
+  1666→            className="pl-9"
+  1667→          />
+  1668→        </div>
+  1669→        <Badge variant="secondary">{filteredTables.length} table{filteredTables.length !== 1 ? 's' : ''}</Badge>
+  1670→        <Button variant="outline" size="sm" onClick={() => void loadTables()}>
+  1671→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+  1672→        </Button>
+  1673→      </div>
+  1674→
+  1675→      <Card>
+  1676→        <CardContent className="p-0">
+  1677→          {filteredTables.length === 0 ? (
+  1678→            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+  1679→              <Database className="h-14 w-14 mb-3 opacity-30" />
+  1680→              <p className="text-base font-medium">No tables found</p>
+  1681→              <p className="text-sm mt-1">
+  1682→                {tables.length === 0
+  1683→                  ? 'Create your first table to get started.'
+  1684→                  : 'Try adjusting your search.'}
+  1685→              </p>
+  1686→              {tables.length === 0 && (
+  1687→                <Button className="mt-4" onClick={() => setShowCreateDialog(true)}>
+  1688→                  <Plus className="mr-1 h-4 w-4" /> New Table
+  1689→                </Button>
+  1690→              )}
+  1691→            </div>
+  1692→          ) : (
+  1693→            <Table>
+  1694→              <TableHeader>
+  1695→                <TableRow>
+  1696→                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort('name')}>
+  1697→                    <span className="flex items-center gap-1">
+  1698→                      Name <ArrowUpDown className="h-3 w-3" />
+  1699→                    </span>
+  1700→                  </TableHead>
+  1701→                  <TableHead>Priority</TableHead>
+  1702→                  <TableHead className="cursor-pointer select-none" onClick={() => handleSort('rowCount')}>
+  1703→                    <span className="flex items-center gap-1">
+  1704→                      Rows <ArrowUpDown className="h-3 w-3" />
+  1705→                    </span>
+  1706→                  </TableHead>
+  1707→                  <TableHead>Columns</TableHead>
+  1708→                  <TableHead>Features</TableHead>
+  1709→                  <TableHead>Version</TableHead>
+  1710→                  <TableHead className="w-8" />
+  1711→                </TableRow>
+  1712→              </TableHeader>
+  1713→              <TableBody>
+  1714→                {filteredTables.map((table) => {
+  1715→                  const trend = emptyTrend(table.rowCount)
+  1716→                  return (
+  1717→                    <TableRow
+  1718→                      key={table.id}
+  1719→                      className="cursor-pointer hover:bg-muted/50 transition-colors"
+  1720→                      onClick={() => setSelectedTable(table)}
+  1721→                    >
+  1722→                      <TableCell>
+  1723→                        <div className="flex items-center gap-2">
+  1724→                          <Database className="h-4 w-4 text-emerald-500" />
+  1725→                          <div>
+  1726→                            <div className="font-medium">{table.displayName || table.name}</div>
+  1727→                            <div className="text-xs text-muted-foreground font-mono">{table.name}</div>
+  1728→                          </div>
+  1729→                        </div>
+  1730→                      </TableCell>
+  1731→                      <TableCell>
+  1732→                        <Badge variant="outline" className={priorityColors[table.priority]}>
+  1733→                          {priorityLabels[table.priority]}
+  1734→                        </Badge>
+  1735→                      </TableCell>
+  1736→                      <TableCell>
+  1737→                        <div className="flex items-center gap-1.5">
+  1738→                          <span className="font-mono">{table.rowCount.toLocaleString()}</span>
+  1739→                          {trend.direction !== 'none' && (
+  1740→                            <Tooltip>
+  1741→                              <TooltipTrigger asChild>
+  1742→                                <span
+  1743→                                  className={`flex items-center text-xs ${trend.direction === 'up' ? 'text-emerald-600' : 'text-red-500'}`}
+  1744→                                >
+  1745→                                  {trend.direction === 'up' ? (
+  1746→                                    <ArrowUpRight className="h-3 w-3" />
+  1747→                                  ) : (
+  1748→                                    <ArrowDownRight className="h-3 w-3" />
+  1749→                                  )}
+  1750→                                  {trend.delta}
+  1751→                                </span>
+  1752→                              </TooltipTrigger>
+  1753→                              <TooltipContent>
+  1754→                                {trend.direction === 'up' ? '+' : '−'}
+  1755→                                {trend.delta} rows since last sync
+  1756→                              </TooltipContent>
+  1757→                            </Tooltip>
+  1758→                          )}
+  1759→                        </div>
+  1760→                      </TableCell>
+  1761→                      <TableCell>
+  1762→                        <div className="flex items-center gap-1">
+  1763→                          <Columns3 className="h-3.5 w-3.5 text-muted-foreground" />
+  1764→                          {table.columns.length}
+  1765→                        </div>
+  1766→                      </TableCell>
+  1767→                      <TableCell>
+  1768→                        <div className="flex gap-1 flex-wrap">
+  1769→                          {table.enableRealtime && (
+  1770→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-emerald-500/10 text-emerald-700">
+  1771→                              <Radio className="h-2.5 w-2.5" /> RT
+  1772→                            </Badge>
+  1773→                          )}
+  1774→                          {table.enableEmbedding && (
+  1775→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-teal-500/10 text-teal-700">
+  1776→                              <Brain className="h-2.5 w-2.5" /> AI
+  1777→                            </Badge>
+  1778→                          )}
+  1779→                          {table.rlsEnabled && (
+  1780→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-amber-500/10 text-amber-700">
+  1781→                              <Shield className="h-2.5 w-2.5" /> RLS
+  1782→                            </Badge>
+  1783→                          )}
+  1784→                          {table.isSystem && (
+  1785→                            <Badge variant="secondary" className="text-xs gap-0.5 bg-slate-400/10 text-slate-700">
+  1786→                              <Lock className="h-2.5 w-2.5" /> SYS
+  1787→                            </Badge>
+  1788→                          )}
+  1789→                        </div>
+  1790→                      </TableCell>
+  1791→                      <TableCell className="font-mono text-xs text-muted-foreground">
+  1792→                        {table.versionHash}
+  1793→                      </TableCell>
+  1794→                      <TableCell>
+  1795→                        <DropdownMenu>
+  1796→                          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+  1797→                            <Button variant="ghost" size="icon" className="h-7 w-7">
+  1798→                              <MoreHorizontal className="h-3.5 w-3.5" />
+  1799→                            </Button>
+  1800→                          </DropdownMenuTrigger>
+  1801→                          <DropdownMenuContent align="end">
+  1802→                            <DropdownMenuItem
+  1803→                              onClick={(e) => {
+  1804→                                e.stopPropagation()
+  1805→                                setSelectedTable(table)
+  1806→                              }}
+  1807→                            >
+  1808→                              <Eye className="mr-2 h-3.5 w-3.5" /> View Details
+  1809→                            </DropdownMenuItem>
+  1810→                            <DropdownMenuItem
+  1811→                              onClick={(e) => {
+  1812→                                e.stopPropagation()
+  1813→                                void handleViewData(table)
+  1814→                              }}
+  1815→                            >
+  1816→                              <TableIcon className="mr-2 h-3.5 w-3.5" /> View Data
+  1817→                            </DropdownMenuItem>
+  1818→                            <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+  1819→                              <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+  1820→                            </DropdownMenuItem>
+  1821→                            <DropdownMenuSeparator />
+  1822→                            <DropdownMenuItem
+  1823→                              className="text-destructive"
+  1824→                              onClick={(e) => {
+  1825→                                e.stopPropagation()
+  1826→                                setDeleteTarget(table)
+  1827→                              }}
+  1828→                            >
+  1829→                              <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+  1830→                            </DropdownMenuItem>
+  1831→                          </DropdownMenuContent>
+  1832→                        </DropdownMenu>
+  1833→                      </TableCell>
+  1834→                    </TableRow>
+  1835→                  )
+  1836→                })}
+  1837→              </TableBody>
+  1838→            </Table>
+  1839→          )}
+  1840→        </CardContent>
+  1841→      </Card>
+  1842→
+  1843→      {/* Delete Confirmation */}
+  1844→      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+  1845→        <AlertDialogContent>
+  1846→          <AlertDialogHeader>
+  1847→            <AlertDialogTitle>Delete table "{deleteTarget?.name}"?</AlertDialogTitle>
+  1848→            <AlertDialogDescription>
+  1849→              This action cannot be undone. All columns and rows in this table will be permanently
+  1850→              removed from your SelfBase instance.
+  1851→            </AlertDialogDescription>
+  1852→          </AlertDialogHeader>
+  1853→          <AlertDialogFooter>
+  1854→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+  1855→            <AlertDialogAction
+  1856→              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+  1857→              onClick={() => deleteTarget && handleDeleteTable(deleteTarget)}
+  1858→            >
+  1859→              Delete Table
+  1860→            </AlertDialogAction>
+  1861→          </AlertDialogFooter>
+  1862→        </AlertDialogContent>
+  1863→      </AlertDialog>
+  1864→    </motion.div>
+  1865→  )
+  1866→}
+  1867→

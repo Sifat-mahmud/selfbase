@@ -1,0 +1,1241 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useRef } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  Brain,
+     7→  Plus,
+     8→  Send,
+     9→  Search,
+    10→  MoreHorizontal,
+    11→  Pencil,
+    12→  Trash2,
+    13→  MessageSquare,
+    14→  Database,
+    15→  Cpu,
+    16→  Sparkles,
+    17→  CheckCircle2,
+    18→  XCircle,
+    19→  Clock,
+    20→  Globe,
+    21→  RefreshCw,
+    22→  Zap,
+    23→  Loader2,
+    24→  Wand2,
+    25→  DollarSign,
+    26→  User,
+    27→  Copy,
+    28→  Check,
+    29→} from 'lucide-react'
+    30→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    31→import { Button } from '@/components/ui/button'
+    32→import { Input } from '@/components/ui/input'
+    33→import { Badge } from '@/components/ui/badge'
+    34→import { Skeleton } from '@/components/ui/skeleton'
+    35→import { Textarea } from '@/components/ui/textarea'
+    36→import { Label } from '@/components/ui/label'
+    37→import { Switch } from '@/components/ui/switch'
+    38→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    39→import {
+    40→  Table,
+    41→  TableBody,
+    42→  TableCell,
+    43→  TableHead,
+    44→  TableHeader,
+    45→  TableRow,
+    46→} from '@/components/ui/table'
+    47→import {
+    48→  Dialog,
+    49→  DialogContent,
+    50→  DialogDescription,
+    51→  DialogFooter,
+    52→  DialogHeader,
+    53→  DialogTitle,
+    54→  DialogTrigger,
+    55→} from '@/components/ui/dialog'
+    56→import {
+    57→  DropdownMenu,
+    58→  DropdownMenuContent,
+    59→  DropdownMenuItem,
+    60→  DropdownMenuSeparator,
+    61→  DropdownMenuTrigger,
+    62→} from '@/components/ui/dropdown-menu'
+    63→import {
+    64→  Select,
+    65→  SelectContent,
+    66→  SelectItem,
+    67→  SelectTrigger,
+    68→  SelectValue,
+    69→} from '@/components/ui/select'
+    70→import {
+    71→  Tooltip,
+    72→  TooltipContent,
+    73→  TooltipTrigger,
+    74→} from '@/components/ui/tooltip'
+    75→import { useToast } from '@/hooks/use-toast'
+    76→import {
+    77→  BarChart,
+    78→  Bar,
+    79→  PieChart,
+    80→  Pie,
+    81→  Cell,
+    82→  XAxis,
+    83→  YAxis,
+    84→  CartesianGrid,
+    85→  Tooltip as RTooltip,
+    86→  ResponsiveContainer,
+    87→  Legend,
+    88→} from 'recharts'
+    89→import { apiGet, apiPost, apiPut, apiDelete } from '@/lib/api-client'
+    90→
+    91→interface LlmConfigItem {
+    92→  id: string
+    93→  provider: string
+    94→  name: string
+    95→  baseUrl: string | null
+    96→  apiKey?: string | null
+    97→  modelName: string
+    98→  isActive: boolean
+    99→  maxTokens: number
+   100→  temperature: number
+   101→  costPer1kInput: number | null
+   102→  costPer1kOutput: number | null
+   103→  createdAt: string
+   104→}
+   105→
+   106→interface LlmCallItem {
+   107→  id: string
+   108→  configId: string
+   109→  model: string
+   110→  promptTokens: number | null
+   111→  completionTokens: number | null
+   112→  totalTokens: number | null
+   113→  latencyMs: number | null
+   114→  cost: number | null
+   115→  status: string
+   116→  errorPayload: string | null
+   117→  createdAt: string
+   118→  config?: { id: string; name: string; provider: string; modelName: string }
+   119→}
+   120→
+   121→interface SbTableItem {
+   122→  id: string
+   123→  name: string
+   124→  displayName: string | null
+   125→}
+   126→
+   127→interface ChatMessage {
+   128→  role: 'user' | 'assistant'
+   129→  content: string
+   130→  status?: 'pending' | 'completed' | 'failed'
+   131→  meta?: { durationMs?: number; sources?: number; tokens?: number }
+   132→  timestamp?: Date
+   133→}
+   134→
+   135→interface SearchResult {
+   136→  rowId: string
+   137→  tableId: string
+   138→  score: number
+   139→  textContent: string | null
+   140→  rowData: Record<string, unknown> | null
+   141→  model: string
+   142→}
+   143→
+   144→interface RagResponse {
+   145→  status?: string
+   146→  query?: string
+   147→  results?: unknown[]
+   148→  response?: string
+   149→  error?: string
+   150→}
+   151→
+   152→const providerIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+   153→  openai: Brain,
+   154→  anthropic: Cpu,
+   155→  ollama: Database,
+   156→  custom: Globe,
+   157→}
+   158→
+   159→const providerColors: Record<string, string> = {
+   160→  openai: '#10b981',
+   161→  anthropic: '#14b8a6',
+   162→  ollama: '#f59e0b',
+   163→  custom: '#8b5cf6',
+   164→}
+   165→
+   166→const PIE_COLORS = ['#10b981', '#14b8a6', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4']
+   167→
+   168→export function AiView() {
+   169→  const { toast } = useToast()
+   170→  const [loading, setLoading] = useState(true)
+   171→  const [llmConfigs, setLlmConfigs] = useState<LlmConfigItem[]>([])
+   172→  const [llmCalls, setLlmCalls] = useState<LlmCallItem[]>([])
+   173→  const [tables, setTables] = useState<SbTableItem[]>([])
+   174→  const [showConfigDialog, setShowConfigDialog] = useState(false)
+   175→  const [editTarget, setEditTarget] = useState<LlmConfigItem | null>(null)
+   176→
+   177→  // Config form
+   178→  const [cfgName, setCfgName] = useState('')
+   179→  const [cfgProvider, setCfgProvider] = useState('openai')
+   180→  const [cfgModel, setCfgModel] = useState('')
+   181→  const [cfgBaseUrl, setCfgBaseUrl] = useState('')
+   182→  const [cfgApiKey, setCfgApiKey] = useState('')
+   183→  const [cfgMaxTokens, setCfgMaxTokens] = useState('4096')
+   184→  const [cfgTemperature, setCfgTemperature] = useState('0.7')
+   185→  const [cfgCostInput, setCfgCostInput] = useState('')
+   186→  const [cfgCostOutput, setCfgCostOutput] = useState('')
+   187→
+   188→  // Chat
+   189→  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+   190→  const [chatInput, setChatInput] = useState('')
+   191→  const [chatTable, setChatTable] = useState('')
+   192→  const [chatModel, setChatModel] = useState('')
+   193→  const [chatSending, setChatSending] = useState(false)
+   194→  const [sessionTokens, setSessionTokens] = useState(0)
+   195→  const chatScrollRef = useRef<HTMLDivElement>(null)
+   196→
+   197→  // Search
+   198→  const [searchQuery, setSearchQuery] = useState('')
+   199→  const [searchTable, setSearchTable] = useState('')
+   200→  const [searchLimit, setSearchLimit] = useState('10')
+   201→  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+   202→  const [searchLoading, setSearchLoading] = useState(false)
+   203→
+   204→  // Embed
+   205→  const [embedText, setEmbedText] = useState('')
+   206→  const [embedTable, setEmbedTable] = useState('')
+   207→  const [embedRowId, setEmbedRowId] = useState('')
+   208→  const [embedding, setEmbedding] = useState(false)
+   209→
+   210→  const loadAll = useCallback(async () => {
+   211→    setLoading(true)
+   212→    try {
+   213→      const [cfgs, callsResp, tbls] = await Promise.all([
+   214→        apiGet<LlmConfigItem[]>('/api/ai/llm-config'),
+   215→        apiGet<{ calls?: LlmCallItem[]; pagination?: unknown }>('/api/ai/calls?limit=100').catch(() => ({ calls: [] })),
+   216→        apiGet<SbTableItem[]>('/api/tables').catch(() => []),
+   217→      ])
+   218→      setLlmConfigs(Array.isArray(cfgs) ? cfgs : [])
+   219→      setLlmCalls(Array.isArray(callsResp?.calls) ? callsResp.calls : [])
+   220→      setTables(Array.isArray(tbls) ? tbls : [])
+   221→    } catch (err) {
+   222→      toast({
+   223→        title: 'Failed to load AI data',
+   224→        description: err instanceof Error ? err.message : 'Unknown error',
+   225→        variant: 'destructive',
+   226→      })
+   227→    } finally {
+   228→      setLoading(false)
+   229→    }
+   230→  }, [toast])
+   231→
+   232→  useEffect(() => {
+   233→    void loadAll()
+   234→  }, [loadAll])
+   235→
+   236→  useEffect(() => {
+   237→    if (chatScrollRef.current) {
+   238→      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
+   239→    }
+   240→  }, [chatMessages])
+   241→
+   242→  const openEditDialog = (config: LlmConfigItem | null) => {
+   243→    setEditTarget(config)
+   244→    if (config) {
+   245→      setCfgName(config.name)
+   246→      setCfgProvider(config.provider)
+   247→      setCfgModel(config.modelName)
+   248→      setCfgBaseUrl(config.baseUrl ?? '')
+   249→      setCfgApiKey('')
+   250→      setCfgMaxTokens(String(config.maxTokens))
+   251→      setCfgTemperature(String(config.temperature))
+   252→      setCfgCostInput(config.costPer1kInput?.toString() ?? '')
+   253→      setCfgCostOutput(config.costPer1kOutput?.toString() ?? '')
+   254→    } else {
+   255→      setCfgName('')
+   256→      setCfgProvider('openai')
+   257→      setCfgModel('')
+   258→      setCfgBaseUrl('')
+   259→      setCfgApiKey('')
+   260→      setCfgMaxTokens('4096')
+   261→      setCfgTemperature('0.7')
+   262→      setCfgCostInput('')
+   263→      setCfgCostOutput('')
+   264→    }
+   265→    setShowConfigDialog(true)
+   266→  }
+   267→
+   268→  const handleSaveConfig = async () => {
+   269→    if (!cfgName.trim() || !cfgModel.trim()) {
+   270→      toast({ title: 'Name and model required', variant: 'destructive' })
+   271→      return
+   272→    }
+   273→    const payload: Record<string, unknown> = {
+   274→      provider: cfgProvider,
+   275→      name: cfgName.trim(),
+   276→      modelName: cfgModel.trim(),
+   277→      baseUrl: cfgBaseUrl || null,
+   278→      maxTokens: Number(cfgMaxTokens) || 4096,
+   279→      temperature: Number(cfgTemperature) || 0.7,
+   280→      costPer1kInput: cfgCostInput ? Number(cfgCostInput) : null,
+   281→      costPer1kOutput: cfgCostOutput ? Number(cfgCostOutput) : null,
+   282→    }
+   283→    if (cfgApiKey) payload.apiKey = cfgApiKey
+   284→    try {
+   285→      if (editTarget) {
+   286→        const updated = await apiPut<LlmConfigItem>(`/api/ai/llm-config/${editTarget.id}`, payload)
+   287→        setLlmConfigs((prev) => prev.map((c) => (c.id === editTarget.id ? { ...c, ...updated } : c)))
+   288→        toast({ title: 'Provider updated' })
+   289→      } else {
+   290→        const created = await apiPost<LlmConfigItem>('/api/ai/llm-config', { ...payload, isActive: true })
+   291→        setLlmConfigs((prev) => [created, ...prev])
+   292→        toast({ title: 'Provider added' })
+   293→      }
+   294→      setShowConfigDialog(false)
+   295→    } catch (err) {
+   296→      toast({
+   297→        title: 'Failed to save provider',
+   298→        description: err instanceof Error ? err.message : 'Unknown error',
+   299→        variant: 'destructive',
+   300→      })
+   301→    }
+   302→  }
+   303→
+   304→  const handleToggleActive = async (config: LlmConfigItem) => {
+   305→    try {
+   306→      const updated = await apiPut<LlmConfigItem>(`/api/ai/llm-config/${config.id}`, {
+   307→        isActive: !config.isActive,
+   308→      })
+   309→      setLlmConfigs((prev) => prev.map((c) => (c.id === config.id ? { ...c, ...updated } : c)))
+   310→      toast({ title: `Provider ${updated.isActive ? 'activated' : 'deactivated'}` })
+   311→    } catch (err) {
+   312→      toast({
+   313→        title: 'Failed to toggle provider',
+   314→        description: err instanceof Error ? err.message : 'Unknown error',
+   315→        variant: 'destructive',
+   316→      })
+   317→    }
+   318→  }
+   319→
+   320→  const handleDeleteConfig = async (config: LlmConfigItem) => {
+   321→    try {
+   322→      await apiDelete(`/api/ai/llm-config/${config.id}`)
+   323→      setLlmConfigs((prev) => prev.filter((c) => c.id !== config.id))
+   324→      toast({ title: 'Provider deleted', variant: 'destructive' })
+   325→    } catch (err) {
+   326→      toast({
+   327→        title: 'Failed to delete provider',
+   328→        description: err instanceof Error ? err.message : 'Unknown error',
+   329→        variant: 'destructive',
+   330→      })
+   331→    }
+   332→  }
+   333→
+   334→  const handleTestConnection = async (config: LlmConfigItem) => {
+   335→    toast({ title: `Testing connection to ${config.name}...` })
+   336→    try {
+   337→      const result = await apiPost<{ status?: string; response?: string; error?: string }>('/api/ai/chat', {
+   338→        configId: config.id,
+   339→        messages: [{ role: 'user', content: 'Reply with just "OK" if you receive this.' }],
+   340→      })
+   341→      if (result.error) {
+   342→        toast({ title: 'Connection failed', description: result.error, variant: 'destructive' })
+   343→      } else {
+   344→        toast({
+   345→          title: 'Connection successful',
+   346→          description: `Response: ${result.response?.slice(0, 100) ?? 'OK'}`,
+   347→        })
+   348→      }
+   349→    } catch (err) {
+   350→      toast({
+   351→        title: 'Connection test failed',
+   352→        description: err instanceof Error ? err.message : 'Unknown error',
+   353→        variant: 'destructive',
+   354→      })
+   355→    }
+   356→  }
+   357→
+   358→  const handleChat = async () => {
+   359→    if (!chatInput.trim() || !chatTable) {
+   360→      toast({ title: 'Select a table and enter a query', variant: 'destructive' })
+   361→      return
+   362→    }
+   363→    const userMsg: ChatMessage = { role: 'user', content: chatInput, timestamp: new Date() }
+   364→    const pendingMsg: ChatMessage = { role: 'assistant', content: '', status: 'pending', timestamp: new Date() }
+   365→    setChatMessages((prev) => [...prev, userMsg, pendingMsg])
+   366→    setChatSending(true)
+   367→    const query = chatInput
+   368→    setChatInput('')
+   369→    try {
+   370→      const result = await apiPost<RagResponse>('/api/ai/rag', {
+   371→        table: chatTable,
+   372→        query,
+   373→        model: chatModel || undefined,
+   374→        prompt: 'You are a helpful assistant answering questions about the user\'s data.',
+   375→      })
+   376→      const usedTokens = result.response ? Math.ceil(chatInput.length / 4) + Math.ceil(result.response.length / 4) : 0
+   377→      setSessionTokens((prev) => prev + usedTokens)
+   378→      setChatMessages((prev) =>
+   379→        prev.map((m, i) =>
+   380→          i === prev.length - 1
+   381→            ? {
+   382→                role: 'assistant',
+   383→                content: result.response ?? result.error ?? 'No response received.',
+   384→                status: result.error ? 'failed' : 'completed',
+   385→                meta: { sources: Array.isArray(result.results) ? result.results.length : 0, tokens: usedTokens },
+   386→                timestamp: new Date(),
+   387→              }
+   388→            : m,
+   389→        ),
+   390→      )
+   391→    } catch (err) {
+   392→      setChatMessages((prev) =>
+   393→        prev.map((m, i) =>
+   394→          i === prev.length - 1
+   395→            ? {
+   396→                role: 'assistant',
+   397→                content: `Failed to get response: ${err instanceof Error ? err.message : 'Unknown error'}`,
+   398→                status: 'failed',
+   399→                timestamp: new Date(),
+   400→              }
+   401→            : m,
+   402→        ),
+   403→      )
+   404→    } finally {
+   405→      setChatSending(false)
+   406→    }
+   407→  }
+   408→
+   409→  const handleSearch = async () => {
+   410→    if (!searchQuery.trim()) {
+   411→      toast({ title: 'Enter a search query', variant: 'destructive' })
+   412→      return
+   413→    }
+   414→    setSearchLoading(true)
+   415→    setSearchResults([])
+   416→    try {
+   417→      const result = await apiPost<{ query: string; totalCandidates: number; results: SearchResult[] }>(
+   418→        '/api/ai/search',
+   419→        {
+   420→          query: searchQuery,
+   421→          tableId: searchTable || undefined,
+   422→          topK: Number(searchLimit) || 10,
+   423→          threshold: 0.3,
+   424→        },
+   425→      )
+   426→      setSearchResults(result.results ?? [])
+   427→      toast({
+   428→        title: 'Search complete',
+   429→        description: `${result.results?.length ?? 0} results from ${result.totalCandidates ?? 0} candidates.`,
+   430→      })
+   431→    } catch (err) {
+   432→      toast({
+   433→        title: 'Search failed',
+   434→        description: err instanceof Error ? err.message : 'Unknown error',
+   435→        variant: 'destructive',
+   436→      })
+   437→    } finally {
+   438→      setSearchLoading(false)
+   439→    }
+   440→  }
+   441→
+   442→  const handleEmbed = async () => {
+   443→    if (!embedText.trim() || !embedTable) {
+   444→      toast({ title: 'Table and text required', variant: 'destructive' })
+   445→      return
+   446→    }
+   447→    setEmbedding(true)
+   448→    try {
+   449→      await apiPost('/api/ai/embed', {
+   450→        text: embedText,
+   451→        table: embedTable,
+   452→        rowId: embedRowId || undefined,
+   453→      })
+   454→      toast({ title: 'Embedding queued', description: 'Embedding generation has been started.' })
+   455→      setEmbedText('')
+   456→      setEmbedRowId('')
+   457→    } catch (err) {
+   458→      toast({
+   459→        title: 'Embed failed',
+   460→        description: err instanceof Error ? err.message : 'Unknown error',
+   461→        variant: 'destructive',
+   462→      })
+   463→    } finally {
+   464→      setEmbedding(false)
+   465→    }
+   466→  }
+   467→
+   468→  if (loading) {
+   469→    return (
+   470→      <div className="space-y-6">
+   471→        <Skeleton className="h-8 w-32" />
+   472→        <div className="grid gap-4 md:grid-cols-2">
+   473→          {Array.from({ length: 4 }).map((_, i) => (
+   474→            <Card key={i}>
+   475→              <CardContent className="p-4">
+   476→                <Skeleton className="h-24 w-full" />
+   477→              </CardContent>
+   478→            </Card>
+   479→          ))}
+   480→        </div>
+   481→      </div>
+   482→    )
+   483→  }
+   484→
+   485→  // Cost breakdown chart data
+   486→  const costByProvider = llmConfigs
+   487→    .map((c) => {
+   488→      const calls = llmCalls.filter((cl) => cl.configId === c.id)
+   489→      const totalCost = calls.reduce((s, cl) => s + (cl.cost ?? 0), 0)
+   490→      const totalTokens = calls.reduce((s, cl) => s + (cl.totalTokens ?? 0), 0)
+   491→      return {
+   492→        name: c.name,
+   493→        provider: c.provider,
+   494→        cost: Number(totalCost.toFixed(4)),
+   495→        tokens: totalTokens,
+   496→        calls: calls.length,
+   497→      }
+   498→    })
+   499→    .filter((d) => d.calls > 0)
+   500→
+   501→  const totalCalls = llmCalls.length
+   502→  const totalTokens = llmCalls.reduce((s, c) => s + (c.totalTokens ?? 0), 0)
+   503→  const totalCost = llmCalls.reduce((s, c) => s + (c.cost ?? 0), 0)
+   504→
+   505→  return (
+   506→    <motion.div
+   507→      initial={{ opacity: 0, y: 8 }}
+   508→      animate={{ opacity: 1, y: 0 }}
+   509→      transition={{ duration: 0.2 }}
+   510→      className="space-y-6"
+   511→    >
+   512→      <div className="flex items-center justify-between flex-wrap gap-2">
+   513→        <div>
+   514→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   515→            AI
+   516→          </h1>
+   517→          <p className="text-muted-foreground">LLM providers, embeddings, semantic search, and RAG</p>
+   518→        </div>
+   519→        <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+   520→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+   521→        </Button>
+   522→      </div>
+   523→
+   524→      <Tabs defaultValue="providers" className="space-y-4">
+   525→        <TabsList>
+   526→          <TabsTrigger value="providers" className="gap-1.5">
+   527→            <Brain className="h-3.5 w-3.5" /> Providers
+   528→          </TabsTrigger>
+   529→          <TabsTrigger value="embeddings" className="gap-1.5">
+   530→            <Sparkles className="h-3.5 w-3.5" /> Embeddings
+   531→          </TabsTrigger>
+   532→          <TabsTrigger value="search" className="gap-1.5">
+   533→            <Search className="h-3.5 w-3.5" /> Search
+   534→          </TabsTrigger>
+   535→          <TabsTrigger value="rag" className="gap-1.5">
+   536→            <MessageSquare className="h-3.5 w-3.5" /> RAG
+   537→          </TabsTrigger>
+   538→          <TabsTrigger value="history" className="gap-1.5">
+   539→            <Clock className="h-3.5 w-3.5" /> History
+   540→          </TabsTrigger>
+   541→        </TabsList>
+   542→
+   543→        {/* Providers Tab */}
+   544→        <TabsContent value="providers" className="space-y-4">
+   545→          <div className="grid gap-4 md:grid-cols-4">
+   546→            <Card>
+   547→              <CardContent className="pt-4">
+   548→                <div className="flex items-center justify-between">
+   549→                  <div>
+   550→                    <div className="text-sm text-muted-foreground">Active Providers</div>
+   551→                    <div className="text-2xl font-bold">
+   552→                      {llmConfigs.filter((c) => c.isActive).length}
+   553→                    </div>
+   554→                  </div>
+   555→                  <div className="rounded-md bg-emerald-500/10 p-2">
+   556→                    <Brain className="h-5 w-5 text-emerald-600" />
+   557→                  </div>
+   558→                </div>
+   559→              </CardContent>
+   560→            </Card>
+   561→            <Card>
+   562→              <CardContent className="pt-4">
+   563→                <div className="flex items-center justify-between">
+   564→                  <div>
+   565→                    <div className="text-sm text-muted-foreground">Total Calls</div>
+   566→                    <div className="text-2xl font-bold">{totalCalls.toLocaleString()}</div>
+   567→                  </div>
+   568→                  <div className="rounded-md bg-teal-500/10 p-2">
+   569→                    <Zap className="h-5 w-5 text-teal-600" />
+   570→                  </div>
+   571→                </div>
+   572→              </CardContent>
+   573→            </Card>
+   574→            <Card>
+   575→              <CardContent className="pt-4">
+   576→                <div className="flex items-center justify-between">
+   577→                  <div>
+   578→                    <div className="text-sm text-muted-foreground">Total Tokens</div>
+   579→                    <div className="text-2xl font-bold">{(totalTokens / 1000).toFixed(1)}K</div>
+   580→                  </div>
+   581→                  <div className="rounded-md bg-amber-500/10 p-2">
+   582→                    <Cpu className="h-5 w-5 text-amber-600" />
+   583→                  </div>
+   584→                </div>
+   585→              </CardContent>
+   586→            </Card>
+   587→            <Card>
+   588→              <CardContent className="pt-4">
+   589→                <div className="flex items-center justify-between">
+   590→                  <div>
+   591→                    <div className="text-sm text-muted-foreground">Total Cost</div>
+   592→                    <div className="text-2xl font-bold">${totalCost.toFixed(4)}</div>
+   593→                  </div>
+   594→                  <div className="rounded-md bg-emerald-500/10 p-2">
+   595→                    <DollarSign className="h-5 w-5 text-emerald-600" />
+   596→                  </div>
+   597→                </div>
+   598→              </CardContent>
+   599→            </Card>
+   600→          </div>
+   601→
+   602→          <div className="flex items-center justify-between">
+   603→            <p className="text-sm text-muted-foreground">Configured LLM providers</p>
+   604→            <Button onClick={() => openEditDialog(null)}>
+   605→              <Plus className="mr-1 h-4 w-4" /> Add Provider
+   606→            </Button>
+   607→          </div>
+   608→
+   609→          <div className="grid gap-4 md:grid-cols-2">
+   610→            {llmConfigs.length === 0 ? (
+   611→              <Card className="md:col-span-2">
+   612→                <CardContent className="py-16 flex flex-col items-center justify-center text-muted-foreground">
+   613→                  <Brain className="h-14 w-14 mb-3 opacity-30" />
+   614→                  <p className="text-base font-medium">No LLM providers configured</p>
+   615→                  <p className="text-sm mt-1">Add an OpenAI, Anthropic, Ollama, or custom provider to get started.</p>
+   616→                  <Button className="mt-4" onClick={() => openEditDialog(null)}>
+   617→                    <Plus className="mr-1 h-4 w-4" /> Add Provider
+   618→                  </Button>
+   619→                </CardContent>
+   620→              </Card>
+   621→            ) : (
+   622→              llmConfigs.map((config) => {
+   623→                const ProviderIcon = providerIcons[config.provider] ?? Globe
+   624→                const callCount = llmCalls.filter((c) => c.configId === config.id).length
+   625→                const tokenCount = llmCalls
+   626→                  .filter((c) => c.configId === config.id)
+   627→                  .reduce((s, c) => s + (c.totalTokens ?? 0), 0)
+   628→                return (
+   629→                  <Card
+   630→                    key={config.id}
+   631→                    className="hover:shadow-md hover:border-emerald-200 transition-all"
+   632→                  >
+   633→                    <CardContent className="p-4">
+   634→                      <div className="flex items-start justify-between mb-3">
+   635→                        <div className="flex items-center gap-2">
+   636→                          <div
+   637→                            className="rounded-md p-2"
+   638→                            style={{ backgroundColor: `${providerColors[config.provider] ?? '#10b981'}20` }}
+   639→                          >
+   640→                            <ProviderIcon
+   641→                              className="h-4 w-4"
+   642→                              style={{ color: providerColors[config.provider] ?? '#10b981' }}
+   643→                            />
+   644→                          </div>
+   645→                          <div>
+   646→                            <div className="font-semibold">{config.name}</div>
+   647→                            <div className="text-xs text-muted-foreground font-mono">{config.modelName}</div>
+   648→                          </div>
+   649→                        </div>
+   650→                        <div className="flex items-center gap-2">
+   651→                          <Switch
+   652→                            checked={config.isActive}
+   653→                            onCheckedChange={() => void handleToggleActive(config)}
+   654→                          />
+   655→                          <DropdownMenu>
+   656→                            <DropdownMenuTrigger asChild>
+   657→                              <Button variant="ghost" size="icon" className="h-7 w-7">
+   658→                                <MoreHorizontal className="h-3.5 w-3.5" />
+   659→                              </Button>
+   660→                            </DropdownMenuTrigger>
+   661→                            <DropdownMenuContent align="end">
+   662→                              <DropdownMenuItem onClick={() => void handleTestConnection(config)}>
+   663→                                <Zap className="mr-2 h-3.5 w-3.5" /> Test Connection
+   664→                              </DropdownMenuItem>
+   665→                              <DropdownMenuItem onClick={() => openEditDialog(config)}>
+   666→                                <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+   667→                              </DropdownMenuItem>
+   668→                              <DropdownMenuSeparator />
+   669→                              <DropdownMenuItem
+   670→                                className="text-destructive"
+   671→                                onClick={() => void handleDeleteConfig(config)}
+   672→                              >
+   673→                                <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+   674→                              </DropdownMenuItem>
+   675→                            </DropdownMenuContent>
+   676→                          </DropdownMenu>
+   677→                        </div>
+   678→                      </div>
+   679→                      <div className="grid grid-cols-3 gap-2 text-center mb-3">
+   680→                        <div className="rounded-md bg-muted/50 p-2">
+   681→                          <div className="text-xs text-muted-foreground">Calls</div>
+   682→                          <div className="text-sm font-bold">{callCount.toLocaleString()}</div>
+   683→                        </div>
+   684→                        <div className="rounded-md bg-muted/50 p-2">
+   685→                          <div className="text-xs text-muted-foreground">Tokens</div>
+   686→                          <div className="text-sm font-bold">{(tokenCount / 1000).toFixed(1)}K</div>
+   687→                        </div>
+   688→                        <div className="rounded-md bg-muted/50 p-2">
+   689→                          <div className="text-xs text-muted-foreground">Temp</div>
+   690→                          <div className="text-sm font-bold">{config.temperature}</div>
+   691→                        </div>
+   692→                      </div>
+   693→                      <div className="flex items-center justify-between text-xs">
+   694→                        <Badge variant={config.isActive ? 'default' : 'secondary'} className="text-xs">
+   695→                          {config.isActive ? 'Active' : 'Inactive'}
+   696→                        </Badge>
+   697→                        {config.baseUrl && (
+   698→                          <span className="font-mono text-muted-foreground truncate ml-2 max-w-[200px]">
+   699→                            {config.baseUrl}
+   700→                          </span>
+   701→                        )}
+   702→                      </div>
+   703→                    </CardContent>
+   704→                  </Card>
+   705→                )
+   706→              })
+   707→            )}
+   708→          </div>
+   709→
+   710→          {/* Cost Breakdown Chart */}
+   711→          {costByProvider.length > 0 && (
+   712→            <Card>
+   713→              <CardHeader>
+   714→                <CardTitle className="text-base">Cost Breakdown by Provider</CardTitle>
+   715→                <CardDescription>Distribution of LLM spending across providers</CardDescription>
+   716→              </CardHeader>
+   717→              <CardContent>
+   718→                <div className="grid gap-4 md:grid-cols-2 items-center">
+   719→                  <div className="h-[260px]">
+   720→                    <ResponsiveContainer width="100%" height="100%">
+   721→                      <PieChart>
+   722→                        <Pie
+   723→                          data={costByProvider}
+   724→                          dataKey="cost"
+   725→                          nameKey="name"
+   726→                          cx="50%"
+   727→                          cy="50%"
+   728→                          outerRadius={90}
+   729→                          label={(entry) => `$${Number(entry.cost).toFixed(4)}`}
+   730→                        >
+   731→                          {costByProvider.map((_, i) => (
+   732→                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+   733→                          ))}
+   734→                        </Pie>
+   735→                        <RTooltip
+   736→                          contentStyle={{
+   737→                            backgroundColor: 'hsl(var(--popover))',
+   738→                            border: '1px solid hsl(var(--border))',
+   739→                            borderRadius: '8px',
+   740→                            fontSize: '12px',
+   741→                          }}
+   742→                        />
+   743→                        <Legend wrapperStyle={{ fontSize: '11px' }} />
+   744→                      </PieChart>
+   745→                    </ResponsiveContainer>
+   746→                  </div>
+   747→                  <div className="h-[260px]">
+   748→                    <ResponsiveContainer width="100%" height="100%">
+   749→                      <BarChart data={costByProvider}>
+   750→                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+   751→                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+   752→                        <YAxis tick={{ fontSize: 11 }} />
+   753→                        <RTooltip
+   754→                          contentStyle={{
+   755→                            backgroundColor: 'hsl(var(--popover))',
+   756→                            border: '1px solid hsl(var(--border))',
+   757→                            borderRadius: '8px',
+   758→                            fontSize: '12px',
+   759→                          }}
+   760→                        />
+   761→                        <Bar dataKey="tokens" fill="#14b8a6" radius={[4, 4, 0, 0]} name="Tokens" />
+   762→                      </BarChart>
+   763→                    </ResponsiveContainer>
+   764→                  </div>
+   765→                </div>
+   766→              </CardContent>
+   767→            </Card>
+   768→          )}
+   769→        </TabsContent>
+   770→
+   771→        {/* Embeddings Tab */}
+   772→        <TabsContent value="embeddings" className="space-y-4">
+   773→          <Card>
+   774→            <CardHeader>
+   775→              <CardTitle className="text-base">Generate Embeddings</CardTitle>
+   776→              <CardDescription>Embed text into a table for semantic search</CardDescription>
+   777→            </CardHeader>
+   778→            <CardContent className="space-y-4">
+   779→              <div className="grid gap-3 md:grid-cols-2">
+   780→                <div className="space-y-2">
+   781→                  <Label>Target Table</Label>
+   782→                  <Select value={embedTable} onValueChange={setEmbedTable}>
+   783→                    <SelectTrigger>
+   784→                      <SelectValue placeholder="Select table" />
+   785→                    </SelectTrigger>
+   786→                    <SelectContent>
+   787→                      {tables.map((t) => (
+   788→                        <SelectItem key={t.id} value={t.id}>
+   789→                          {t.displayName || t.name}
+   790→                        </SelectItem>
+   791→                      ))}
+   792→                    </SelectContent>
+   793→                  </Select>
+   794→                </div>
+   795→                <div className="space-y-2">
+   796→                  <Label>Row ID (optional)</Label>
+   797→                  <Input
+   798→                    value={embedRowId}
+   799→                    onChange={(e) => setEmbedRowId(e.target.value)}
+   800→                    placeholder="cuid..."
+   801→                  />
+   802→                </div>
+   803→              </div>
+   804→              <div className="space-y-2">
+   805→                <Label>Text to embed</Label>
+   806→                <Textarea
+   807→                  value={embedText}
+   808→                  onChange={(e) => setEmbedText(e.target.value)}
+   809→                  rows={5}
+   810→                  placeholder="Paste or type the text you want to embed..."
+   811→                />
+   812→              </div>
+   813→              <Button onClick={() => void handleEmbed()} disabled={embedding}>
+   814→                {embedding ? (
+   815→                  <>
+   816→                    <Loader2 className="mr-1 h-4 w-4 animate-spin" /> Embedding...
+   817→                  </>
+   818→                ) : (
+   819→                  <>
+   820→                    <Wand2 className="mr-1 h-4 w-4" /> Generate Embedding
+   821→                  </>
+   822→                )}
+   823→              </Button>
+   824→            </CardContent>
+   825→          </Card>
+   826→        </TabsContent>
+   827→
+   828→        {/* Semantic Search Tab */}
+   829→        <TabsContent value="search" className="space-y-4">
+   830→          <Card>
+   831→            <CardHeader>
+   832→              <CardTitle className="text-base">Semantic Search</CardTitle>
+   833→              <CardDescription>Search across your embedded data using natural language</CardDescription>
+   834→            </CardHeader>
+   835→            <CardContent className="space-y-4">
+   836→              <div className="flex gap-2 flex-wrap">
+   837→                <div className="relative flex-1 min-w-[200px]">
+   838→                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+   839→                  <Input
+   840→                    value={searchQuery}
+   841→                    onChange={(e) => setSearchQuery(e.target.value)}
+   842→                    placeholder="Search across your data..."
+   843→                    className="pl-9 h-10"
+   844→                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+   845→                  />
+   846→                </div>
+   847→                <Select value={searchTable} onValueChange={setSearchTable}>
+   848→                  <SelectTrigger className="w-44">
+   849→                    <SelectValue placeholder="All tables" />
+   850→                  </SelectTrigger>
+   851→                  <SelectContent>
+   852→                    <SelectItem value="">All Tables</SelectItem>
+   853→                    {tables.map((t) => (
+   854→                      <SelectItem key={t.id} value={t.id}>
+   855→                        {t.displayName || t.name}
+   856→                      </SelectItem>
+   857→                    ))}
+   858→                  </SelectContent>
+   859→                </Select>
+   860→                <Select value={searchLimit} onValueChange={setSearchLimit}>
+   861→                  <SelectTrigger className="w-28">
+   862→                    <SelectValue />
+   863→                  </SelectTrigger>
+   864→                  <SelectContent>
+   865→                    <SelectItem value="5">Top 5</SelectItem>
+   866→                    <SelectItem value="10">Top 10</SelectItem>
+   867→                    <SelectItem value="20">Top 20</SelectItem>
+   868→                    <SelectItem value="50">Top 50</SelectItem>
+   869→                  </SelectContent>
+   870→                </Select>
+   871→                <Button onClick={() => void handleSearch()} disabled={searchLoading}>
+   872→                  {searchLoading ? (
+   873→                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+   874→                  ) : (
+   875→                    <Search className="mr-1 h-4 w-4" />
+   876→                  )}
+   877→                  Search
+   878→                </Button>
+   879→              </div>
+   880→
+   881→              {searchResults.length === 0 && !searchLoading ? (
+   882→                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+   883→                  <Search className="h-12 w-12 mb-3 opacity-30" />
+   884→                  <p className="text-sm">Enter a query to search your embedded data</p>
+   885→                  <p className="text-xs mt-1">Results will appear here with similarity scores</p>
+   886→                </div>
+   887→              ) : (
+   888→                <div className="space-y-2">
+   889→                  {searchResults.map((res) => (
+   890→                    <div
+   891→                      key={res.rowId}
+   892→                      className="rounded-lg border p-3 hover:bg-muted/40 transition-colors"
+   893→                    >
+   894→                      <div className="flex items-center justify-between mb-1">
+   895→                        <Badge variant="outline" className="text-xs">
+   896→                          Score: {(res.score * 100).toFixed(1)}%
+   897→                        </Badge>
+   898→                        <span className="text-xs text-muted-foreground font-mono">
+   899→                          {res.model}
+   900→                        </span>
+   901→                      </div>
+   902→                      {res.textContent && (
+   903→                        <p className="text-sm line-clamp-2 mb-1">{res.textContent}</p>
+   904→                      )}
+   905→                      {res.rowData && (
+   906→                        <pre className="text-xs font-mono text-muted-foreground bg-muted/40 rounded p-2 max-h-32 overflow-auto">
+   907→                          {JSON.stringify(res.rowData, null, 2)}
+   908→                        </pre>
+   909→                      )}
+   910→                    </div>
+   911→                  ))}
+   912→                </div>
+   913→              )}
+   914→            </CardContent>
+   915→          </Card>
+   916→        </TabsContent>
+   917→
+   918→        {/* RAG Tab */}
+   919→        <TabsContent value="rag" className="space-y-4">
+   920→          <div className="grid gap-4 lg:grid-cols-3">
+   921→            <Card className="lg:col-span-2 flex flex-col">
+   922→              <CardHeader>
+   923→                <CardTitle className="text-base flex items-center gap-2">
+   924→                  <MessageSquare className="h-4 w-4 text-emerald-600" />
+   925→                  RAG Chat
+   926→                </CardTitle>
+   927→                <CardDescription>Ask questions about your data</CardDescription>
+   928→              </CardHeader>
+   929→              <CardContent className="flex-1 flex flex-col">
+   930→                <div
+   931→                  ref={chatScrollRef}
+   932→                  className="flex-1 min-h-[300px] max-h-[460px] overflow-y-auto space-y-3 mb-4 pr-2"
+   933→                >
+   934→                  {chatMessages.length === 0 ? (
+   935→                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+   936→                      <MessageSquare className="h-10 w-10 mb-2 opacity-30" />
+   937→                      <p className="text-sm">Start a conversation with your data</p>
+   938→                      <p className="text-xs mt-1">Select a table and ask a question below</p>
+   939→                    </div>
+   940→                  ) : (
+   941→                    chatMessages.map((msg, i) => (
+   942→                      <div
+   943→                        key={i}
+   944→                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+   945→                      >
+   946→                        <div
+   947→                          className={`rounded-lg px-3 py-2 max-w-[80%] text-sm whitespace-pre-wrap ${
+   948→                            msg.role === 'user'
+   949→                              ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white'
+   950→                              : msg.status === 'failed'
+   951→                                ? 'bg-red-500/10 text-red-700 border border-red-200'
+   952→                                : msg.status === 'pending'
+   953→                                  ? 'bg-muted text-muted-foreground'
+   954→                                  : 'bg-muted'
+   955→                          }`}
+   956→                        >
+   957→                          {msg.status === 'pending' ? (
+   958→                            <span className="flex items-center gap-2">
+   959→                              <Loader2 className="h-3 w-3 animate-spin" /> Thinking...
+   960→                            </span>
+   961→                          ) : (
+   962→                            msg.content
+   963→                          )}
+   964→                          {msg.meta?.sources !== undefined && msg.status === 'completed' && (
+   965→                            <div className="text-xs opacity-70 mt-1">
+   966→                              {msg.meta.sources} source(s) retrieved
+   967→                            </div>
+   968→                          )}
+   969→                        </div>
+   970→                      </div>
+   971→                    ))
+   972→                  )}
+   973→                </div>
+   974→                <div className="space-y-2">
+   975→                  <div className="flex gap-2 flex-wrap">
+   976→                    <Select value={chatTable} onValueChange={setChatTable}>
+   977→                      <SelectTrigger className="w-full sm:w-44">
+   978→                        <SelectValue placeholder="Select table" />
+   979→                      </SelectTrigger>
+   980→                      <SelectContent>
+   981→                        {tables.map((t) => (
+   982→                          <SelectItem key={t.id} value={t.id}>
+   983→                            {t.displayName || t.name}
+   984→                          </SelectItem>
+   985→                        ))}
+   986→                      </SelectContent>
+   987→                    </Select>
+   988→                    <Select value={chatModel} onValueChange={setChatModel}>
+   989→                      <SelectTrigger className="w-full sm:w-44">
+   990→                        <SelectValue placeholder="Default model" />
+   991→                      </SelectTrigger>
+   992→                      <SelectContent>
+   993→                        <SelectItem value="">Default</SelectItem>
+   994→                        {llmConfigs
+   995→                          .filter((c) => c.isActive)
+   996→                          .map((c) => (
+   997→                            <SelectItem key={c.id} value={c.id}>
+   998→                              {c.name}
+   999→                            </SelectItem>
+  1000→                          ))}
+  1001→                      </SelectContent>
+  1002→                    </Select>
+  1003→                  </div>
+  1004→                  <div className="flex gap-2">
+  1005→                    <Input
+  1006→                      value={chatInput}
+  1007→                      onChange={(e) => setChatInput(e.target.value)}
+  1008→                      placeholder="Ask about your data..."
+  1009→                      className="flex-1"
+  1010→                      onKeyDown={(e) => {
+  1011→                        if (e.key === 'Enter' && !chatSending) void handleChat()
+  1012→                      }}
+  1013→                      disabled={chatSending}
+  1014→                    />
+  1015→                    <Button onClick={() => void handleChat()} disabled={chatSending || !chatTable}>
+  1016→                      <Send className="h-4 w-4" />
+  1017→                    </Button>
+  1018→                  </div>
+  1019→                </div>
+  1020→              </CardContent>
+  1021→            </Card>
+  1022→
+  1023→            <Card>
+  1024→              <CardHeader>
+  1025→                <CardTitle className="text-base">How RAG Works</CardTitle>
+  1026→                <CardDescription>Retrieval-Augmented Generation pipeline</CardDescription>
+  1027→              </CardHeader>
+  1028→              <CardContent className="space-y-3 text-sm">
+  1029→                <div className="flex gap-3">
+  1030→                  <div className="rounded-md bg-emerald-500/10 p-2 h-fit">
+  1031→                    <Search className="h-4 w-4 text-emerald-600" />
+  1032→                  </div>
+  1033→                  <div>
+  1034→                    <div className="font-medium">1. Retrieve</div>
+  1035→                    <p className="text-xs text-muted-foreground">
+  1036→                      Your query is embedded and matched against table embeddings using cosine similarity.
+  1037→                    </p>
+  1038→                  </div>
+  1039→                </div>
+  1040→                <div className="flex gap-3">
+  1041→                  <div className="rounded-md bg-teal-500/10 p-2 h-fit">
+  1042→                    <Sparkles className="h-4 w-4 text-teal-600" />
+  1043→                  </div>
+  1044→                  <div>
+  1045→                    <div className="font-medium">2. Augment</div>
+  1046→                    <p className="text-xs text-muted-foreground">
+  1047→                      Top matching rows are added to the LLM prompt as context.
+  1048→                    </p>
+  1049→                  </div>
+  1050→                </div>
+  1051→                <div className="flex gap-3">
+  1052→                  <div className="rounded-md bg-emerald-500/10 p-2 h-fit">
+  1053→                    <Brain className="h-4 w-4 text-emerald-600" />
+  1054→                  </div>
+  1055→                  <div>
+  1056→                    <div className="font-medium">3. Generate</div>
+  1057→                    <p className="text-xs text-muted-foreground">
+  1058→                      The configured LLM generates a grounded response using your data.
+  1059→                    </p>
+  1060→                  </div>
+  1061→                </div>
+  1062→                <div className="rounded-md border border-emerald-200 bg-emerald-500/5 p-3">
+  1063→                  <p className="text-xs text-emerald-700">
+  1064→                    <strong>Tip:</strong> Make sure your target table has embeddings generated first.
+  1065→                  </p>
+  1066→                </div>
+  1067→              </CardContent>
+  1068→            </Card>
+  1069→          </div>
+  1070→        </TabsContent>
+  1071→
+  1072→        {/* History Tab */}
+  1073→        <TabsContent value="history" className="space-y-4">
+  1074→          <Card>
+  1075→            <CardHeader>
+  1076→              <CardTitle className="text-base">LLM Call History</CardTitle>
+  1077→              <CardDescription>Recent LLM API calls ({llmCalls.length} total)</CardDescription>
+  1078→            </CardHeader>
+  1079→            <CardContent className="p-0">
+  1080→              {llmCalls.length === 0 ? (
+  1081→                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+  1082→                  <Clock className="h-10 w-10 mb-2 opacity-30" />
+  1083→                  <p className="text-sm">No LLM calls recorded yet</p>
+  1084→                  <p className="text-xs mt-1">Calls will appear here once you start using the RAG chat or generate embeddings.</p>
+  1085→                </div>
+  1086→              ) : (
+  1087→                <div className="rounded-md border max-h-[600px] overflow-y-auto">
+  1088→                  <Table>
+  1089→                    <TableHeader className="sticky top-0 bg-background">
+  1090→                      <TableRow>
+  1091→                        <TableHead>Status</TableHead>
+  1092→                        <TableHead>Provider</TableHead>
+  1093→                        <TableHead>Model</TableHead>
+  1094→                        <TableHead>Tokens</TableHead>
+  1095→                        <TableHead>Latency</TableHead>
+  1096→                        <TableHead>Cost</TableHead>
+  1097→                        <TableHead>When</TableHead>
+  1098→                      </TableRow>
+  1099→                    </TableHeader>
+  1100→                    <TableBody>
+  1101→                      {llmCalls.slice(0, 100).map((call) => (
+  1102→                        <TableRow key={call.id} className="hover:bg-muted/40">
+  1103→                          <TableCell>
+  1104→                            {call.status === 'success' ? (
+  1105→                              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+  1106→                            ) : (
+  1107→                              <XCircle className="h-4 w-4 text-red-500" />
+  1108→                            )}
+  1109→                          </TableCell>
+  1110→                          <TableCell>
+  1111→                            <Badge variant="outline" className="text-xs capitalize">
+  1112→                              {call.config?.provider ?? '—'}
+  1113→                            </Badge>
+  1114→                          </TableCell>
+  1115→                          <TableCell className="font-mono text-xs">{call.model}</TableCell>
+  1116→                          <TableCell>{call.totalTokens?.toLocaleString() ?? '—'}</TableCell>
+  1117→                          <TableCell className="font-mono text-xs">
+  1118→                            {call.latencyMs ? `${call.latencyMs}ms` : '—'}
+  1119→                          </TableCell>
+  1120→                          <TableCell className="font-mono text-xs">
+  1121→                            {call.cost != null ? `$${call.cost.toFixed(6)}` : '—'}
+  1122→                          </TableCell>
+  1123→                          <TableCell className="text-xs text-muted-foreground">
+  1124→                            {new Date(call.createdAt).toLocaleString()}
+  1125→                          </TableCell>
+  1126→                        </TableRow>
+  1127→                      ))}
+  1128→                    </TableBody>
+  1129→                  </Table>
+  1130→                </div>
+  1131→              )}
+  1132→            </CardContent>
+  1133→          </Card>
+  1134→        </TabsContent>
+  1135→      </Tabs>
+  1136→
+  1137→      {/* Provider Edit Dialog */}
+  1138→      <Dialog open={showConfigDialog} onOpenChange={setShowConfigDialog}>
+  1139→        <DialogContent>
+  1140→          <DialogHeader>
+  1141→            <DialogTitle>{editTarget ? 'Edit Provider' : 'Configure LLM Provider'}</DialogTitle>
+  1142→            <DialogDescription>
+  1143→              {editTarget
+  1144→                ? 'Update provider configuration'
+  1145→                : 'Add a new LLM provider configuration'}
+  1146→            </DialogDescription>
+  1147→          </DialogHeader>
+  1148→          <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
+  1149→            <div className="grid gap-3 md:grid-cols-2">
+  1150→              <div className="space-y-2">
+  1151→                <Label>Config Name</Label>
+  1152→                <Input value={cfgName} onChange={(e) => setCfgName(e.target.value)} placeholder="My LLM Config" />
+  1153→              </div>
+  1154→              <div className="space-y-2">
+  1155→                <Label>Provider</Label>
+  1156→                <Select value={cfgProvider} onValueChange={setCfgProvider}>
+  1157→                  <SelectTrigger>
+  1158→                    <SelectValue />
+  1159→                  </SelectTrigger>
+  1160→                  <SelectContent>
+  1161→                    <SelectItem value="openai">OpenAI</SelectItem>
+  1162→                    <SelectItem value="anthropic">Anthropic</SelectItem>
+  1163→                    <SelectItem value="ollama">Ollama (Local)</SelectItem>
+  1164→                    <SelectItem value="custom">Custom Endpoint</SelectItem>
+  1165→                  </SelectContent>
+  1166→                </Select>
+  1167→              </div>
+  1168→            </div>
+  1169→            <div className="grid gap-3 md:grid-cols-2">
+  1170→              <div className="space-y-2">
+  1171→                <Label>Model Name</Label>
+  1172→                <Input value={cfgModel} onChange={(e) => setCfgModel(e.target.value)} placeholder="gpt-4o" />
+  1173→              </div>
+  1174→              <div className="space-y-2">
+  1175→                <Label>Max Tokens</Label>
+  1176→                <Input
+  1177→                  type="number"
+  1178→                  value={cfgMaxTokens}
+  1179→                  onChange={(e) => setCfgMaxTokens(e.target.value)}
+  1180→                />
+  1181→              </div>
+  1182→            </div>
+  1183→            <div className="grid gap-3 md:grid-cols-3">
+  1184→              <div className="space-y-2">
+  1185→                <Label>Temperature</Label>
+  1186→                <Input
+  1187→                  type="number"
+  1188→                  step="0.1"
+  1189→                  value={cfgTemperature}
+  1190→                  onChange={(e) => setCfgTemperature(e.target.value)}
+  1191→                />
+  1192→              </div>
+  1193→              <div className="space-y-2">
+  1194→                <Label>Cost / 1K in ($)</Label>
+  1195→                <Input
+  1196→                  type="number"
+  1197→                  step="0.001"
+  1198→                  value={cfgCostInput}
+  1199→                  onChange={(e) => setCfgCostInput(e.target.value)}
+  1200→                  placeholder="0.005"
+  1201→                />
+  1202→              </div>
+  1203→              <div className="space-y-2">
+  1204→                <Label>Cost / 1K out ($)</Label>
+  1205→                <Input
+  1206→                  type="number"
+  1207→                  step="0.001"
+  1208→                  value={cfgCostOutput}
+  1209→                  onChange={(e) => setCfgCostOutput(e.target.value)}
+  1210→                  placeholder="0.015"
+  1211→                />
+  1212→              </div>
+  1213→            </div>
+  1214→            {(cfgProvider === 'ollama' || cfgProvider === 'custom') && (
+  1215→              <div className="space-y-2">
+  1216→                <Label>Base URL</Label>
+  1217→                <Input value={cfgBaseUrl} onChange={(e) => setCfgBaseUrl(e.target.value)} placeholder="http://localhost:11434" />
+  1218→              </div>
+  1219→            )}
+  1220→            <div className="space-y-2">
+  1221→              <Label>API Key {editTarget && '(leave blank to keep current)'}</Label>
+  1222→              <Input
+  1223→                type="password"
+  1224→                value={cfgApiKey}
+  1225→                onChange={(e) => setCfgApiKey(e.target.value)}
+  1226→                placeholder="sk-..."
+  1227→              />
+  1228→            </div>
+  1229→          </div>
+  1230→          <DialogFooter>
+  1231→            <Button variant="outline" onClick={() => setShowConfigDialog(false)}>
+  1232→              Cancel
+  1233→            </Button>
+  1234→            <Button onClick={handleSaveConfig}>{editTarget ? 'Save Changes' : 'Add Provider'}</Button>
+  1235→          </DialogFooter>
+  1236→        </DialogContent>
+  1237→      </Dialog>
+  1238→    </motion.div>
+  1239→  )
+  1240→}
+  1241→

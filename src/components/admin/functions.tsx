@@ -22,6 +22,7 @@ import {
   Copy,
   RefreshCw,
   Loader2,
+  Globe,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -99,15 +100,24 @@ interface SbFunctionItem {
 }
 
 const triggerIcons = {
-  http: Zap,
+  http: Globe,
   schedule: Clock,
-  event: Radio,
+  event: Zap,
+  manual: Play,
 }
 
 const triggerBadgeColors: Record<string, string> = {
-  http: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  http: 'bg-teal-500/10 text-teal-700 border-teal-200',
   schedule: 'bg-amber-500/10 text-amber-700 border-amber-200',
   event: 'bg-purple-500/10 text-purple-700 border-purple-200',
+  manual: 'bg-slate-500/10 text-slate-700 border-slate-200',
+}
+
+const runtimeBadgeColors: Record<string, string> = {
+  javascript: 'bg-amber-500/10 text-amber-700 border-amber-200',
+  typescript: 'bg-blue-600/10 text-blue-600 border-blue-200',
+  python: 'bg-emerald-500/10 text-emerald-700 border-emerald-200',
+  wasm: 'bg-slate-500/10 text-slate-700 border-slate-200',
 }
 
 const statusIcons = {
@@ -141,6 +151,52 @@ const defaultCode = `export default async function handler(ctx) {
   return { ok: true, received: Object.keys(input || {}).length };
 }
 `
+
+function highlightCode(code: string): React.ReactNode[] {
+  const lines = code.split('\n')
+  return lines.map((line, lineIdx) => {
+    const parts: React.ReactNode[] = []
+    let remaining = line
+    let keyIdx = 0
+    while (remaining.length > 0) {
+      // Comments
+      const commentMatch = remaining.match(/^(\/\/.*$)/)
+      if (commentMatch) {
+        parts.push(<span key={`${lineIdx}-${keyIdx++}`} className="text-slate-500 dark:text-slate-400">{commentMatch[1]}</span>)
+        remaining = remaining.slice(commentMatch[1].length)
+        continue
+      }
+      // Strings (single and double quoted)
+      const stringMatch = remaining.match(/^("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/)
+      if (stringMatch) {
+        parts.push(<span key={`${lineIdx}-${keyIdx++}`} className="text-emerald-400">{stringMatch[1]}</span>)
+        remaining = remaining.slice(stringMatch[1].length)
+        continue
+      }
+      // Keywords
+      const keywordMatch = remaining.match(/^(function|const|let|var|async|await|return|if|else|for|while|class|import|export|from|new|try|catch|throw|typeof|instanceof|switch|case|break|default|yield)\b/)
+      if (keywordMatch) {
+        parts.push(<span key={`${lineIdx}-${keyIdx++}`} className="text-violet-400 font-medium">{keywordMatch[1]}</span>)
+        remaining = remaining.slice(keywordMatch[1].length)
+        continue
+      }
+      // Numbers
+      const numberMatch = remaining.match(/^(\d+\.?\d*)/)
+      if (numberMatch) {
+        parts.push(<span key={`${lineIdx}-${keyIdx++}`} className="text-amber-400">{numberMatch[1]}</span>)
+        remaining = remaining.slice(numberMatch[1].length)
+        continue
+      }
+      // Default: take one character
+      parts.push(<span key={`${lineIdx}-${keyIdx++}`}>{remaining[0]}</span>)
+      remaining = remaining.slice(1)
+    }
+    if (lineIdx < lines.length - 1) {
+      parts.push('\n')
+    }
+    return <span key={`line-${lineIdx}`}>{parts}</span>
+  })
+}
 
 export function FunctionsView() {
   const { toast } = useToast()
@@ -418,8 +474,8 @@ export function FunctionsView() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="rounded-md bg-slate-950 text-emerald-400 p-4 overflow-auto max-h-[400px]">
-              <pre className="text-sm font-mono whitespace-pre-wrap">{selectedFunction.code}</pre>
+            <div className="rounded-md bg-slate-950 text-slate-200 p-4 overflow-auto max-h-[400px]">
+              <pre className="text-sm font-mono whitespace-pre-wrap">{highlightCode(selectedFunction.code)}</pre>
             </div>
           </CardContent>
         </Card>
@@ -515,28 +571,73 @@ export function FunctionsView() {
               </DialogTitle>
               <DialogDescription>
                 {runResult?.result.status === 'success' ? 'Executed successfully' : 'Execution failed'}
-                {runResult?.result.durationMs ? ` in ${runResult.result.durationMs}ms` : ''}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
-              <div className="flex gap-3 text-xs">
-                <Badge variant={runResult?.result.status === 'success' ? 'default' : 'destructive'} className="capitalize">
-                  {runResult?.result.status}
-                </Badge>
-                {runResult?.result.durationMs && (
-                  <Badge variant="outline">Duration: {runResult.result.durationMs}ms</Badge>
-                )}
-                <Badge variant="outline">Run ID: {runResult?.result.runId?.slice(0, 8)}...</Badge>
+              <div className={`rounded-lg border-2 p-4 ${
+                runResult?.result.status === 'success'
+                  ? 'border-emerald-300 bg-emerald-500/5 dark:border-emerald-700 dark:bg-emerald-500/10'
+                  : 'border-red-300 bg-red-500/5 dark:border-red-700 dark:bg-red-500/10'
+              }`}>
+                <div className="flex items-center gap-2 mb-2">
+                  {runResult?.result.status === 'success' ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                  ) : (
+                    <XCircle className="h-5 w-5 text-red-500" />
+                  )}
+                  <span className={`font-semibold capitalize ${runResult?.result.status === 'success' ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}`}>
+                    {runResult?.result.status}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-3 text-xs">
+                  {runResult?.result.durationMs !== undefined && runResult.result.durationMs !== null && (
+                    <div className="rounded-md bg-background/60 px-2.5 py-1.5 border">
+                      <span className="text-muted-foreground">Duration: </span>
+                      <span className="font-mono font-medium">{runResult.result.durationMs}ms</span>
+                    </div>
+                  )}
+                  <div className="rounded-md bg-background/60 px-2.5 py-1.5 border">
+                    <span className="text-muted-foreground">Run ID: </span>
+                    <span className="font-mono font-medium">{runResult?.result.runId?.slice(0, 8)}...</span>
+                  </div>
+                  <div className="rounded-md bg-background/60 px-2.5 py-1.5 border">
+                    <span className="text-muted-foreground">Runtime: </span>
+                    <span className="font-medium capitalize">{runResult?.fn.runtime}</span>
+                  </div>
+                </div>
               </div>
               {runResult?.result.error && (
-                <div className="rounded-md bg-red-500/10 border border-red-200 p-3 text-sm text-red-700">
-                  {runResult.result.error}
+                <div className="rounded-md bg-red-500/10 border border-red-200 p-3 text-sm text-red-700 dark:text-red-400">
+                  <div className="flex items-center gap-1.5 mb-1 font-medium">
+                    <XCircle className="h-3.5 w-3.5" />
+                    Error
+                  </div>
+                  <pre className="whitespace-pre-wrap font-mono text-xs">{runResult.result.error}</pre>
                 </div>
               )}
               {runResult?.result.output !== undefined && (
                 <div>
-                  <div className="text-sm font-medium mb-1">Output</div>
-                  <div className="rounded-md bg-slate-950 text-emerald-400 p-3 overflow-auto max-h-[40vh]">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-sm font-medium">Output</div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs gap-1"
+                      onClick={() => {
+                        if (runResult?.result.output) {
+                          navigator.clipboard.writeText(
+                            typeof runResult.result.output === 'string'
+                              ? runResult.result.output
+                              : JSON.stringify(runResult.result.output, null, 2),
+                          )
+                          toast({ title: 'Result copied' })
+                        }
+                      }}
+                    >
+                      <Copy className="h-3 w-3" /> Copy Result
+                    </Button>
+                  </div>
+                  <div className="rounded-md bg-slate-950 text-slate-200 p-3 overflow-auto max-h-[40vh]">
                     <pre className="text-sm font-mono whitespace-pre-wrap">
                       {typeof runResult.result.output === 'string'
                         ? runResult.result.output
@@ -548,20 +649,6 @@ export function FunctionsView() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setRunResult(null)}>Close</Button>
-              <Button
-                onClick={() => {
-                  if (runResult?.result.output) {
-                    navigator.clipboard.writeText(
-                      typeof runResult.result.output === 'string'
-                        ? runResult.result.output
-                        : JSON.stringify(runResult.result.output, null, 2),
-                    )
-                    toast({ title: 'Output copied' })
-                  }
-                }}
-              >
-                <Copy className="mr-1 h-3.5 w-3.5" /> Copy Output
-              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -816,18 +903,15 @@ export function FunctionsView() {
                       <TriggerIcon className="h-3 w-3 mr-1" />
                       {fn.triggerType}
                     </Badge>
-                    <Badge variant="outline" className="text-xs">
+                    <Badge variant="outline" className={`text-xs ${runtimeBadgeColors[fn.runtime] ?? ''}`}>
                       {fn.runtime}
                     </Badge>
                     <span className="text-xs text-muted-foreground">{fn.timeoutMs / 1000}s timeout</span>
                     <span className="text-xs text-muted-foreground">·</span>
                     <span className="text-xs text-muted-foreground">{fn.memoryMb} MB</span>
                   </div>
-                  <div className="rounded-md bg-slate-950 text-emerald-400 p-2 overflow-hidden">
-                    <pre className="text-xs font-mono line-clamp-3 whitespace-pre-wrap">
-                      {fn.code.slice(0, 180)}
-                      {fn.code.length > 180 ? '...' : ''}
-                    </pre>
+                  <div className="rounded-md bg-slate-950 text-slate-200 p-2 overflow-hidden">
+                    <pre className="text-xs font-mono line-clamp-3 whitespace-pre-wrap">{highlightCode(fn.code.slice(0, 180) + (fn.code.length > 180 ? '...' : ''))}</pre>
                   </div>
                   {lastRun && LastStatusIcon && (
                     <div className="mt-3 flex items-center gap-2 text-xs border-t pt-2">
