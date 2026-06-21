@@ -184,7 +184,7 @@ export default function AdminStudio() {
       <SidebarInset>
         <div className="flex min-h-svh flex-col">
           {/* Top Bar */}
-          <header className="flex h-12 items-center gap-3 border-b bg-white px-4 shrink-0">
+          <header className="flex h-12 items-center gap-3 border-b bg-background border-border px-4 shrink-0">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="h-5" />
             <NotificationsBell />
@@ -221,7 +221,7 @@ export default function AdminStudio() {
           </div>
 
           {/* Footer */}
-          <footer className="border-t bg-white px-4 py-2 shrink-0">
+          <footer className="border-t bg-background border-border px-4 py-2 shrink-0">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>SelfBase v1.0 · Self-Hosted · Local-First</span>
               <span className="hidden sm:inline">AI-Native Backend-as-a-Service</span>

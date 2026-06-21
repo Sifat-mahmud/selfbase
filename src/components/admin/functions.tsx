@@ -150,6 +150,7 @@ export function FunctionsView() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [selectedFunction, setSelectedFunction] = useState<SbFunctionItem | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
+  const [runResult, setRunResult] = useState<{ fn: SbFunctionItem; result: { runId: string; status: string; output?: unknown; durationMs?: number; error?: string } } | null>(null)
 
   // Create form
   const [newName, setNewName] = useState('')
@@ -252,6 +253,7 @@ export function FunctionsView() {
         `/api/functions/${fn.id}/run`,
         {},
       )
+      setRunResult({ fn, result })
       toast({
         title: result.status === 'success' ? 'Function executed' : 'Function run failed',
         description:
@@ -498,6 +500,71 @@ export function FunctionsView() {
             )}
           </CardContent>
         </Card>
+
+        {/* Run Result Dialog */}
+        <Dialog open={!!runResult} onOpenChange={(open) => !open && setRunResult(null)}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                {runResult?.result.status === 'success' ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-red-500" />
+                )}
+                Function Result: {runResult?.fn.name}
+              </DialogTitle>
+              <DialogDescription>
+                {runResult?.result.status === 'success' ? 'Executed successfully' : 'Execution failed'}
+                {runResult?.result.durationMs ? ` in ${runResult.result.durationMs}ms` : ''}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="flex gap-3 text-xs">
+                <Badge variant={runResult?.result.status === 'success' ? 'default' : 'destructive'} className="capitalize">
+                  {runResult?.result.status}
+                </Badge>
+                {runResult?.result.durationMs && (
+                  <Badge variant="outline">Duration: {runResult.result.durationMs}ms</Badge>
+                )}
+                <Badge variant="outline">Run ID: {runResult?.result.runId?.slice(0, 8)}...</Badge>
+              </div>
+              {runResult?.result.error && (
+                <div className="rounded-md bg-red-500/10 border border-red-200 p-3 text-sm text-red-700">
+                  {runResult.result.error}
+                </div>
+              )}
+              {runResult?.result.output !== undefined && (
+                <div>
+                  <div className="text-sm font-medium mb-1">Output</div>
+                  <div className="rounded-md bg-slate-950 text-emerald-400 p-3 overflow-auto max-h-[40vh]">
+                    <pre className="text-sm font-mono whitespace-pre-wrap">
+                      {typeof runResult.result.output === 'string'
+                        ? runResult.result.output
+                        : JSON.stringify(runResult.result.output, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRunResult(null)}>Close</Button>
+              <Button
+                onClick={() => {
+                  if (runResult?.result.output) {
+                    navigator.clipboard.writeText(
+                      typeof runResult.result.output === 'string'
+                        ? runResult.result.output
+                        : JSON.stringify(runResult.result.output, null, 2),
+                    )
+                    toast({ title: 'Output copied' })
+                  }
+                }}
+              >
+                <Copy className="mr-1 h-3.5 w-3.5" /> Copy Output
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </motion.div>
     )
   }

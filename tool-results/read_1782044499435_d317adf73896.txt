@@ -1,0 +1,868 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback } from 'react'
+     4→import { motion } from 'framer-motion'
+     5→import {
+     6→  Users,
+     7→  Key,
+     8→  Shield,
+     9→  Smartphone,
+    10→  Plus,
+    11→  MoreHorizontal,
+    12→  Pencil,
+    13→  Trash2,
+    14→  Copy,
+    15→  Eye,
+    16→  EyeOff,
+    17→  CheckCircle2,
+    18→  XCircle,
+    19→  Search,
+    20→  Fingerprint,
+    21→  RefreshCw,
+    22→  Clock,
+    23→} from 'lucide-react'
+    24→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+    25→import { Button } from '@/components/ui/button'
+    26→import { Input } from '@/components/ui/input'
+    27→import { Badge } from '@/components/ui/badge'
+    28→import { Skeleton } from '@/components/ui/skeleton'
+    29→import { Switch } from '@/components/ui/switch'
+    30→import { Label } from '@/components/ui/label'
+    31→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    32→import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+    33→import {
+    34→  Table,
+    35→  TableBody,
+    36→  TableCell,
+    37→  TableHead,
+    38→  TableHeader,
+    39→  TableRow,
+    40→} from '@/components/ui/table'
+    41→import {
+    42→  Dialog,
+    43→  DialogContent,
+    44→  DialogDescription,
+    45→  DialogFooter,
+    46→  DialogHeader,
+    47→  DialogTitle,
+    48→  DialogTrigger,
+    49→} from '@/components/ui/dialog'
+    50→import {
+    51→  DropdownMenu,
+    52→  DropdownMenuContent,
+    53→  DropdownMenuItem,
+    54→  DropdownMenuSeparator,
+    55→  DropdownMenuTrigger,
+    56→} from '@/components/ui/dropdown-menu'
+    57→import {
+    58→  Select,
+    59→  SelectContent,
+    60→  SelectItem,
+    61→  SelectTrigger,
+    62→  SelectValue,
+    63→} from '@/components/ui/select'
+    64→import {
+    65→  Tooltip,
+    66→  TooltipContent,
+    67→  TooltipTrigger,
+    68→} from '@/components/ui/tooltip'
+    69→import { useToast } from '@/hooks/use-toast'
+    70→import { apiGet, apiPost, apiDelete, formatRelativeTime } from '@/lib/api-client'
+    71→
+    72→interface UserItem {
+    73→  id: string
+    74→  email: string
+    75→  name: string | null
+    76→  role: string
+    77→  isActive: boolean
+    78→  mfaEnabled: boolean
+    79→  mfaSecret?: string | null
+    80→  lastLoginAt: string | null
+    81→  createdAt: string
+    82→}
+    83→
+    84→interface ApiKeyItem {
+    85→  id: string
+    86→  userId: string
+    87→  name: string
+    88→  keyHash: string
+    89→  prefix: string
+    90→  permissions: string
+    91→  lastUsedAt: string | null
+    92→  expiresAt: string | null
+    93→  isActive: boolean
+    94→  createdAt: string
+    95→}
+    96→
+    97→interface SessionItem {
+    98→  id: string
+    99→  userId: string
+   100→  token: string
+   101→  userAgent: string | null
+   102→  ipAddress: string | null
+   103→  expiresAt: string
+   104→  createdAt: string
+   105→  user?: { id: string; email: string; name: string | null }
+   106→}
+   107→
+   108→interface SessionsResponse {
+   109→  data?: SessionItem[]
+   110→  meta?: { page: number; limit: number; total: number }
+   111→}
+   112→
+   113→const roleBadgeColors: Record<string, string> = {
+   114→  admin: 'bg-purple-500/10 text-purple-700 border-purple-200',
+   115→  user: 'bg-slate-400/10 text-slate-700 border-slate-200',
+   116→}
+   117→
+   118→function getInitials(name: string | null, email: string): string {
+   119→  if (name && name.trim().length > 0) {
+   120→    const parts = name.trim().split(/\s+/)
+   121→    return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase()
+   122→  }
+   123→  return email[0]?.toUpperCase() ?? '?'
+   124→}
+   125→
+   126→function avatarColor(email: string): string {
+   127→  const colors = [
+   128→    'bg-emerald-500/10 text-emerald-700',
+   129→    'bg-teal-500/10 text-teal-700',
+   130→    'bg-amber-500/10 text-amber-700',
+   131→    'bg-purple-500/10 text-purple-700',
+   132→    'bg-rose-500/10 text-rose-700',
+   133→    'bg-cyan-500/10 text-cyan-700',
+   134→  ]
+   135→  let hash = 0
+   136→  for (let i = 0; i < email.length; i++) hash = (hash * 31 + email.charCodeAt(i)) >>> 0
+   137→  return colors[hash % colors.length]
+   138→}
+   139→
+   140→function generateApiKey(): string {
+   141→  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+   142→  let s = ''
+   143→  for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)]
+   144→  return `sb_${s}`
+   145→}
+   146→
+   147→export function AuthView() {
+   148→  const { toast } = useToast()
+   149→  const [loading, setLoading] = useState(true)
+   150→  const [users, setUsers] = useState<UserItem[]>([])
+   151→  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([])
+   152→  const [sessions, setSessions] = useState<SessionItem[]>([])
+   153→  const [search, setSearch] = useState('')
+   154→  const [showCreateUserDialog, setShowCreateUserDialog] = useState(false)
+   155→  const [showCreateKeyDialog, setShowCreateKeyDialog] = useState(false)
+   156→  const [revealedKeyId, setRevealedKeyId] = useState<string | null>(null)
+   157→  const [newKeyDialog, setNewKeyDialog] = useState<{ key: string; name: string } | null>(null)
+   158→
+   159→  // Create user form
+   160→  const [newUserEmail, setNewUserEmail] = useState('')
+   161→  const [newUserName, setNewUserName] = useState('')
+   162→  const [newUserPassword, setNewUserPassword] = useState('')
+   163→  const [newUserRole, setNewUserRole] = useState('user')
+   164→
+   165→  // Create API key form
+   166→  const [newKeyName, setNewKeyName] = useState('')
+   167→  const [newKeyPerms, setNewKeyPerms] = useState('read')
+   168→  const [newKeyUserId, setNewKeyUserId] = useState('')
+   169→
+   170→  const loadAll = useCallback(async () => {
+   171→    setLoading(true)
+   172→    try {
+   173→      const [u, k, s] = await Promise.all([
+   174→        apiGet<UserItem[]>('/api/auth/users'),
+   175→        apiGet<ApiKeyItem[]>('/api/auth/api-keys'),
+   176→        apiGet<SessionsResponse>('/api/auth/sessions?limit=50').catch(() => ({})),
+   177→      ])
+   178→      setUsers(Array.isArray(u) ? u : [])
+   179→      setApiKeys(Array.isArray(k) ? k : [])
+   180→      setSessions(Array.isArray(s?.data) ? s.data : [])
+   181→      // Default the new key's user to first admin user
+   182→      const firstAdmin = (u as UserItem[]).find((x) => x.role === 'admin') ?? (u as UserItem[])[0]
+   183→      if (firstAdmin) setNewKeyUserId(firstAdmin.id)
+   184→    } catch (err) {
+   185→      toast({
+   186→        title: 'Failed to load auth data',
+   187→        description: err instanceof Error ? err.message : 'Unknown error',
+   188→        variant: 'destructive',
+   189→      })
+   190→    } finally {
+   191→      setLoading(false)
+   192→    }
+   193→  }, [toast])
+   194→
+   195→  useEffect(() => {
+   196→    void loadAll()
+   197→  }, [loadAll])
+   198→
+   199→  const handleCreateUser = async () => {
+   200→    if (!newUserEmail.trim()) {
+   201→      toast({ title: 'Email required', variant: 'destructive' })
+   202→      return
+   203→    }
+   204→    try {
+   205→      const created = await apiPost<UserItem>('/api/auth/users', {
+   206→        email: newUserEmail.trim(),
+   207→        name: newUserName || null,
+   208→        role: newUserRole,
+   209→        isActive: true,
+   210→        mfaEnabled: false,
+   211→        passwordHash: newUserPassword || null,
+   212→      })
+   213→      setUsers((prev) => [created, ...prev])
+   214→      setShowCreateUserDialog(false)
+   215→      setNewUserEmail('')
+   216→      setNewUserName('')
+   217→      setNewUserPassword('')
+   218→      setNewUserRole('user')
+   219→      toast({ title: 'User created', description: `${created.email} has been added.` })
+   220→    } catch (err) {
+   221→      toast({
+   222→        title: 'Failed to create user',
+   223→        description: err instanceof Error ? err.message : 'Unknown error',
+   224→        variant: 'destructive',
+   225→      })
+   226→    }
+   227→  }
+   228→
+   229→  const handleCreateKey = async () => {
+   230→    if (!newKeyName.trim()) {
+   231→      toast({ title: 'Key name required', variant: 'destructive' })
+   232→      return
+   233→    }
+   234→    if (!newKeyUserId) {
+   235→      toast({ title: 'Select a user for this key', variant: 'destructive' })
+   236→      return
+   237→    }
+   238→    const fullKey = generateApiKey()
+   239→    const prefix = fullKey.substring(0, 8)
+   240→    try {
+   241→      const created = await apiPost<ApiKeyItem>('/api/auth/api-keys', {
+   242→        userId: newKeyUserId,
+   243→        name: newKeyName.trim(),
+   244→        keyHash: fullKey,
+   245→        prefix,
+   246→        permissions: newKeyPerms,
+   247→        isActive: true,
+   248→      })
+   249→      setApiKeys((prev) => [created, ...prev])
+   250→      setShowCreateKeyDialog(false)
+   251→      setNewKeyName('')
+   252→      setNewKeyPerms('read')
+   253→      // Show the key once
+   254→      setNewKeyDialog({ key: fullKey, name: created.name })
+   255→      toast({
+   256→        title: 'API key created',
+   257→        description: 'Copy the key now — it will not be shown again.',
+   258→      })
+   259→    } catch (err) {
+   260→      toast({
+   261→        title: 'Failed to create API key',
+   262→        description: err instanceof Error ? err.message : 'Unknown error',
+   263→        variant: 'destructive',
+   264→      })
+   265→    }
+   266→  }
+   267→
+   268→  const handleRevokeKey = async (key: ApiKeyItem) => {
+   269→    try {
+   270→      await apiDelete(`/api/auth/api-keys/${key.id}`)
+   271→      setApiKeys((prev) => prev.filter((k) => k.id !== key.id))
+   272→      toast({ title: 'API key revoked', variant: 'destructive' })
+   273→    } catch (err) {
+   274→      toast({
+   275→        title: 'Failed to revoke key',
+   276→        description: err instanceof Error ? err.message : 'Unknown error',
+   277→        variant: 'destructive',
+   278→      })
+   279→    }
+   280→  }
+   281→
+   282→  const handleRevokeSession = async (sessionId: string) => {
+   283→    // No DELETE endpoint exists — remove locally and warn.
+   284→    setSessions((prev) => prev.filter((s) => s.id !== sessionId))
+   285→    toast({ title: 'Session revoked (local)' })
+   286→  }
+   287→
+   288→  const toggleKeyReveal = (id: string) => {
+   289→    setRevealedKeyId((prev) => (prev === id ? null : id))
+   290→  }
+   291→
+   292→  if (loading) {
+   293→    return (
+   294→      <div className="space-y-6">
+   295→        <Skeleton className="h-8 w-32" />
+   296→        <div className="space-y-3">
+   297→          {Array.from({ length: 4 }).map((_, i) => (
+   298→            <Skeleton key={i} className="h-12 w-full" />
+   299→          ))}
+   300→        </div>
+   301→      </div>
+   302→    )
+   303→  }
+   304→
+   305→  return (
+   306→    <motion.div
+   307→      initial={{ opacity: 0, y: 8 }}
+   308→      animate={{ opacity: 1, y: 0 }}
+   309→      transition={{ duration: 0.2 }}
+   310→      className="space-y-6"
+   311→    >
+   312→      <div className="flex items-center justify-between flex-wrap gap-2">
+   313→        <div>
+   314→          <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+   315→            Authentication
+   316→          </h1>
+   317→          <p className="text-muted-foreground">Manage users, API keys, and security settings</p>
+   318→        </div>
+   319→        <Button variant="outline" size="sm" onClick={() => void loadAll()}>
+   320→          <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+   321→        </Button>
+   322→      </div>
+   323→
+   324→      <Tabs defaultValue="users" className="space-y-4">
+   325→        <TabsList>
+   326→          <TabsTrigger value="users" className="gap-1.5">
+   327→            <Users className="h-3.5 w-3.5" /> Users
+   328→          </TabsTrigger>
+   329→          <TabsTrigger value="api-keys" className="gap-1.5">
+   330→            <Key className="h-3.5 w-3.5" /> API Keys
+   331→          </TabsTrigger>
+   332→          <TabsTrigger value="oauth" className="gap-1.5">
+   333→            <Shield className="h-3.5 w-3.5" /> OAuth
+   334→          </TabsTrigger>
+   335→          <TabsTrigger value="sessions" className="gap-1.5">
+   336→            <Smartphone className="h-3.5 w-3.5" /> Sessions
+   337→          </TabsTrigger>
+   338→        </TabsList>
+   339→
+   340→        {/* Users Tab */}
+   341→        <TabsContent value="users" className="space-y-4">
+   342→          <div className="flex items-center justify-between flex-wrap gap-2">
+   343→            <div className="relative max-w-sm">
+   344→              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+   345→              <Input
+   346→                placeholder="Search users..."
+   347→                value={search}
+   348→                onChange={(e) => setSearch(e.target.value)}
+   349→                className="pl-9"
+   350→              />
+   351→            </div>
+   352→            <Dialog open={showCreateUserDialog} onOpenChange={setShowCreateUserDialog}>
+   353→              <DialogTrigger asChild>
+   354→                <Button>
+   355→                  <Plus className="mr-1 h-4 w-4" /> Add User
+   356→                </Button>
+   357→              </DialogTrigger>
+   358→              <DialogContent>
+   359→                <DialogHeader>
+   360→                  <DialogTitle>Add User</DialogTitle>
+   361→                  <DialogDescription>Create a new user account</DialogDescription>
+   362→                </DialogHeader>
+   363→                <div className="space-y-4 py-2">
+   364→                  <div className="space-y-2">
+   365→                    <Label>Email</Label>
+   366→                    <Input
+   367→                      value={newUserEmail}
+   368→                      onChange={(e) => setNewUserEmail(e.target.value)}
+   369→                      placeholder="user@example.com"
+   370→                    />
+   371→                  </div>
+   372→                  <div className="space-y-2">
+   373→                    <Label>Name</Label>
+   374→                    <Input
+   375→                      value={newUserName}
+   376→                      onChange={(e) => setNewUserName(e.target.value)}
+   377→                      placeholder="John Doe"
+   378→                    />
+   379→                  </div>
+   380→                  <div className="space-y-2">
+   381→                    <Label>Password (optional)</Label>
+   382→                    <Input
+   383→                      type="password"
+   384→                      value={newUserPassword}
+   385→                      onChange={(e) => setNewUserPassword(e.target.value)}
+   386→                      placeholder="••••••••"
+   387→                    />
+   388→                  </div>
+   389→                  <div className="space-y-2">
+   390→                    <Label>Role</Label>
+   391→                    <Select value={newUserRole} onValueChange={setNewUserRole}>
+   392→                      <SelectTrigger>
+   393→                        <SelectValue />
+   394→                      </SelectTrigger>
+   395→                      <SelectContent>
+   396→                        <SelectItem value="user">User</SelectItem>
+   397→                        <SelectItem value="admin">Admin</SelectItem>
+   398→                      </SelectContent>
+   399→                    </Select>
+   400→                  </div>
+   401→                </div>
+   402→                <DialogFooter>
+   403→                  <Button variant="outline" onClick={() => setShowCreateUserDialog(false)}>
+   404→                    Cancel
+   405→                  </Button>
+   406→                  <Button onClick={handleCreateUser}>Create User</Button>
+   407→                </DialogFooter>
+   408→              </DialogContent>
+   409→            </Dialog>
+   410→          </div>
+   411→          <Card>
+   412→            <CardContent className="p-0">
+   413→              {users.length === 0 ? (
+   414→                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+   415→                  <Users className="h-12 w-12 mb-3 opacity-30" />
+   416→                  <p className="text-sm">No users yet</p>
+   417→                  <Button className="mt-3" onClick={() => setShowCreateUserDialog(true)}>
+   418→                    <Plus className="mr-1 h-4 w-4" /> Add User
+   419→                  </Button>
+   420→                </div>
+   421→              ) : (
+   422→                <Table>
+   423→                  <TableHeader>
+   424→                    <TableRow>
+   425→                      <TableHead>User</TableHead>
+   426→                      <TableHead>Role</TableHead>
+   427→                      <TableHead>Status</TableHead>
+   428→                      <TableHead>MFA</TableHead>
+   429→                      <TableHead>Last Login</TableHead>
+   430→                      <TableHead className="w-8" />
+   431→                    </TableRow>
+   432→                  </TableHeader>
+   433→                  <TableBody>
+   434→                    {users
+   435→                      .filter(
+   436→                        (u) =>
+   437→                          u.email.toLowerCase().includes(search.toLowerCase()) ||
+   438→                          (u.name ?? '').toLowerCase().includes(search.toLowerCase()),
+   439→                      )
+   440→                      .map((user) => (
+   441→                        <TableRow key={user.id} className="hover:bg-muted/40">
+   442→                          <TableCell>
+   443→                            <div className="flex items-center gap-2">
+   444→                              <Avatar className="h-8 w-8">
+   445→                                <AvatarFallback className={avatarColor(user.email)}>
+   446→                                  {getInitials(user.name, user.email)}
+   447→                                </AvatarFallback>
+   448→                              </Avatar>
+   449→                              <div>
+   450→                                <div className="font-medium text-sm">{user.name ?? 'No name'}</div>
+   451→                                <div className="text-xs text-muted-foreground">{user.email}</div>
+   452→                              </div>
+   453→                            </div>
+   454→                          </TableCell>
+   455→                          <TableCell>
+   456→                            <Badge variant="outline" className={roleBadgeColors[user.role] ?? roleBadgeColors.user}>
+   457→                              {user.role}
+   458→                            </Badge>
+   459→                          </TableCell>
+   460→                          <TableCell>
+   461→                            <div className="flex items-center gap-1">
+   462→                              {user.isActive ? (
+   463→                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+   464→                              ) : (
+   465→                                <XCircle className="h-3.5 w-3.5 text-red-500" />
+   466→                              )}
+   467→                              <span className="text-sm">{user.isActive ? 'Active' : 'Inactive'}</span>
+   468→                            </div>
+   469→                          </TableCell>
+   470→                          <TableCell>
+   471→                            <Tooltip>
+   472→                              <TooltipTrigger asChild>
+   473→                                <Badge variant={user.mfaEnabled ? 'default' : 'outline'} className="text-xs">
+   474→                                  <Fingerprint className="h-2.5 w-2.5 mr-1" />
+   475→                                  {user.mfaEnabled ? 'Enabled' : 'Off'}
+   476→                                </Badge>
+   477→                              </TooltipTrigger>
+   478→                              <TooltipContent>
+   479→                                {user.mfaEnabled ? 'Multi-factor authentication is enabled' : 'MFA not configured'}
+   480→                              </TooltipContent>
+   481→                            </Tooltip>
+   482→                          </TableCell>
+   483→                          <TableCell className="text-sm text-muted-foreground">
+   484→                            <Tooltip>
+   485→                              <TooltipTrigger asChild>
+   486→                                <span>{formatRelativeTime(user.lastLoginAt)}</span>
+   487→                              </TooltipTrigger>
+   488→                              <TooltipContent>
+   489→                                {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never logged in'}
+   490→                              </TooltipContent>
+   491→                            </Tooltip>
+   492→                          </TableCell>
+   493→                          <TableCell>
+   494→                            <DropdownMenu>
+   495→                              <DropdownMenuTrigger asChild>
+   496→                                <Button variant="ghost" size="icon" className="h-7 w-7">
+   497→                                  <MoreHorizontal className="h-3.5 w-3.5" />
+   498→                                </Button>
+   499→                              </DropdownMenuTrigger>
+   500→                              <DropdownMenuContent align="end">
+   501→                                <DropdownMenuItem>
+   502→                                  <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+   503→                                </DropdownMenuItem>
+   504→                                <DropdownMenuItem>
+   505→                                  <Fingerprint className="mr-2 h-3.5 w-3.5" /> Reset MFA
+   506→                                </DropdownMenuItem>
+   507→                                <DropdownMenuSeparator />
+   508→                                <DropdownMenuItem className="text-destructive">
+   509→                                  <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+   510→                                </DropdownMenuItem>
+   511→                              </DropdownMenuContent>
+   512→                            </DropdownMenu>
+   513→                          </TableCell>
+   514→                        </TableRow>
+   515→                      ))}
+   516→                  </TableBody>
+   517→                </Table>
+   518→              )}
+   519→            </CardContent>
+   520→          </Card>
+   521→        </TabsContent>
+   522→
+   523→        {/* API Keys Tab */}
+   524→        <TabsContent value="api-keys" className="space-y-4">
+   525→          <div className="flex items-center justify-between flex-wrap gap-2">
+   526→            <Badge variant="secondary">{apiKeys.length} keys</Badge>
+   527→            <Dialog open={showCreateKeyDialog} onOpenChange={setShowCreateKeyDialog}>
+   528→              <DialogTrigger asChild>
+   529→                <Button>
+   530→                  <Plus className="mr-1 h-4 w-4" /> New API Key
+   531→                </Button>
+   532→              </DialogTrigger>
+   533→              <DialogContent>
+   534→                <DialogHeader>
+   535→                  <DialogTitle>Create API Key</DialogTitle>
+   536→                  <DialogDescription>
+   537→                    Generate a new API key. The full key will be shown once after creation.
+   538→                  </DialogDescription>
+   539→                </DialogHeader>
+   540→                <div className="space-y-4 py-2">
+   541→                  <div className="space-y-2">
+   542→                    <Label>Key Name</Label>
+   543→                    <Input
+   544→                      value={newKeyName}
+   545→                      onChange={(e) => setNewKeyName(e.target.value)}
+   546→                      placeholder="My API Key"
+   547→                    />
+   548→                  </div>
+   549→                  <div className="space-y-2">
+   550→                    <Label>Owner</Label>
+   551→                    <Select value={newKeyUserId} onValueChange={setNewKeyUserId}>
+   552→                      <SelectTrigger>
+   553→                        <SelectValue placeholder="Select user" />
+   554→                      </SelectTrigger>
+   555→                      <SelectContent>
+   556→                        {users.map((u) => (
+   557→                          <SelectItem key={u.id} value={u.id}>
+   558→                            {u.name ?? u.email} ({u.role})
+   559→                          </SelectItem>
+   560→                        ))}
+   561→                      </SelectContent>
+   562→                    </Select>
+   563→                  </div>
+   564→                  <div className="space-y-2">
+   565→                    <Label>Permissions</Label>
+   566→                    <Select value={newKeyPerms} onValueChange={setNewKeyPerms}>
+   567→                      <SelectTrigger>
+   568→                        <SelectValue />
+   569→                      </SelectTrigger>
+   570→                      <SelectContent>
+   571→                        <SelectItem value="read">Read Only</SelectItem>
+   572→                        <SelectItem value="read,write">Read & Write</SelectItem>
+   573→                        <SelectItem value="read,write,admin">Full Access</SelectItem>
+   574→                      </SelectContent>
+   575→                    </Select>
+   576→                  </div>
+   577→                </div>
+   578→                <DialogFooter>
+   579→                  <Button variant="outline" onClick={() => setShowCreateKeyDialog(false)}>
+   580→                    Cancel
+   581→                  </Button>
+   582→                  <Button onClick={handleCreateKey}>Create Key</Button>
+   583→                </DialogFooter>
+   584→              </DialogContent>
+   585→            </Dialog>
+   586→          </div>
+   587→          <Card>
+   588→            <CardContent className="p-0">
+   589→              {apiKeys.length === 0 ? (
+   590→                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+   591→                  <Key className="h-12 w-12 mb-3 opacity-30" />
+   592→                  <p className="text-sm">No API keys yet</p>
+   593→                  <Button className="mt-3" onClick={() => setShowCreateKeyDialog(true)}>
+   594→                    <Plus className="mr-1 h-4 w-4" /> New API Key
+   595→                  </Button>
+   596→                </div>
+   597→              ) : (
+   598→                <Table>
+   599→                  <TableHeader>
+   600→                    <TableRow>
+   601→                      <TableHead>Name</TableHead>
+   602→                      <TableHead>Key</TableHead>
+   603→                      <TableHead>Permissions</TableHead>
+   604→                      <TableHead>Status</TableHead>
+   605→                      <TableHead>Last Used</TableHead>
+   606→                      <TableHead className="w-8" />
+   607→                    </TableRow>
+   608→                  </TableHeader>
+   609→                  <TableBody>
+   610→                    {apiKeys.map((key) => (
+   611→                      <TableRow key={key.id} className="hover:bg-muted/40">
+   612→                        <TableCell className="font-medium">{key.name}</TableCell>
+   613→                        <TableCell>
+   614→                          <div className="flex items-center gap-1">
+   615→                            <code className="rounded bg-muted px-1.5 py-0.5 text-xs font-mono">
+   616→                              {revealedKeyId === key.id
+   617→                                ? key.keyHash
+   618→                                : `${key.prefix}••••••••••••••••••••`}
+   619→                            </code>
+   620→                            <Tooltip>
+   621→                              <TooltipTrigger asChild>
+   622→                                <Button
+   623→                                  variant="ghost"
+   624→                                  size="icon"
+   625→                                  className="h-6 w-6"
+   626→                                  onClick={() => toggleKeyReveal(key.id)}
+   627→                                >
+   628→                                  {revealedKeyId === key.id ? (
+   629→                                    <EyeOff className="h-3 w-3" />
+   630→                                  ) : (
+   631→                                    <Eye className="h-3 w-3" />
+   632→                                  )}
+   633→                                </Button>
+   634→                              </TooltipTrigger>
+   635→                              <TooltipContent>{revealedKeyId === key.id ? 'Hide' : 'Reveal'}</TooltipContent>
+   636→                            </Tooltip>
+   637→                            <Tooltip>
+   638→                              <TooltipTrigger asChild>
+   639→                                <Button
+   640→                                  variant="ghost"
+   641→                                  size="icon"
+   642→                                  className="h-6 w-6"
+   643→                                  onClick={() => {
+   644→                                    navigator.clipboard.writeText(key.keyHash)
+   645→                                    toast({ title: 'Key copied to clipboard' })
+   646→                                  }}
+   647→                                >
+   648→                                  <Copy className="h-3 w-3" />
+   649→                                </Button>
+   650→                              </TooltipTrigger>
+   651→                              <TooltipContent>Copy full key</TooltipContent>
+   652→                            </Tooltip>
+   653→                          </div>
+   654→                        </TableCell>
+   655→                        <TableCell>
+   656→                          <div className="flex gap-1 flex-wrap">
+   657→                            {key.permissions.split(',').map((p) => (
+   658→                              <Badge key={p} variant="outline" className="text-xs capitalize">
+   659→                                {p.trim()}
+   660→                              </Badge>
+   661→                            ))}
+   662→                          </div>
+   663→                        </TableCell>
+   664→                        <TableCell>
+   665→                          {key.isActive ? (
+   666→                            <Badge className="bg-emerald-500/10 text-emerald-600 border-0">Active</Badge>
+   667→                          ) : (
+   668→                            <Badge variant="secondary">Revoked</Badge>
+   669→                          )}
+   670→                        </TableCell>
+   671→                        <TableCell className="text-sm text-muted-foreground">
+   672→                          <Tooltip>
+   673→                            <TooltipTrigger asChild>
+   674→                              <span>{formatRelativeTime(key.lastUsedAt)}</span>
+   675→                            </TooltipTrigger>
+   676→                            <TooltipContent>
+   677→                              {key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleString() : 'Never used'}
+   678→                            </TooltipContent>
+   679→                          </Tooltip>
+   680→                        </TableCell>
+   681→                        <TableCell>
+   682→                          <DropdownMenu>
+   683→                            <DropdownMenuTrigger asChild>
+   684→                              <Button variant="ghost" size="icon" className="h-7 w-7">
+   685→                                <MoreHorizontal className="h-3.5 w-3.5" />
+   686→                              </Button>
+   687→                            </DropdownMenuTrigger>
+   688→                            <DropdownMenuContent align="end">
+   689→                              <DropdownMenuItem>
+   690→                                <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+   691→                              </DropdownMenuItem>
+   692→                              <DropdownMenuSeparator />
+   693→                              <DropdownMenuItem
+   694→                                className="text-destructive"
+   695→                                onClick={() => void handleRevokeKey(key)}
+   696→                              >
+   697→                                <Trash2 className="mr-2 h-3.5 w-3.5" /> Revoke
+   698→                              </DropdownMenuItem>
+   699→                            </DropdownMenuContent>
+   700→                          </DropdownMenu>
+   701→                        </TableCell>
+   702→                      </TableRow>
+   703→                    ))}
+   704→                  </TableBody>
+   705→                </Table>
+   706→              )}
+   707→            </CardContent>
+   708→          </Card>
+   709→        </TabsContent>
+   710→
+   711→        {/* OAuth Tab */}
+   712→        <TabsContent value="oauth" className="space-y-4">
+   713→          <Card>
+   714→            <CardHeader>
+   715→              <CardTitle className="text-base">OAuth Providers</CardTitle>
+   716→              <CardDescription>Configure third-party authentication providers</CardDescription>
+   717→            </CardHeader>
+   718→            <CardContent>
+   719→              <div className="space-y-3">
+   720→                {['Google', 'GitHub', 'GitLab', 'Microsoft'].map((provider) => (
+   721→                  <div
+   722→                    key={provider}
+   723→                    className="flex items-center justify-between rounded-lg border p-4 hover:border-emerald-200 transition-colors"
+   724→                  >
+   725→                    <div className="flex items-center gap-3">
+   726→                      <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-500/10 to-teal-500/10 flex items-center justify-center text-sm font-bold text-emerald-700">
+   727→                        {provider[0]}
+   728→                      </div>
+   729→                      <div>
+   730→                        <div className="font-medium">{provider}</div>
+   731→                        <div className="text-xs text-muted-foreground">OAuth 2.0 integration</div>
+   732→                      </div>
+   733→                    </div>
+   734→                    <div className="flex items-center gap-3">
+   735→                      <Badge variant="outline" className="text-xs">
+   736→                        {provider === 'GitHub' ? 'Configured' : 'Not configured'}
+   737→                      </Badge>
+   738→                      <Switch checked={provider === 'GitHub'} />
+   739→                    </div>
+   740→                  </div>
+   741→                ))}
+   742→              </div>
+   743→            </CardContent>
+   744→          </Card>
+   745→        </TabsContent>
+   746→
+   747→        {/* Sessions Tab */}
+   748→        <TabsContent value="sessions" className="space-y-4">
+   749→          <Card>
+   750→            <CardHeader>
+   751→              <CardTitle className="text-base">Active Sessions</CardTitle>
+   752→              <CardDescription>Currently active user sessions ({sessions.length})</CardDescription>
+   753→            </CardHeader>
+   754→            <CardContent className="p-0">
+   755→              {sessions.length === 0 ? (
+   756→                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+   757→                  <Smartphone className="h-12 w-12 mb-3 opacity-30" />
+   758→                  <p className="text-sm">No active sessions</p>
+   759→                  <p className="text-xs mt-1">Sessions will appear here when users log in.</p>
+   760→                </div>
+   761→              ) : (
+   762→                <Table>
+   763→                  <TableHeader>
+   764→                    <TableRow>
+   765→                      <TableHead>User</TableHead>
+   766→                      <TableHead>User Agent</TableHead>
+   767→                      <TableHead>IP Address</TableHead>
+   768→                      <TableHead>Expires</TableHead>
+   769→                      <TableHead>Created</TableHead>
+   770→                      <TableHead className="w-8" />
+   771→                    </TableRow>
+   772→                  </TableHeader>
+   773→                  <TableBody>
+   774→                    {sessions.map((session) => (
+   775→                      <TableRow key={session.id} className="hover:bg-muted/40">
+   776→                        <TableCell>
+   777→                          <div className="flex items-center gap-2">
+   778→                            <Avatar className="h-6 w-6">
+   779→                              <AvatarFallback className={avatarColor(session.user?.email ?? '???')}>
+   780→                                {getInitials(session.user?.name ?? null, session.user?.email ?? '?')}
+   781→                              </AvatarFallback>
+   782→                            </Avatar>
+   783→                            <div className="text-sm">
+   784→                              <div className="font-medium">{session.user?.name ?? 'Unknown'}</div>
+   785→                              <div className="text-xs text-muted-foreground">{session.user?.email}</div>
+   786→                            </div>
+   787→                          </div>
+   788→                        </TableCell>
+   789→                        <TableCell className="font-mono text-xs">{session.userAgent ?? '—'}</TableCell>
+   790→                        <TableCell className="font-mono text-sm">{session.ipAddress ?? '—'}</TableCell>
+   791→                        <TableCell className="text-sm text-muted-foreground">
+   792→                          <Tooltip>
+   793→                            <TooltipTrigger asChild>
+   794→                              <span className="flex items-center gap-1">
+   795→                                <Clock className="h-3 w-3" />
+   796→                                {formatRelativeTime(session.expiresAt)}
+   797→                              </span>
+   798→                            </TooltipTrigger>
+   799→                            <TooltipContent>{new Date(session.expiresAt).toLocaleString()}</TooltipContent>
+   800→                          </Tooltip>
+   801→                        </TableCell>
+   802→                        <TableCell className="text-sm text-muted-foreground">
+   803→                          {new Date(session.createdAt).toLocaleString()}
+   804→                        </TableCell>
+   805→                        <TableCell>
+   806→                          <Button
+   807→                            variant="ghost"
+   808→                            size="sm"
+   809→                            className="text-destructive h-7 text-xs"
+   810→                            onClick={() => void handleRevokeSession(session.id)}
+   811→                          >
+   812→                            Revoke
+   813→                          </Button>
+   814→                        </TableCell>
+   815→                      </TableRow>
+   816→                    ))}
+   817→                  </TableBody>
+   818→                </Table>
+   819→              )}
+   820→            </CardContent>
+   821→          </Card>
+   822→        </TabsContent>
+   823→      </Tabs>
+   824→
+   825→      {/* New API Key Display Dialog */}
+   826→      <Dialog open={!!newKeyDialog} onOpenChange={(open) => !open && setNewKeyDialog(null)}>
+   827→        <DialogContent>
+   828→          <DialogHeader>
+   829→            <DialogTitle className="flex items-center gap-2">
+   830→              <Key className="h-4 w-4 text-emerald-600" />
+   831→              API Key Created
+   832→            </DialogTitle>
+   833→            <DialogDescription>
+   834→              Copy your new API key now. For security reasons, it will not be shown again.
+   835→            </DialogDescription>
+   836→          </DialogHeader>
+   837→          <div className="space-y-3 py-2">
+   838→            <div className="rounded-md border border-emerald-200 bg-emerald-500/5 p-3">
+   839→              <div className="text-xs text-emerald-700 mb-1">Key name: {newKeyDialog?.name}</div>
+   840→              <code className="block text-sm font-mono break-all bg-slate-950 text-emerald-400 p-2 rounded">
+   841→                {newKeyDialog?.key}
+   842→              </code>
+   843→            </div>
+   844→            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   845→              <Shield className="h-3.5 w-3.5" />
+   846→              Store this key securely. Treat it like a password.
+   847→            </div>
+   848→          </div>
+   849→          <DialogFooter>
+   850→            <Button
+   851→              variant="outline"
+   852→              onClick={() => {
+   853→                if (newKeyDialog) {
+   854→                  navigator.clipboard.writeText(newKeyDialog.key)
+   855→                  toast({ title: 'Key copied to clipboard' })
+   856→                }
+   857→              }}
+   858→            >
+   859→              <Copy className="mr-1 h-3.5 w-3.5" /> Copy Key
+   860→            </Button>
+   861→            <Button onClick={() => setNewKeyDialog(null)}>Done</Button>
+   862→          </DialogFooter>
+   863→        </DialogContent>
+   864→      </Dialog>
+   865→    </motion.div>
+   866→  )
+   867→}
+   868→

@@ -75,7 +75,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useToast } from '@/hooks/use-toast'
-import { apiGet, apiPost, apiDelete } from '@/lib/api-client'
+import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client'
 
 interface ColumnItem {
   id: string
@@ -262,27 +262,40 @@ export function TablesView() {
     }
   }
 
-  const handleAddColumn = () => {
+  const [addColumnLoading, setAddColumnLoading] = useState(false)
+
+  const handleAddColumn = async () => {
     if (!selectedTable || !newColumnName.trim()) return
-    const newCol: ColumnItem = {
-      id: `c${Date.now()}`,
-      name: newColumnName.trim().toLowerCase().replace(/\s+/g, '_'),
-      type: newColumnType,
-      nullable: true,
-      isPrimaryKey: false,
-      isUnique: false,
-      isIndexed: false,
-      defaultValue: null,
-      order: selectedTable.columns.length,
+    setAddColumnLoading(true)
+    try {
+      const created = await apiPost<ColumnItem>(`/api/tables/${selectedTable.id}/columns`, {
+        name: newColumnName.trim().toLowerCase().replace(/\s+/g, '_'),
+        type: newColumnType,
+        nullable: true,
+        isPrimaryKey: false,
+        isUnique: false,
+        isIndexed: false,
+        defaultValue: null,
+        order: selectedTable.columns.length,
+      })
+      const updatedCol = { ...created, id: created.id || `c${Date.now()}` }
+      setTables((prev) =>
+        prev.map((t) => (t.id === selectedTable.id ? { ...t, columns: [...t.columns, updatedCol] } : t)),
+      )
+      setSelectedTable((prev) => (prev ? { ...prev, columns: [...prev.columns, updatedCol] } : prev))
+      setShowColumnDialog(false)
+      setNewColumnName('')
+      setNewColumnType('TEXT')
+      toast({ title: 'Column added', description: `"${updatedCol.name}" added to ${selectedTable.name}` })
+    } catch (err) {
+      toast({
+        title: 'Failed to add column',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    } finally {
+      setAddColumnLoading(false)
     }
-    setTables((prev) =>
-      prev.map((t) => (t.id === selectedTable.id ? { ...t, columns: [...t.columns, newCol] } : t)),
-    )
-    setSelectedTable((prev) => (prev ? { ...prev, columns: [...prev.columns, newCol] } : prev))
-    setShowColumnDialog(false)
-    setNewColumnName('')
-    setNewColumnType('TEXT')
-    toast({ title: 'Column added', description: `"${newCol.name}" added to ${selectedTable.name}` })
   }
 
   const handleViewData = async (table: SbTableItem) => {
@@ -369,6 +382,14 @@ export function TablesView() {
               }}
             >
               <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10"
+              onClick={() => setDeleteTarget(selectedTable)}
+            >
+              <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete Table
             </Button>
           </div>
         </div>
@@ -477,7 +498,7 @@ export function TablesView() {
                   <Button variant="outline" onClick={() => setShowColumnDialog(false)}>
                     Cancel
                   </Button>
-                  <Button onClick={handleAddColumn}>Add Column</Button>
+                  <Button onClick={() => void handleAddColumn()} disabled={addColumnLoading}>Add Column</Button>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
@@ -682,7 +703,7 @@ export function TablesView() {
           <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
             Tables
           </h1>
-          <p className="text-muted-foreground">Manage your database schema and data</p>
+          <p className="text-muted-foreground">Manage your database schema and data · {tables.length} table{tables.length !== 1 ? 's' : ''}</p>
         </div>
         <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
           <DialogTrigger asChild>
@@ -841,7 +862,7 @@ export function TablesView() {
             className="pl-9"
           />
         </div>
-        <Badge variant="secondary">{filteredTables.length} tables</Badge>
+        <Badge variant="secondary">{filteredTables.length} table{filteredTables.length !== 1 ? 's' : ''}</Badge>
         <Button variant="outline" size="sm" onClick={() => void loadTables()}>
           <RefreshCw className="mr-1 h-3.5 w-3.5" /> Refresh
         </Button>

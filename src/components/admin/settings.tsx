@@ -59,6 +59,16 @@ import {
 } from '@/components/ui/form'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 /* -------------------------------------------------------------------------- */
 /*                              Config Key Map                                */
@@ -239,7 +249,7 @@ function StickySaveBar({
   dirty: boolean
 }) {
   return (
-    <div className="sticky bottom-0 -mx-4 mt-6 flex items-center justify-between border-t bg-white/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-white/80 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8">
+    <div className="sticky bottom-0 -mx-4 mt-6 flex items-center justify-between border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         {dirty ? (
           <>
@@ -1165,6 +1175,7 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
   const [storageUsageKb, setStorageUsageKb] = useState<number | null>(null)
   const [restarting, setRestarting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false)
 
   // Compute uptime from process start; for demo we use a stable start time.
   const startTimeRef = useRef<number>(Date.now() - 1000 * 60 * 60 * 27.4) // ~27.4h uptime
@@ -1219,6 +1230,7 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
 
   const handleRestart = async () => {
     setRestarting(true)
+    setShowRestartConfirm(false)
     await new Promise((r) => setTimeout(r, 900))
     setRestarting(false)
     toast({
@@ -1377,7 +1389,7 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="outline"
-              onClick={handleRestart}
+              onClick={() => setShowRestartConfirm(true)}
               disabled={restarting}
               className="gap-2 border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
             >
@@ -1388,6 +1400,26 @@ function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
               )}
               Restart Services
             </Button>
+            <AlertDialog open={showRestartConfirm} onOpenChange={setShowRestartConfirm}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Restart all services?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will trigger a graceful container reload. All active requests will be allowed to
+                    complete before services restart. Expect ~30 seconds of downtime.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="bg-amber-600 text-white hover:bg-amber-700"
+                    onClick={() => void handleRestart()}
+                  >
+                    Restart Now
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
             <Button
               variant="outline"
               onClick={handleExport}
@@ -1426,7 +1458,7 @@ function InfoStat({
   valueClassName?: string
 }) {
   return (
-    <div className="rounded-lg border bg-white/60 p-4">
+    <div className="rounded-lg border bg-background/60 p-4">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />

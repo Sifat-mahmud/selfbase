@@ -161,8 +161,9 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-function formatNumber(n: number): string {
+function formatNumber(n: number, mode: 'compact' | 'full' = 'compact'): string {
   if (!Number.isFinite(n)) return '0'
+  if (mode === 'full') return n.toLocaleString()
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toLocaleString()
@@ -499,10 +500,13 @@ function DashboardContent({
     const cpuDir = dir(latest?.cpuTotal, prev?.cpuTotal)
 
     // server health from load level
+    // Only consider uptime a concern if there are enough heartbeats to make
+    // the measurement meaningful (at least 60 = 1 hour of 1-min intervals)
+    const uptimeIsConcern = uptimePercent < 95 && heartbeatCount > 60
     const health: 'healthy' | 'degraded' | 'down' =
       loadScore >= 85
         ? 'down'
-        : loadScore >= 60 || uptimePercent < 95
+        : loadScore >= 60 || uptimeIsConcern
           ? 'degraded'
           : 'healthy'
 
@@ -710,7 +714,7 @@ function DashboardContent({
           max={100}
           displayValue={`${computed.ramPercent}%`}
           bucket={progressBucket(computed.ramPercent)}
-          description={`${formatNumber(computed.ramUsedMb)} MB / ${formatNumber(computed.ramTotalMb)} MB`}
+          description={`${formatNumber(computed.ramUsedMb)} MB / ${formatNumber(computed.ramTotalMb, 'full')} MB`}
           spark={computed.sparkRam}
           sparkColor="#0d9488"
         />
