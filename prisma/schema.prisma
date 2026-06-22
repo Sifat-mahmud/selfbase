@@ -10,18 +10,19 @@ datasource db {
 // ==================== AUTH & USERS ====================
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  name          String?
-  passwordHash  String?
-  avatarUrl     String?
-  role          String    @default("user") // admin, user
-  isActive      Boolean   @default(true)
-  mfaEnabled    Boolean   @default(false)
-  mfaSecret     String?
-  lastLoginAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String?
+  passwordHash      String?
+  avatarUrl         String?
+  role              String    @default("user") // admin, user
+  isActive          Boolean   @default(true)
+  mustChangePassword Boolean  @default(true) // Force password change on first login
+  mfaEnabled        Boolean   @default(false)
+  mfaSecret         String?
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   apiKeys       ApiKey[]
   sessions      Session[]

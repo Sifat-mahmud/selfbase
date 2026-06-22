@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+// Routes that don't require authentication
+const PUBLIC_ROUTES = [
+  '/api/auth/login',
+  '/api/auth/setup',
+]
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -18,8 +24,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } })
   }
 
+  // Allow public routes (login, setup) without auth
+  if (PUBLIC_ROUTES.some(route => pathname === route)) {
+    return NextResponse.next()
+  }
+
   // For self-hosted local-first platform, pass through all API requests
-  // Auth can be enabled by adding JWT/API key checks here
+  // The frontend handles auth state and redirects to login if needed
+  // Auth enforcement can be tightened here by checking the Bearer token
   return NextResponse.next()
 }
 

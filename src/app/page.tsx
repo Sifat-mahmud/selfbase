@@ -36,10 +36,11 @@ import {
   Settings,
   Terminal,
   Loader2,
+  LogOut,
+  User,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import {
   CommandDialog,
   CommandEmpty,
@@ -50,7 +51,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
 import { DashboardView } from '@/components/admin/dashboard'
 import { TablesView } from '@/components/admin/tables'
@@ -70,6 +71,23 @@ import { NotificationsBell } from '@/components/admin/notifications-bell'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { KeyboardShortcuts } from '@/components/admin/keyboard-shortcuts'
 import { OnboardingTour } from '@/components/admin/onboarding-tour'
+import { LoginPage } from '@/components/auth/login-page'
+import { ForceChangePassword } from '@/components/auth/force-change-password'
+
+// ─── Auth Types ───────────────────────────────────────────────────────────
+
+interface UserPayload {
+  id: string
+  email: string
+  name: string | null
+  role: string
+  mustChangePassword: boolean
+  avatarUrl: string | null
+}
+
+type AuthState = 'checking' | 'unauthenticated' | 'must-change-password' | 'authenticated'
+
+// ─── Navigation Items ─────────────────────────────────────────────────────
 
 const navItems: { section: AdminSection; label: string; icon: React.ComponentType<{ className?: string }>; color: string }[] = [
   { section: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'text-emerald-500' },
@@ -200,16 +218,18 @@ function SectionContent({ section }: { section: AdminSection }) {
   }
 }
 
-export default function AdminStudio() {
+// =====================================================================
+// MAIN APP (post-auth)
+// =====================================================================
+
+function AdminStudio({ user, token, onLogout }: { user: UserPayload; token: string; onLogout: () => void }) {
   const { activeSection, setActiveSection } = useAdminStore()
   const [commandOpen, setCommandOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [onboardingDone, setOnboardingDone] = useState(false)
   const [searchResults, setSearchResults] = useState<SearchResults>(EMPTY_SEARCH_RESULTS)
   const [dataLoaded, setDataLoaded] = useState(false)
-  // Ref guard prevents duplicate in-flight fetches when the palette reopens quickly
   const fetchInFlight = useRef(false)
-  // Derived loading state — no synchronous setState in effect body needed
   const dataLoading = commandOpen && !dataLoaded
 
   useEffect(() => {
@@ -227,66 +247,47 @@ export default function AdminStudio() {
     return () => document.removeEventListener('keydown', down)
   }, [])
 
-  // Fetch data from all major APIs when the command palette opens (cached via dataLoaded)
   useEffect(() => {
     if (!commandOpen || dataLoaded || fetchInFlight.current) return
     fetchInFlight.current = true
     let cancelled = false
     Promise.all([
-      fetch('/api/tables').then((r) => r.json()).catch(() => []),
-      fetch('/api/pipelines').then((r) => r.json()).catch(() => []),
-      fetch('/api/functions').then((r) => r.json()).catch(() => []),
-      fetch('/api/scrapers').then((r) => r.json()).catch(() => []),
-      fetch('/api/storage').then((r) => r.json()).catch(() => []),
-      fetch('/api/auth/users').then((r) => r.json()).catch(() => []),
+      fetch('/api/tables', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
+      fetch('/api/pipelines', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
+      fetch('/api/functions', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
+      fetch('/api/scrapers', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
+      fetch('/api/storage', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
+      fetch('/api/auth/users', { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json()).catch(() => []),
     ])
       .then(([tables, pipelines, functions, scrapers, files, users]) => {
         if (cancelled) return
         setSearchResults({
           tables: normalize(tables).map((t: any) => ({
-            id: String(t.id),
-            name: String(t.name ?? ''),
-            displayName: t.displayName ?? undefined,
+            id: String(t.id), name: String(t.name ?? ''), displayName: t.displayName ?? undefined,
           })),
           pipelines: normalize(pipelines).map((p: any) => ({
-            id: String(p.id),
-            name: String(p.name ?? ''),
-            url: String(p.url ?? ''),
+            id: String(p.id), name: String(p.name ?? ''), url: String(p.url ?? ''),
           })),
           functions: normalize(functions).map((f: any) => ({
-            id: String(f.id),
-            name: String(f.name ?? ''),
-            description: f.description ?? undefined,
+            id: String(f.id), name: String(f.name ?? ''), description: f.description ?? undefined,
           })),
           scrapers: normalize(scrapers).map((s: any) => ({
-            id: String(s.id),
-            name: String(s.name ?? ''),
-            url: String(s.startUrl ?? s.url ?? ''),
+            id: String(s.id), name: String(s.name ?? ''), url: String(s.startUrl ?? s.url ?? ''),
           })),
           files: normalize(files).map((f: any) => ({
-            id: String(f.id),
-            filename: String(f.originalName ?? f.name ?? ''),
-            bucket: String(f.bucket ?? 'default'),
+            id: String(f.id), filename: String(f.originalName ?? f.name ?? ''), bucket: String(f.bucket ?? 'default'),
           })),
           users: normalize(users).map((u: any) => ({
-            id: String(u.id),
-            email: String(u.email ?? ''),
-            name: u.name ?? undefined,
+            id: String(u.id), email: String(u.email ?? ''), name: u.name ?? undefined,
           })),
         })
         setDataLoaded(true)
         fetchInFlight.current = false
       })
-      .catch(() => {
-        fetchInFlight.current = false
-      })
-    return () => {
-      cancelled = true
-      fetchInFlight.current = false
-    }
-  }, [commandOpen, dataLoaded])
+      .catch(() => { fetchInFlight.current = false })
+    return () => { cancelled = true; fetchInFlight.current = false }
+  }, [commandOpen, dataLoaded, token])
 
-  // Reset the cache 30s after the palette closes so reopened data is fresh-ish
   useEffect(() => {
     if (commandOpen) return
     const timer = setTimeout(() => setDataLoaded(false), 30000)
@@ -351,13 +352,42 @@ export default function AdminStudio() {
 
         <SidebarFooter className="p-3">
           <div className="group-data-[collapsible=icon]:hidden">
-            <div className="rounded-md bg-sidebar-accent px-3 py-2">
+            {/* User info + logout */}
+            <div className="rounded-md bg-sidebar-accent px-3 py-2 space-y-2">
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-xs text-sidebar-foreground/80">Server Online</span>
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                  <User className="h-3.5 w-3.5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium text-sidebar-foreground truncate">{user.name || user.email}</div>
+                  <div className="text-[10px] text-sidebar-foreground/50 truncate">{user.role}</div>
+                </div>
               </div>
-              <div className="mt-1 text-[10px] text-sidebar-foreground/50">SelfBase v1.0 · Local-First</div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] text-sidebar-foreground/60">Online</span>
+                </div>
+                <button
+                  onClick={onLogout}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-sidebar-foreground/50 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                  title="Sign out"
+                >
+                  <LogOut className="h-3 w-3" />
+                  Sign Out
+                </button>
+              </div>
             </div>
+          </div>
+          {/* Icon mode: just show logout */}
+          <div className="hidden group-data-[collapsible=icon]:flex items-center justify-center">
+            <button
+              onClick={onLogout}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-sidebar-foreground/50 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </SidebarFooter>
 
@@ -428,7 +458,6 @@ export default function AdminStudio() {
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
 
-          {/* Loading state */}
           {dataLoading && !dataLoaded && (
             <CommandGroup heading="Loading">
               <CommandItem disabled className="gap-2">
@@ -438,15 +467,10 @@ export default function AdminStudio() {
             </CommandGroup>
           )}
 
-          {/* Dynamic: Tables */}
           {dataLoaded && searchResults.tables.length > 0 && (
             <CommandGroup heading="Tables">
               {searchResults.tables.map((table) => (
-                <CommandItem
-                  key={table.id}
-                  onSelect={() => { setActiveSection('tables'); setCommandOpen(false) }}
-                  className="gap-2"
-                >
+                <CommandItem key={table.id} onSelect={() => { setActiveSection('tables'); setCommandOpen(false) }} className="gap-2">
                   <Database className="h-4 w-4 text-emerald-600" />
                   <span>{table.displayName || table.name}</span>
                   <span className="ml-auto text-xs text-muted-foreground font-mono truncate max-w-[180px]">{table.name}</span>
@@ -455,72 +479,46 @@ export default function AdminStudio() {
             </CommandGroup>
           )}
 
-          {/* Dynamic: Pipelines */}
           {dataLoaded && searchResults.pipelines.length > 0 && (
             <CommandGroup heading="Pipelines">
               {searchResults.pipelines.map((pipeline) => (
-                <CommandItem
-                  key={pipeline.id}
-                  onSelect={() => { setActiveSection('pipeline'); setCommandOpen(false) }}
-                  className="gap-2"
-                >
+                <CommandItem key={pipeline.id} onSelect={() => { setActiveSection('pipeline'); setCommandOpen(false) }} className="gap-2">
                   <GitBranch className="h-4 w-4 text-teal-600" />
                   <span>{pipeline.name}</span>
-                  {pipeline.url && (
-                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{pipeline.url}</span>
-                  )}
+                  {pipeline.url && (<span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{pipeline.url}</span>)}
                 </CommandItem>
               ))}
             </CommandGroup>
           )}
 
-          {/* Dynamic: Functions */}
           {dataLoaded && searchResults.functions.length > 0 && (
             <CommandGroup heading="Functions">
               {searchResults.functions.map((fn) => (
-                <CommandItem
-                  key={fn.id}
-                  onSelect={() => { setActiveSection('functions'); setCommandOpen(false) }}
-                  className="gap-2"
-                >
+                <CommandItem key={fn.id} onSelect={() => { setActiveSection('functions'); setCommandOpen(false) }} className="gap-2">
                   <Code2 className="h-4 w-4 text-purple-600" />
                   <span>{fn.name}</span>
-                  {fn.description && (
-                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{fn.description}</span>
-                  )}
+                  {fn.description && (<span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{fn.description}</span>)}
                 </CommandItem>
               ))}
             </CommandGroup>
           )}
 
-          {/* Dynamic: Scrapers */}
           {dataLoaded && searchResults.scrapers.length > 0 && (
             <CommandGroup heading="Scrapers">
               {searchResults.scrapers.map((scraper) => (
-                <CommandItem
-                  key={scraper.id}
-                  onSelect={() => { setActiveSection('scraper'); setCommandOpen(false) }}
-                  className="gap-2"
-                >
+                <CommandItem key={scraper.id} onSelect={() => { setActiveSection('scraper'); setCommandOpen(false) }} className="gap-2">
                   <Globe className="h-4 w-4 text-amber-600" />
                   <span>{scraper.name}</span>
-                  {scraper.url && (
-                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{scraper.url}</span>
-                  )}
+                  {scraper.url && (<span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{scraper.url}</span>)}
                 </CommandItem>
               ))}
             </CommandGroup>
           )}
 
-          {/* Dynamic: Storage Files */}
           {dataLoaded && searchResults.files.length > 0 && (
             <CommandGroup heading="Storage Files">
               {searchResults.files.map((file) => (
-                <CommandItem
-                  key={file.id}
-                  onSelect={() => { setActiveSection('storage'); setCommandOpen(false) }}
-                  className="gap-2"
-                >
+                <CommandItem key={file.id} onSelect={() => { setActiveSection('storage'); setCommandOpen(false) }} className="gap-2">
                   <HardDrive className="h-4 w-4 text-blue-600" />
                   <span className="truncate">{file.filename}</span>
                   <span className="ml-auto text-xs text-muted-foreground">{file.bucket}</span>
@@ -529,33 +527,21 @@ export default function AdminStudio() {
             </CommandGroup>
           )}
 
-          {/* Dynamic: Users */}
           {dataLoaded && searchResults.users.length > 0 && (
             <CommandGroup heading="Users">
-              {searchResults.users.map((user) => (
-                <CommandItem
-                  key={user.id}
-                  onSelect={() => { setActiveSection('auth'); setCommandOpen(false) }}
-                  className="gap-2"
-                >
+              {searchResults.users.map((u) => (
+                <CommandItem key={u.id} onSelect={() => { setActiveSection('auth'); setCommandOpen(false) }} className="gap-2">
                   <Shield className="h-4 w-4 text-rose-600" />
-                  <span>{user.email}</span>
-                  {user.name && (
-                    <span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{user.name}</span>
-                  )}
+                  <span>{u.email}</span>
+                  {u.name && (<span className="ml-auto text-xs text-muted-foreground truncate max-w-[200px]">{u.name}</span>)}
                 </CommandItem>
               ))}
             </CommandGroup>
           )}
 
-          {/* Static: Navigation */}
           <CommandGroup heading="Navigation">
             {navItems.map((item) => (
-              <CommandItem
-                key={item.section}
-                onSelect={() => { setActiveSection(item.section); setCommandOpen(false) }}
-                className="gap-2"
-              >
+              <CommandItem key={item.section} onSelect={() => { setActiveSection(item.section); setCommandOpen(false) }} className="gap-2">
                 <item.icon className="h-4 w-4" />
                 <span>{item.label}</span>
               </CommandItem>
@@ -583,10 +569,8 @@ export default function AdminStudio() {
         </CommandList>
       </CommandDialog>
 
-      {/* Keyboard Shortcuts Dialog */}
       <KeyboardShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
 
-      {/* Onboarding Tour */}
       {!onboardingDone && (
         <OnboardingTour
           onComplete={(navigateTo) => {
@@ -597,4 +581,130 @@ export default function AdminStudio() {
       )}
     </SidebarProvider>
   )
+}
+
+// =====================================================================
+// ROOT: Auth Wrapper
+// =====================================================================
+
+export default function SelfBaseApp() {
+  const [authState, setAuthState] = useState<AuthState>('checking')
+  const [currentUser, setCurrentUser] = useState<UserPayload | null>(null)
+  const [authToken, setAuthToken] = useState<string | null>(null)
+
+  // Check existing session on mount
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const token = localStorage.getItem('sb_auth_token')
+        if (!token) {
+          if (!cancelled) setAuthState('unauthenticated')
+          return
+        }
+
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+
+        if (!res.ok) {
+          localStorage.removeItem('sb_auth_token')
+          if (!cancelled) setAuthState('unauthenticated')
+          return
+        }
+
+        const data = await res.json()
+        const user: UserPayload = data.user
+
+        setAuthToken(token)
+        setCurrentUser(user)
+
+        if (user.mustChangePassword) {
+          if (!cancelled) setAuthState('must-change-password')
+        } else {
+          if (!cancelled) setAuthState('authenticated')
+        }
+      } catch {
+        localStorage.removeItem('sb_auth_token')
+        if (!cancelled) setAuthState('unauthenticated')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const handleLogin = useCallback((token: string, user: UserPayload) => {
+    setAuthToken(token)
+    setCurrentUser(user)
+    if (user.mustChangePassword) {
+      setAuthState('must-change-password')
+    } else {
+      setAuthState('authenticated')
+    }
+  }, [])
+
+  const handlePasswordChanged = useCallback(() => {
+    if (currentUser) {
+      const updated = { ...currentUser, mustChangePassword: false }
+      setCurrentUser(updated)
+    }
+    setAuthState('authenticated')
+  }, [currentUser])
+
+  const handleLogout = useCallback(async () => {
+    try {
+      if (authToken) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        })
+      }
+    } catch {
+      // ignore
+    }
+    localStorage.removeItem('sb_auth_token')
+    setAuthToken(null)
+    setCurrentUser(null)
+    setAuthState('unauthenticated')
+  }, [authToken])
+
+  // Loading state
+  if (authState === 'checking') {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 animate-pulse">
+            <Shield className="h-6 w-6 text-white" />
+          </div>
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+            <span className="text-sm text-muted-foreground">Loading SelfBase...</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Not authenticated → show login
+  if (authState === 'unauthenticated') {
+    return <LoginPage onLogin={handleLogin} />
+  }
+
+  // Must change password → force change
+  if (authState === 'must-change-password' && currentUser && authToken) {
+    return (
+      <ForceChangePassword
+        user={currentUser}
+        token={authToken}
+        onPasswordChanged={handlePasswordChanged}
+      />
+    )
+  }
+
+  // Authenticated → show main app
+  if (authState === 'authenticated' && currentUser && authToken) {
+    return <AdminStudio user={currentUser} token={authToken} onLogout={handleLogout} />
+  }
+
+  // Fallback
+  return <LoginPage onLogin={handleLogin} />
 }

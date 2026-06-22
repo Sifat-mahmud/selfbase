@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import { useEffect, useState, useCallback, useRef } from 'react'
+     4→import { useForm } from 'react-hook-form'
+     5→import { zodResolver } from '@hookform/resolvers/zod'
+     6→import { z } from 'zod'
+     7→import { motion, AnimatePresence } from 'framer-motion'
+     8→import {
+     9→  Settings as SettingsIcon,
+    10→  Sliders,
+    11→  Brain,
+    12→  HardDrive,
+    13→  Shield,
+    14→  Server,
+    15→  Save,
+    16→  RotateCcw,
+    17→  Download,
+    18→  CheckCircle2,
+    19→  Loader2,
+    20→  Info,
+    21→  Globe,
+    22→  Lock,
+    23→  Cpu,
+    24→  Database,
+    25→  Clock,
+    26→  Activity,
+    27→  CircleAlert,
+    28→  Mail,
+    29→  Wrench,
+    30→  AlertTriangle,
+    31→  XCircle,
+    32→  Webhook,
+    33→  Copy,
+    34→  Pencil,
+    35→  Trash2,
+    36→  Zap,
+    37→  Plus,
+    38→} from 'lucide-react'
+    39→import {
+    40→  Card,
+    41→  CardContent,
+    42→  CardDescription,
+    43→  CardHeader,
+    44→  CardTitle,
+    45→} from '@/components/ui/card'
+    46→import { Button } from '@/components/ui/button'
+    47→import { Input } from '@/components/ui/input'
+    48→import { Textarea } from '@/components/ui/textarea'
+    49→import { Switch } from '@/components/ui/switch'
+    50→import { Label } from '@/components/ui/label'
+    51→import { Badge } from '@/components/ui/badge'
+    52→import { Skeleton } from '@/components/ui/skeleton'
+    53→import { Separator } from '@/components/ui/separator'
+    54→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    55→import {
+    56→  Select,
+    57→  SelectContent,
+    58→  SelectItem,
+    59→  SelectTrigger,
+    60→  SelectValue,
+    61→} from '@/components/ui/select'
+    62→import {
+    63→  Form,
+    64→  FormControl,
+    65→  FormDescription,
+    66→  FormField,
+    67→  FormItem,
+    68→  FormLabel,
+    69→  FormMessage,
+    70→} from '@/components/ui/form'
+    71→import { useToast } from '@/hooks/use-toast'
+    72→import { cn } from '@/lib/utils'
+    73→import {
+    74→  AlertDialog,
+    75→  AlertDialogAction,
+    76→  AlertDialogCancel,
+    77→  AlertDialogContent,
+    78→  AlertDialogDescription,
+    79→  AlertDialogFooter,
+    80→  AlertDialogHeader,
+    81→  AlertDialogTitle,
+    82→} from '@/components/ui/alert-dialog'
+    83→import {
+    84→  Tooltip,
+    85→  TooltipContent,
+    86→  TooltipTrigger,
+    87→} from '@/components/ui/tooltip'
+    88→import {
+    89→  Dialog,
+    90→  DialogContent,
+    91→  DialogDescription,
+    92→  DialogFooter,
+    93→  DialogHeader,
+    94→  DialogTitle,
+    95→} from '@/components/ui/dialog'
+    96→import { Checkbox } from '@/components/ui/checkbox'
+    97→import {
+    98→  Table,
+    99→  TableBody,
+   100→  TableCell,
+   101→  TableHead,
+   102→  TableHeader,
+   103→  TableRow,
+   104→} from '@/components/ui/table'
+   105→
+   106→/* -------------------------------------------------------------------------- */
+   107→/*                              Config Key Map                                */
+   108→/* -------------------------------------------------------------------------- */
+   109→
+   110→// Maps each setting key to a default value (used to seed before fetching)
+   111→const CONFIG_DEFAULTS: Record<string, string | number | boolean> = {
+   112→  // General
+   113→  'general.appName': 'SelfBase',
+   114→  'general.appDescription': 'Self-hosted, local-first, AI-native backend-as-a-service',
+   115→  'general.adminEmail': 'admin@selfbase.local',
+   116→  'general.defaultTablePriority': 'normal',
+   117→  'general.heartbeatInterval': 15,
+   118→  'general.loadSheddingThreshold': 85,
+   119→  'general.idleThreshold': 30,
+   120→  'general.queueTtl': 300,
+   121→  'general.ssrfProtection': true,
+   122→  'general.hotReloadConfig': true,
+   123→  // AI
+   124→  'ai.defaultLlmProvider': '',
+   125→  'ai.defaultEmbeddingModel': 'text-embedding-3-small',
+   126→  'ai.embeddingDimensions': 128,
+   127→  'ai.autoEmbedOnWrite': true,
+   128→  'ai.semanticCache': true,
+   129→  'ai.costTracking': true,
+   130→  // Storage
+   131→  'storage.defaultBucketName': 'selfbase-default',
+   132→  'storage.maxFileSizeMb': 100,
+   133→  'storage.allowedMimeTypes': 'image/jpeg,image/png,image/webp,application/pdf,text/plain,application/json',
+   134→  'storage.publicUrlPattern': 'https://{cdn}/{bucket}/{path}',
+   135→  'storage.cdnBaseUrl': 'https://cdn.selfbase.local',
+   136→  // Security
+   137→  'security.jwtExpiration': 60,
+   138→  'security.apiKeyRotationPeriod': 90,
+   139→  'security.mfaRequiredForAdmin': false,
+   140→  'security.ipWhitelist': '',
+   141→  'security.corsOrigins': '*',
+   142→}
+   143→
+   144→/* -------------------------------------------------------------------------- */
+   145→/*                                 Schemas                                    */
+   146→/* -------------------------------------------------------------------------- */
+   147→
+   148→const generalSchema = z.object({
+   149→  'general.appName': z.string().min(1, 'App name is required').max(64),
+   150→  'general.appDescription': z.string().max(280).optional().or(z.literal('')),
+   151→  'general.adminEmail': z.string().email('Must be a valid email'),
+   152→  'general.defaultTablePriority': z.string(),
+   153→  'general.heartbeatInterval': z.coerce.number().int().min(5, 'Min 5s').max(600, 'Max 600s'),
+   154→  'general.loadSheddingThreshold': z.coerce.number().int().min(1).max(100),
+   155→  'general.idleThreshold': z.coerce.number().int().min(1).max(100),
+   156→  'general.queueTtl': z.coerce.number().int().min(60, 'Min 60s').max(86400),
+   157→  'general.ssrfProtection': z.boolean(),
+   158→  'general.hotReloadConfig': z.boolean(),
+   159→})
+   160→
+   161→const aiSchema = z.object({
+   162→  'ai.defaultLlmProvider': z.string(),
+   163→  'ai.defaultEmbeddingModel': z.string().min(1, 'Required'),
+   164→  'ai.embeddingDimensions': z.coerce.number().int().min(32).max(4096),
+   165→  'ai.autoEmbedOnWrite': z.boolean(),
+   166→  'ai.semanticCache': z.boolean(),
+   167→  'ai.costTracking': z.boolean(),
+   168→})
+   169→
+   170→const storageSchema = z.object({
+   171→  'storage.defaultBucketName': z.string().min(1, 'Required').max(64),
+   172→  'storage.maxFileSizeMb': z.coerce.number().int().min(1, 'Min 1MB').max(10240),
+   173→  'storage.allowedMimeTypes': z.string().min(1, 'At least one type required'),
+   174→  'storage.publicUrlPattern': z.string().min(1, 'Required'),
+   175→  'storage.cdnBaseUrl': z.string().min(1, 'Required'),
+   176→})
+   177→
+   178→const securitySchema = z.object({
+   179→  'security.jwtExpiration': z.coerce.number().int().min(1, 'Min 1 min').max(10080),
+   180→  'security.apiKeyRotationPeriod': z.coerce.number().int().min(1, 'Min 1 day').max(365),
+   181→  'security.mfaRequiredForAdmin': z.boolean(),
+   182→  'security.ipWhitelist': z.string(),
+   183→  'security.corsOrigins': z.string(),
+   184→})
+   185→
+   186→type GeneralValues = z.infer<typeof generalSchema>
+   187→type AiValues = z.infer<typeof aiSchema>
+   188→type StorageValues = z.infer<typeof storageSchema>
+   189→type SecurityValues = z.infer<typeof securitySchema>
+   190→
+   191→/* -------------------------------------------------------------------------- */
+   192→/*                            Helper: Config Fetch                            */
+   193→/* -------------------------------------------------------------------------- */
+   194→
+   195→async function fetchConfigMap(): Promise<Record<string, unknown>> {
+   196→  try {
+   197→    const res = await fetch('/api/config?limit=200')
+   198→    if (!res.ok) return {}
+   199→    const body = await res.json()
+   200→    const list: Array<{ key: string; value: unknown }> = body?.data ?? body ?? []
+   201→    const map: Record<string, unknown> = {}
+   202→    for (const item of list) {
+   203→      map[item.key] = item.value
+   204→    }
+   205→    return map
+   206→  } catch {
+   207→    return {}
+   208→  }
+   209→}
+   210→
+   211→function deriveInitial<T extends Record<string, unknown>>(
+   212→  keys: string[],
+   213→  configMap: Record<string, unknown>,
+   214→): T {
+   215→  const out = {} as Record<string, unknown>
+   216→  for (const k of keys) {
+   217→    const fallback = CONFIG_DEFAULTS[k]
+   218→    if (k in configMap && configMap[k] !== undefined && configMap[k] !== null && configMap[k] !== '') {
+   219→      out[k] = configMap[k]
+   220→    } else {
+   221→      out[k] = fallback
+   222→    }
+   223→  }
+   224→  return out as T
+   225→}
+   226→
+   227→async function saveConfig(values: Record<string, unknown>): Promise<{ ok: boolean; saved: number }> {
+   228→  let saved = 0
+   229→  let failed = 0
+   230→  // Send sequentially to avoid race conditions on the upsert endpoint.
+   231→  for (const [key, value] of Object.entries(values)) {
+   232→    try {
+   233→      const res = await fetch('/api/config', {
+   234→        method: 'POST',
+   235→        headers: { 'Content-Type': 'application/json' },
+   236→        body: JSON.stringify({ key, value }),
+   237→      })
+   238→      if (res.ok) saved++
+   239→      else failed++
+   240→    } catch {
+   241→      failed++
+   242→    }
+   243→  }
+   244→  return { ok: failed === 0, saved }
+   245→}
+   246→
+   247→/* -------------------------------------------------------------------------- */
+   248→/*                              Shared UI Bits                                */
+   249→/* -------------------------------------------------------------------------- */
+   250→
+   251→function SectionHeader({
+   252→  icon: Icon,
+   253→  title,
+   254→  description,
+   255→}: {
+   256→  icon: React.ComponentType<{ className?: string }>
+   257→  title: string
+   258→  description: string
+   259→}) {
+   260→  return (
+   261→    <div className="flex items-start gap-3">
+   262→      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/20">
+   263→        <Icon className="h-4.5 w-4.5" />
+   264→      </div>
+   265→      <div>
+   266→        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+   267→        <p className="text-xs text-muted-foreground">{description}</p>
+   268→      </div>
+   269→    </div>
+   270→  )
+   271→}
+   272→
+   273→function StickySaveBar({
+   274→  onSave,
+   275→  onReset,
+   276→  saving,
+   277→  dirty,
+   278→  dirtyCount,
+   279→}: {
+   280→  onSave: () => void
+   281→  onReset: () => void
+   282→  saving: boolean
+   283→  dirty: boolean
+   284→  dirtyCount?: number
+   285→}) {
+   286→  return (
+   287→    <div className="sticky bottom-0 -mx-4 mt-6 flex items-center justify-between border-t bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8">
+   288→      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   289→        {dirty ? (
+   290→          <>
+   291→            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+   292→            Unsaved changes{dirtyCount != null && dirtyCount > 0 ? ` (${dirtyCount} field${dirtyCount !== 1 ? 's' : ''})` : ''}
+   293→          </>
+   294→        ) : (
+   295→          <>
+   296→            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+   297→            All changes saved
+   298→          </>
+   299→        )}
+   300→      </div>
+   301→      <div className="flex items-center gap-2">
+   302→        <Button
+   303→          type="button"
+   304→          variant="ghost"
+   305→          size="sm"
+   306→          onClick={onReset}
+   307→          disabled={saving || !dirty}
+   308→          className="text-xs"
+   309→        >
+   310→          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+   311→          Reset
+   312→        </Button>
+   313→        <Button
+   314→          type="button"
+   315→          size="sm"
+   316→          onClick={onSave}
+   317→          disabled={saving || !dirty}
+   318→          className="bg-emerald-600 text-xs hover:bg-emerald-700"
+   319→        >
+   320→          {saving ? (
+   321→            <>
+   322→              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+   323→              Saving...
+   324→            </>
+   325→          ) : (
+   326→            <>
+   327→              <Save className="mr-1.5 h-3.5 w-3.5" />
+   328→              Save Changes
+   329→            </>
+   330→          )}
+   331→        </Button>
+   332→      </div>
+   333→    </div>
+   334→  )
+   335→}
+   336→
+   337→function ToggleField({
+   338→  name,
+   339→  control,
+   340→  label,
+   341→  description,
+   342→}: {
+   343→  name: string
+   344→  control: any
+   345→  label: string
+   346→  description: string
+   347→}) {
+   348→  return (
+   349→    <FormField
+   350→      control={control}
+   351→      name={name}
+   352→      render={({ field }) => (
+   353→        <div className="flex flex-row items-start justify-between gap-4 rounded-lg border p-4">
+   354→          <div className="space-y-0.5">
+   355→            <FormLabel className="text-sm font-medium">{label}</FormLabel>
+   356→            <FormDescription className="text-xs">{description}</FormDescription>
+   357→          </div>
+   358→          <FormControl>
+   359→            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+   360→          </FormControl>
+   361→        </div>
+   362→      )}
+   363→    />
+   364→  )
+   365→}
+   366→
+   367→/* -------------------------------------------------------------------------- */
+   368→/*                            Validation Helpers                              */
+   369→/* -------------------------------------------------------------------------- */
+   370→
+   371→function ValidationIndicator({ value, keyName }: { value: unknown; keyName: string }) {
+   372→  const defaults: Record<string, unknown> = CONFIG_DEFAULTS
+   373→  const isInsecureDefault =
+   374→    (keyName === 'security.corsOrigins' && value === '*') ||
+   375→    (keyName === 'security.ipWhitelist' && (value === '' || value == null)) ||
+   376→    (keyName === 'general.adminEmail' && value === 'admin@selfbase.local') ||
+   377→    (keyName === 'storage.cdnBaseUrl' && value === 'https://cdn.selfbase.local')
+   378→  const isMissing =
+   379→    value === '' || value === undefined || value === null
+   380→  const isDefault =
+   381→    keyName in defaults && value === defaults[keyName]
+   382→
+   383→  if (isMissing) {
+   384→    return (
+   385→      <Tooltip>
+   386→        <TooltipTrigger asChild>
+   387→          <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+   388→        </TooltipTrigger>
+   389→        <TooltipContent>Required field is missing</TooltipContent>
+   390→      </Tooltip>
+   391→    )
+   392→  }
+   393→  if (isInsecureDefault) {
+   394→    return (
+   395→      <Tooltip>
+   396→        <TooltipTrigger asChild>
+   397→          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+   398→        </TooltipTrigger>
+   399→        <TooltipContent>Using default or insecure value</TooltipContent>
+   400→      </Tooltip>
+   401→    )
+   402→  }
+   403→  if (isDefault) {
+   404→    return (
+   405→      <Tooltip>
+   406→        <TooltipTrigger asChild>
+   407→          <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+   408→        </TooltipTrigger>
+   409→        <TooltipContent>Using default value</TooltipContent>
+   410→      </Tooltip>
+   411→    )
+   412→  }
+   413→  return (
+   414→    <Tooltip>
+   415→      <TooltipTrigger asChild>
+   416→        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+   417→      </TooltipTrigger>
+   418→      <TooltipContent>Properly configured</TooltipContent>
+   419→    </Tooltip>
+   420→  )
+   421→}
+   422→
+   423→/* -------------------------------------------------------------------------- */
+   424→/*                              General Tab                                   */
+   425→/* -------------------------------------------------------------------------- */
+   426→
+   427→function GeneralTab({
+   428→  configMap,
+   429→  loaded,
+   430→  onSaved,
+   431→}: {
+   432→  configMap: Record<string, unknown>
+   433→  loaded: boolean
+   434→  onSaved: () => void
+   435→}) {
+   436→  const { toast } = useToast()
+   437→  const form = useForm<GeneralValues>({
+   438→    resolver: zodResolver(generalSchema),
+   439→    values: deriveInitial<GeneralValues>(
+   440→      [
+   441→        'general.appName',
+   442→        'general.appDescription',
+   443→        'general.adminEmail',
+   444→        'general.defaultTablePriority',
+   445→        'general.heartbeatInterval',
+   446→        'general.loadSheddingThreshold',
+   447→        'general.idleThreshold',
+   448→        'general.queueTtl',
+   449→        'general.ssrfProtection',
+   450→        'general.hotReloadConfig',
+   451→      ],
+   452→      configMap,
+   453→    ),
+   454→    mode: 'onChange',
+   455→  })
+   456→
+   457→  const [saving, setSaving] = useState(false)
+   458→
+   459→  const onSubmit = async (values: GeneralValues) => {
+   460→    setSaving(true)
+   461→    try {
+   462→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+   463→      if (res.ok) {
+   464→        toast({
+   465→          title: 'General settings saved',
+   466→          description: `${res.saved} config keys updated`,
+   467→        })
+   468→        onSaved()
+   469→      } else {
+   470→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+   471→      }
+   472→    } finally {
+   473→      setSaving(false)
+   474→    }
+   475→  }
+   476→
+   477→  if (!loaded) return <SettingsSkeleton />
+   478→
+   479→  return (
+   480→    <Form {...form}>
+   481→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+   482→        <Card>
+   483→          <CardHeader>
+   484→            <SectionHeader
+   485→              icon={Info}
+   486→              title="Application Identity"
+   487→              description="Displayed across the admin studio, emails, and API responses."
+   488→            />
+   489→          </CardHeader>
+   490→          <CardContent className="grid gap-5 md:grid-cols-2">
+   491→            <FormField
+   492→              control={form.control}
+   493→              name="general.appName"
+   494→              render={({ field }) => (
+   495→                <FormItem>
+   496→                  <div className="flex items-center gap-1.5">
+   497→                    <FormLabel>App Name</FormLabel>
+   498→                    <ValidationIndicator value={field.value} keyName="general.appName" />
+   499→                  </div>
+   500→                  <FormControl>
+   501→                    <Input placeholder="SelfBase" {...field} />
+   502→                  </FormControl>
+   503→                  <FormDescription>Shown in the sidebar header and browser title.</FormDescription>
+   504→                  <FormMessage />
+   505→                </FormItem>
+   506→              )}
+   507→            />
+   508→            <FormField
+   509→              control={form.control}
+   510→              name="general.adminEmail"
+   511→              render={({ field }) => (
+   512→                <FormItem>
+   513→                  <div className="flex items-center gap-1.5">
+   514→                    <FormLabel>Admin Email</FormLabel>
+   515→                    <ValidationIndicator value={field.value} keyName="general.adminEmail" />
+   516→                  </div>
+   517→                  <FormControl>
+   518→                    <Input type="email" placeholder="admin@selfbase.local" {...field} />
+   519→                  </FormControl>
+   520→                  <FormDescription>Receives system alerts and security notices.</FormDescription>
+   521→                  <FormMessage />
+   522→                </FormItem>
+   523→              )}
+   524→            />
+   525→            <FormField
+   526→              control={form.control}
+   527→              name="general.appDescription"
+   528→              render={({ field }) => (
+   529→                <FormItem className="md:col-span-2">
+   530→                  <FormLabel>Description</FormLabel>
+   531→                  <FormControl>
+   532→                    <Textarea
+   533→                      rows={2}
+   534→                      placeholder="Self-hosted, local-first, AI-native backend-as-a-service"
+   535→                      {...field}
+   536→                    />
+   537→                  </FormControl>
+   538→                  <FormDescription>Short tagline used in onboarding screens.</FormDescription>
+   539→                  <FormMessage />
+   540→                </FormItem>
+   541→              )}
+   542→            />
+   543→          </CardContent>
+   544→        </Card>
+   545→
+   546→        <Card>
+   547→          <CardHeader>
+   548→            <SectionHeader
+   549→              icon={Sliders}
+   550→              title="Performance & Throttling"
+   551→              description="Tune heartbeat cadence, load shedding, and the deferred queue."
+   552→            />
+   553→          </CardHeader>
+   554→          <CardContent className="grid gap-5 md:grid-cols-2">
+   555→            <FormField
+   556→              control={form.control}
+   557→              name="general.defaultTablePriority"
+   558→              render={({ field }) => (
+   559→                <FormItem>
+   560→                  <FormLabel>Default Table Priority</FormLabel>
+   561→                  <Select onValueChange={field.onChange} value={field.value as string}>
+   562→                    <FormControl>
+   563→                      <SelectTrigger>
+   564→                        <SelectValue placeholder="Select priority" />
+   565→                      </SelectTrigger>
+   566→                    </FormControl>
+   567→                    <SelectContent>
+   568→                      <SelectItem value="low">Low</SelectItem>
+   569→                      <SelectItem value="normal">Normal</SelectItem>
+   570→                      <SelectItem value="high">High</SelectItem>
+   571→                      <SelectItem value="critical">Critical</SelectItem>
+   572→                    </SelectContent>
+   573→                  </Select>
+   574→                  <FormDescription>
+   575→                    Default priority assigned to newly created tables for queue ordering.
+   576→                  </FormDescription>
+   577→                  <FormMessage />
+   578→                </FormItem>
+   579→              )}
+   580→            />
+   581→            <FormField
+   582→              control={form.control}
+   583→              name="general.heartbeatInterval"
+   584→              render={({ field }) => (
+   585→                <FormItem>
+   586→                  <FormLabel>Heartbeat Interval (seconds)</FormLabel>
+   587→                  <FormControl>
+   588→                    <Input type="number" min={5} max={600} {...field} />
+   589→                  </FormControl>
+   590→                  <FormDescription>How often the server emits heartbeat metrics.</FormDescription>
+   591→                  <FormMessage />
+   592→                </FormItem>
+   593→              )}
+   594→            />
+   595→            <FormField
+   596→              control={form.control}
+   597→              name="general.loadSheddingThreshold"
+   598→              render={({ field }) => (
+   599→                <FormItem>
+   600→                  <FormLabel>Load Shedding Threshold (%)</FormLabel>
+   601→                  <FormControl>
+   602→                    <Input type="number" min={1} max={100} {...field} />
+   603→                  </FormControl>
+   604→                  <FormDescription>
+   605→                    When the load score exceeds this value, low-priority requests are deferred.
+   606→                  </FormDescription>
+   607→                  <FormMessage />
+   608→                </FormItem>
+   609→              )}
+   610→            />
+   611→            <FormField
+   612→              control={form.control}
+   613→              name="general.idleThreshold"
+   614→              render={({ field }) => (
+   615→                <FormItem>
+   616→                  <FormLabel>Idle Threshold (%)</FormLabel>
+   617→                  <FormControl>
+   618→                    <Input type="number" min={1} max={100} {...field} />
+   619→                  </FormControl>
+   620→                  <FormDescription>
+   621→                    Connections idle for longer than this percentage of the interval are pruned.
+   622→                  </FormDescription>
+   623→                  <FormMessage />
+   624→                </FormItem>
+   625→              )}
+   626→            />
+   627→            <FormField
+   628→              control={form.control}
+   629→              name="general.queueTtl"
+   630→              render={({ field }) => (
+   631→                <FormItem>
+   632→                  <FormLabel>Queue TTL (seconds)</FormLabel>
+   633→                  <FormControl>
+   634→                    <Input type="number" min={60} max={86400} {...field} />
+   635→                  </FormControl>
+   636→                  <FormDescription>
+   637→                    Time-to-live for deferred requests before they expire.
+   638→                  </FormDescription>
+   639→                  <FormMessage />
+   640→                </FormItem>
+   641→              )}
+   642→            />
+   643→          </CardContent>
+   644→        </Card>
+   645→
+   646→        <Card>
+   647→          <CardHeader>
+   648→            <SectionHeader
+   649→              icon={Lock}
+   650→              title="Safety Toggles"
+   651→              description="Hardening switches for hot-reload and SSRF protection."
+   652→            />
+   653→          </CardHeader>
+   654→          <CardContent className="grid gap-3 md:grid-cols-2">
+   655→            <ToggleField
+   656→              control={form.control}
+   657→              name="general.ssrfProtection"
+   658→              label="SSRF Protection"
+   659→              description="Block outbound requests to private IP ranges and link-local addresses."
+   660→            />
+   661→            <ToggleField
+   662→              control={form.control}
+   663→              name="general.hotReloadConfig"
+   664→              label="Hot-Reload Config"
+   665→              description="Apply config changes immediately without restarting services."
+   666→            />
+   667→          </CardContent>
+   668→        </Card>
+   669→
+   670→        <StickySaveBar
+   671→          onSave={form.handleSubmit(onSubmit)}
+   672→          onReset={() => form.reset()}
+   673→          saving={saving}
+   674→          dirty={form.formState.isDirty}
+   675→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+   676→        />
+   677→      </form>
+   678→    </Form>
+   679→  )
+   680→}
+   681→
+   682→/* -------------------------------------------------------------------------- */
+   683→/*                                 AI Tab                                     */
+   684→/* -------------------------------------------------------------------------- */
+   685→
+   686→interface LlmConfigOption {
+   687→  id: string
+   688→  provider: string
+   689→  name: string
+   690→  isActive: boolean
+   691→}
+   692→
+   693→function AiTab({
+   694→  configMap,
+   695→  loaded,
+   696→  onSaved,
+   697→}: {
+   698→  configMap: Record<string, unknown>
+   699→  loaded: boolean
+   700→  onSaved: () => void
+   701→}) {
+   702→  const { toast } = useToast()
+   703→  const [providers, setProviders] = useState<LlmConfigOption[]>([])
+   704→  const [providersLoading, setProvidersLoading] = useState(true)
+   705→
+   706→  useEffect(() => {
+   707→    let active = true
+   708→    ;(async () => {
+   709→      try {
+   710→        const res = await fetch('/api/ai/llm-config')
+   711→        if (!res.ok) return
+   712→        const body = await res.json()
+   713→        const list: LlmConfigOption[] = Array.isArray(body) ? body : body?.data ?? []
+   714→        if (active) setProviders(list)
+   715→      } catch {
+   716→        // ignore — dropdown stays empty
+   717→      } finally {
+   718→        if (active) setProvidersLoading(false)
+   719→      }
+   720→    })()
+   721→    return () => {
+   722→      active = false
+   723→    }
+   724→  }, [])
+   725→
+   726→  const form = useForm<AiValues>({
+   727→    resolver: zodResolver(aiSchema),
+   728→    values: deriveInitial<AiValues>(
+   729→      [
+   730→        'ai.defaultLlmProvider',
+   731→        'ai.defaultEmbeddingModel',
+   732→        'ai.embeddingDimensions',
+   733→        'ai.autoEmbedOnWrite',
+   734→        'ai.semanticCache',
+   735→        'ai.costTracking',
+   736→      ],
+   737→      configMap,
+   738→    ),
+   739→    mode: 'onChange',
+   740→  })
+   741→
+   742→  const [saving, setSaving] = useState(false)
+   743→
+   744→  const onSubmit = async (values: AiValues) => {
+   745→    setSaving(true)
+   746→    try {
+   747→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+   748→      if (res.ok) {
+   749→        toast({
+   750→          title: 'AI settings saved',
+   751→          description: `${res.saved} config keys updated`,
+   752→        })
+   753→        onSaved()
+   754→      } else {
+   755→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+   756→      }
+   757→    } finally {
+   758→      setSaving(false)
+   759→    }
+   760→  }
+   761→
+   762→  if (!loaded) return <SettingsSkeleton />
+   763→
+   764→  return (
+   765→    <Form {...form}>
+   766→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+   767→        <Card>
+   768→          <CardHeader>
+   769→            <SectionHeader
+   770→              icon={Brain}
+   771→              title="LLM Provider"
+   772→              description="Choose the default model used for chat, RAG, and completions."
+   773→            />
+   774→          </CardHeader>
+   775→          <CardContent className="grid gap-5">
+   776→            <FormField
+   777→              control={form.control}
+   778→              name="ai.defaultLlmProvider"
+   779→              render={({ field }) => (
+   780→                <FormItem>
+   781→                  <div className="flex items-center gap-1.5">
+   782→                    <FormLabel>Default LLM Provider</FormLabel>
+   783→                    <ValidationIndicator value={field.value} keyName="ai.defaultLlmProvider" />
+   784→                  </div>
+   785→                  <Select
+   786→                    onValueChange={field.onChange}
+   787→                    value={(field.value as string) || ''}
+   788→                    disabled={providersLoading}
+   789→                  >
+   790→                    <FormControl>
+   791→                      <SelectTrigger>
+   792→                        <SelectValue
+   793→                          placeholder={
+   794→                            providersLoading ? 'Loading providers...' : 'Select a provider'
+   795→                          }
+   796→                        />
+   797→                      </SelectTrigger>
+   798→                    </FormControl>
+   799→                    <SelectContent>
+   800→                      {providers.length === 0 && !providersLoading && (
+   801→                        <SelectItem value="" disabled>
+   802→                          No providers configured — visit AI section
+   803→                        </SelectItem>
+   804→                      )}
+   805→                      {providers.map((p) => (
+   806→                        <SelectItem key={p.id} value={p.id}>
+   807→                          {p.name} · {p.provider}
+   808→                          {p.isActive ? ' (active)' : ''}
+   809→                        </SelectItem>
+   810→                      ))}
+   811→                    </SelectContent>
+   812→                  </Select>
+   813→                  <FormDescription>
+   814→                    Manage providers in the AI section. Only configured LLMs appear here.
+   815→                  </FormDescription>
+   816→                  <FormMessage />
+   817→                </FormItem>
+   818→              )}
+   819→            />
+   820→          </CardContent>
+   821→        </Card>
+   822→
+   823→        <Card>
+   824→          <CardHeader>
+   825→            <SectionHeader
+   826→              icon={Cpu}
+   827→              title="Embeddings"
+   828→              description="Vectorisation settings drive semantic search and RAG retrieval."
+   829→            />
+   830→          </CardHeader>
+   831→          <CardContent className="grid gap-5 md:grid-cols-2">
+   832→            <FormField
+   833→              control={form.control}
+   834→              name="ai.defaultEmbeddingModel"
+   835→              render={({ field }) => (
+   836→                <FormItem>
+   837→                  <div className="flex items-center gap-1.5">
+   838→                    <FormLabel>Default Embedding Model</FormLabel>
+   839→                    <ValidationIndicator value={field.value} keyName="ai.defaultEmbeddingModel" />
+   840→                  </div>
+   841→                  <FormControl>
+   842→                    <Input placeholder="text-embedding-3-small" {...field} />
+   843→                  </FormControl>
+   844→                  <FormDescription>Used when a table has embeddings enabled.</FormDescription>
+   845→                  <FormMessage />
+   846→                </FormItem>
+   847→              )}
+   848→            />
+   849→            <FormField
+   850→              control={form.control}
+   851→              name="ai.embeddingDimensions"
+   852→              render={({ field }) => (
+   853→                <FormItem>
+   854→                  <FormLabel>Embedding Dimensions</FormLabel>
+   855→                  <Select onValueChange={field.onChange} value={String(field.value)}>
+   856→                    <FormControl>
+   857→                      <SelectTrigger>
+   858→                        <SelectValue placeholder="Dimensions" />
+   859→                      </SelectTrigger>
+   860→                    </FormControl>
+   861→                    <SelectContent>
+   862→                      {[64, 128, 256, 512, 768, 1024, 1536, 3072].map((d) => (
+   863→                        <SelectItem key={d} value={String(d)}>
+   864→                          {d}
+   865→                        </SelectItem>
+   866→                      ))}
+   867→                    </SelectContent>
+   868→                  </Select>
+   869→                  <FormDescription>
+   870→                    Higher dimensions improve recall at the cost of storage and latency.
+   871→                  </FormDescription>
+   872→                  <FormMessage />
+   873→                </FormItem>
+   874→              )}
+   875→            />
+   876→          </CardContent>
+   877→        </Card>
+   878→
+   879→        <Card>
+   880→          <CardHeader>
+   881→            <SectionHeader
+   882→              icon={Activity}
+   883→              title="Runtime Behavior"
+   884→              description="Automatic embedding, semantic caching, and cost observability."
+   885→            />
+   886→          </CardHeader>
+   887→          <CardContent className="grid gap-3 md:grid-cols-3">
+   888→            <ToggleField
+   889→              control={form.control}
+   890→              name="ai.autoEmbedOnWrite"
+   891→              label="Auto-Embed on Write"
+   892→              description="Generate embeddings automatically when rows are inserted or updated."
+   893→            />
+   894→            <ToggleField
+   895→              control={form.control}
+   896→              name="ai.semanticCache"
+   897→              label="Semantic Cache"
+   898→              description="Cache LLM responses using cosine similarity to skip duplicate queries."
+   899→            />
+   900→            <ToggleField
+   901→              control={form.control}
+   902→              name="ai.costTracking"
+   903→              label="Cost Tracking"
+   904→              description="Log token usage and estimated cost for every LLM call."
+   905→            />
+   906→          </CardContent>
+   907→        </Card>
+   908→
+   909→        <StickySaveBar
+   910→          onSave={form.handleSubmit(onSubmit)}
+   911→          onReset={() => form.reset()}
+   912→          saving={saving}
+   913→          dirty={form.formState.isDirty}
+   914→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+   915→        />
+   916→      </form>
+   917→    </Form>
+   918→  )
+   919→}
+   920→
+   921→/* -------------------------------------------------------------------------- */
+   922→/*                              Storage Tab                                   */
+   923→/* -------------------------------------------------------------------------- */
+   924→
+   925→function StorageTab({
+   926→  configMap,
+   927→  loaded,
+   928→  onSaved,
+   929→}: {
+   930→  configMap: Record<string, unknown>
+   931→  loaded: boolean
+   932→  onSaved: () => void
+   933→}) {
+   934→  const { toast } = useToast()
+   935→  const form = useForm<StorageValues>({
+   936→    resolver: zodResolver(storageSchema),
+   937→    values: deriveInitial<StorageValues>(
+   938→      [
+   939→        'storage.defaultBucketName',
+   940→        'storage.maxFileSizeMb',
+   941→        'storage.allowedMimeTypes',
+   942→        'storage.publicUrlPattern',
+   943→        'storage.cdnBaseUrl',
+   944→      ],
+   945→      configMap,
+   946→    ),
+   947→    mode: 'onChange',
+   948→  })
+   949→
+   950→  const [saving, setSaving] = useState(false)
+   951→
+   952→  const onSubmit = async (values: StorageValues) => {
+   953→    setSaving(true)
+   954→    try {
+   955→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+   956→      if (res.ok) {
+   957→        toast({
+   958→          title: 'Storage settings saved',
+   959→          description: `${res.saved} config keys updated`,
+   960→        })
+   961→        onSaved()
+   962→      } else {
+   963→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+   964→      }
+   965→    } finally {
+   966→      setSaving(false)
+   967→    }
+   968→  }
+   969→
+   970→  if (!loaded) return <SettingsSkeleton />
+   971→
+   972→  return (
+   973→    <Form {...form}>
+   974→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+   975→        <Card>
+   976→          <CardHeader>
+   977→            <SectionHeader
+   978→              icon={HardDrive}
+   979→              title="Bucket & Limits"
+   980→              description="Default bucket and upload size constraints."
+   981→            />
+   982→          </CardHeader>
+   983→          <CardContent className="grid gap-5 md:grid-cols-2">
+   984→            <FormField
+   985→              control={form.control}
+   986→              name="storage.defaultBucketName"
+   987→              render={({ field }) => (
+   988→                <FormItem>
+   989→                  <div className="flex items-center gap-1.5">
+   990→                    <FormLabel>Default Bucket Name</FormLabel>
+   991→                    <ValidationIndicator value={field.value} keyName="storage.defaultBucketName" />
+   992→                  </div>
+   993→                  <FormControl>
+   994→                    <Input placeholder="selfbase-default" {...field} />
+   995→                  </FormControl>
+   996→                  <FormDescription>
+   997→                    Bucket used for uploads that do not specify an explicit target.
+   998→                  </FormDescription>
+   999→                  <FormMessage />
+  1000→                </FormItem>
+  1001→              )}
+  1002→            />
+  1003→            <FormField
+  1004→              control={form.control}
+  1005→              name="storage.maxFileSizeMb"
+  1006→              render={({ field }) => (
+  1007→                <FormItem>
+  1008→                  <FormLabel>Max File Size (MB)</FormLabel>
+  1009→                  <FormControl>
+  1010→                    <Input type="number" min={1} max={10240} {...field} />
+  1011→                  </FormControl>
+  1012→                  <FormDescription>Hard limit enforced at the upload API.</FormDescription>
+  1013→                  <FormMessage />
+  1014→                </FormItem>
+  1015→              )}
+  1016→            />
+  1017→            <FormField
+  1018→              control={form.control}
+  1019→              name="storage.allowedMimeTypes"
+  1020→              render={({ field }) => (
+  1021→                <FormItem className="md:col-span-2">
+  1022→                  <FormLabel>Allowed MIME Types</FormLabel>
+  1023→                  <FormControl>
+  1024→                    <Textarea
+  1025→                      rows={2}
+  1026→                      placeholder="image/jpeg,image/png,application/pdf"
+  1027→                      className="font-mono text-xs"
+  1028→                      {...field}
+  1029→                    />
+  1030→                  </FormControl>
+  1031→                  <FormDescription>
+  1032→                    Comma-separated list. Uploads with other types are rejected.
+  1033→                  </FormDescription>
+  1034→                  <FormMessage />
+  1035→                </FormItem>
+  1036→              )}
+  1037→            />
+  1038→          </CardContent>
+  1039→        </Card>
+  1040→
+  1041→        <Card>
+  1042→          <CardHeader>
+  1043→            <SectionHeader
+  1044→              icon={Globe}
+  1045→              title="Public URLs & CDN"
+  1046→              description="How files are exposed to the public internet."
+  1047→            />
+  1048→          </CardHeader>
+  1049→          <CardContent className="grid gap-5 md:grid-cols-2">
+  1050→            <FormField
+  1051→              control={form.control}
+  1052→              name="storage.publicUrlPattern"
+  1053→              render={({ field }) => (
+  1054→                <FormItem>
+  1055→                  <FormLabel>Public URL Pattern</FormLabel>
+  1056→                  <FormControl>
+  1057→                    <Input
+  1058→                      placeholder="https://{cdn}/{bucket}/{path}"
+  1059→                      className="font-mono text-xs"
+  1060→                      {...field}
+  1061→                    />
+  1062→                  </FormControl>
+  1063→                  <FormDescription>
+  1064→                    Tokens <code className="text-emerald-700">{'{cdn}'}</code>,{' '}
+  1065→                    <code className="text-emerald-700">{'{bucket}'}</code>, and{' '}
+  1066→                    <code className="text-emerald-700">{'{path}'}</code> are substituted at runtime.
+  1067→                  </FormDescription>
+  1068→                  <FormMessage />
+  1069→                </FormItem>
+  1070→              )}
+  1071→            />
+  1072→            <FormField
+  1073→              control={form.control}
+  1074→              name="storage.cdnBaseUrl"
+  1075→              render={({ field }) => (
+  1076→                <FormItem>
+  1077→                  <div className="flex items-center gap-1.5">
+  1078→                    <FormLabel>CDN Base URL</FormLabel>
+  1079→                    <ValidationIndicator value={field.value} keyName="storage.cdnBaseUrl" />
+  1080→                  </div>
+  1081→                  <FormControl>
+  1082→                    <Input
+  1083→                      placeholder="https://cdn.selfbase.local"
+  1084→                      className="font-mono text-xs"
+  1085→                      {...field}
+  1086→                    />
+  1087→                  </FormControl>
+  1088→                  <FormDescription>Origin-pull base for the public CDN edge.</FormDescription>
+  1089→                  <FormMessage />
+  1090→                </FormItem>
+  1091→              )}
+  1092→            />
+  1093→          </CardContent>
+  1094→        </Card>
+  1095→
+  1096→        <StickySaveBar
+  1097→          onSave={form.handleSubmit(onSubmit)}
+  1098→          onReset={() => form.reset()}
+  1099→          saving={saving}
+  1100→          dirty={form.formState.isDirty}
+  1101→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+  1102→        />
+  1103→      </form>
+  1104→    </Form>
+  1105→  )
+  1106→}
+  1107→
+  1108→/* -------------------------------------------------------------------------- */
+  1109→/*                              Security Tab                                  */
+  1110→/* -------------------------------------------------------------------------- */
+  1111→
+  1112→function SecurityTab({
+  1113→  configMap,
+  1114→  loaded,
+  1115→  onSaved,
+  1116→}: {
+  1117→  configMap: Record<string, unknown>
+  1118→  loaded: boolean
+  1119→  onSaved: () => void
+  1120→}) {
+  1121→  const { toast } = useToast()
+  1122→  const form = useForm<SecurityValues>({
+  1123→    resolver: zodResolver(securitySchema),
+  1124→    values: deriveInitial<SecurityValues>(
+  1125→      [
+  1126→        'security.jwtExpiration',
+  1127→        'security.apiKeyRotationPeriod',
+  1128→        'security.mfaRequiredForAdmin',
+  1129→        'security.ipWhitelist',
+  1130→        'security.corsOrigins',
+  1131→      ],
+  1132→      configMap,
+  1133→    ),
+  1134→    mode: 'onChange',
+  1135→  })
+  1136→
+  1137→  const [saving, setSaving] = useState(false)
+  1138→
+  1139→  const onSubmit = async (values: SecurityValues) => {
+  1140→    setSaving(true)
+  1141→    try {
+  1142→      const res = await saveConfig(values as unknown as Record<string, unknown>)
+  1143→      if (res.ok) {
+  1144→        toast({
+  1145→          title: 'Security settings saved',
+  1146→          description: `${res.saved} config keys updated`,
+  1147→        })
+  1148→        onSaved()
+  1149→      } else {
+  1150→        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+  1151→      }
+  1152→    } finally {
+  1153→      setSaving(false)
+  1154→    }
+  1155→  }
+  1156→
+  1157→  if (!loaded) return <SettingsSkeleton />
+  1158→
+  1159→  return (
+  1160→    <Form {...form}>
+  1161→      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+  1162→        <Card>
+  1163→          <CardHeader>
+  1164→            <SectionHeader
+  1165→              icon={Shield}
+  1166→              title="Tokens & Rotation"
+  1167→              description="Lifetime of issued credentials and admin MFA enforcement."
+  1168→            />
+  1169→          </CardHeader>
+  1170→          <CardContent className="grid gap-5 md:grid-cols-2">
+  1171→            <FormField
+  1172→              control={form.control}
+  1173→              name="security.jwtExpiration"
+  1174→              render={({ field }) => (
+  1175→                <FormItem>
+  1176→                  <FormLabel>JWT Expiration (minutes)</FormLabel>
+  1177→                  <FormControl>
+  1178→                    <Input type="number" min={1} max={10080} {...field} />
+  1179→                  </FormControl>
+  1180→                  <FormDescription>
+  1181→                    Time-to-live for access tokens. Refresh tokens last 7× longer.
+  1182→                  </FormDescription>
+  1183→                  <FormMessage />
+  1184→                </FormItem>
+  1185→              )}
+  1186→            />
+  1187→            <FormField
+  1188→              control={form.control}
+  1189→              name="security.apiKeyRotationPeriod"
+  1190→              render={({ field }) => (
+  1191→                <FormItem>
+  1192→                  <FormLabel>API Key Rotation Period (days)</FormLabel>
+  1193→                  <FormControl>
+  1194→                    <Input type="number" min={1} max={365} {...field} />
+  1195→                  </FormControl>
+  1196→                  <FormDescription>
+  1197→                    Recommended rotation cadence surfaced in the Auth section.
+  1198→                  </FormDescription>
+  1199→                  <FormMessage />
+  1200→                </FormItem>
+  1201→              )}
+  1202→            />
+  1203→            <div className="md:col-span-2">
+  1204→              <ToggleField
+  1205→                control={form.control}
+  1206→                name="security.mfaRequiredForAdmin"
+  1207→                label="Require MFA for Admins"
+  1208→                description="Admins without a verified second factor cannot access the studio."
+  1209→              />
+  1210→            </div>
+  1211→          </CardContent>
+  1212→        </Card>
+  1213→
+  1214→        <Card>
+  1215→          <CardHeader>
+  1216→            <SectionHeader
+  1217→              icon={Lock}
+  1218→              title="Network Policy"
+  1219→              description="IP allow-listing and CORS configuration."
+  1220→            />
+  1221→          </CardHeader>
+  1222→          <CardContent className="grid gap-5 md:grid-cols-2">
+  1223→            <FormField
+  1224→              control={form.control}
+  1225→              name="security.ipWhitelist"
+  1226→              render={({ field }) => (
+  1227→                <FormItem>
+  1228→                  <div className="flex items-center gap-1.5">
+  1229→                    <FormLabel>IP Whitelist</FormLabel>
+  1230→                    <ValidationIndicator value={field.value} keyName="security.ipWhitelist" />
+  1231→                  </div>
+  1232→                  <FormControl>
+  1233→                    <Textarea
+  1234→                      rows={5}
+  1235→                      placeholder={'10.0.0.0/8\n192.168.1.0/24\n203.0.113.42'}
+  1236→                      className="font-mono text-xs"
+  1237→                      {...field}
+  1238→                    />
+  1239→                  </FormControl>
+  1240→                  <FormDescription>
+  1241→                    One CIDR or IP per line. Empty list means all source IPs are allowed.
+  1242→                  </FormDescription>
+  1243→                  <FormMessage />
+  1244→                </FormItem>
+  1245→              )}
+  1246→            />
+  1247→            <FormField
+  1248→              control={form.control}
+  1249→              name="security.corsOrigins"
+  1250→              render={({ field }) => (
+  1251→                <FormItem>
+  1252→                  <div className="flex items-center gap-1.5">
+  1253→                    <FormLabel>CORS Origins</FormLabel>
+  1254→                    <ValidationIndicator value={field.value} keyName="security.corsOrigins" />
+  1255→                  </div>
+  1256→                  <FormControl>
+  1257→                    <Textarea
+  1258→                      rows={5}
+  1259→                      placeholder={'https://app.selfbase.local\nhttps://studio.selfbase.local'}
+  1260→                      className="font-mono text-xs"
+  1261→                      {...field}
+  1262→                    />
+  1263→                  </FormControl>
+  1264→                  <FormDescription>
+  1265→                    One origin per line. Use <code className="text-emerald-700">*</code> to allow all
+  1266→                    (not recommended for production).
+  1267→                  </FormDescription>
+  1268→                  <FormMessage />
+  1269→                </FormItem>
+  1270→              )}
+  1271→            />
+  1272→          </CardContent>
+  1273→        </Card>
+  1274→
+  1275→        <StickySaveBar
+  1276→          onSave={form.handleSubmit(onSubmit)}
+  1277→          onReset={() => form.reset()}
+  1278→          saving={saving}
+  1279→          dirty={form.formState.isDirty}
+  1280→          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+  1281→        />
+  1282→      </form>
+  1283→    </Form>
+  1284→  )
+  1285→}
+  1286→
+  1287→/* -------------------------------------------------------------------------- */
+  1288→/*                              Webhooks Tab                                  */
+  1289→/* -------------------------------------------------------------------------- */
+  1290→
+  1291→const WEBHOOK_EVENTS = [
+  1292→  'pipeline.success',
+  1293→  'pipeline.failed',
+  1294→  'scraper.complete',
+  1295→  'alert.triggered',
+  1296→  'function.error',
+  1297→] as const
+  1298→
+  1299→type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
+  1300→
+  1301→interface WebhookItem {
+  1302→  id: string
+  1303→  url: string
+  1304→  events: WebhookEvent[]
+  1305→  secretKey: string
+  1306→  description: string
+  1307→  isActive: boolean
+  1308→  lastTriggered: string | null
+  1309→  createdAt: string
+  1310→}
+  1311→
+  1312→function generateSecretKey(): string {
+  1313→  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  1314→  const segments: string[] = []
+  1315→  for (let s = 0; s < 4; s++) {
+  1316→    let seg = ''
+  1317→    for (let i = 0; i < 8; i++) {
+  1318→      seg += chars.charAt(Math.floor(Math.random() * chars.length))
+  1319→    }
+  1320→    segments.push(seg)
+  1321→  }
+  1322→  return `whk_${segments.join('_')}`
+  1323→}
+  1324→
+  1325→function WebhooksTab() {
+  1326→  const { toast } = useToast()
+  1327→  const [webhooks, setWebhooks] = useState<WebhookItem[]>([
+  1328→    {
+  1329→      id: 'wh-1',
+  1330→      url: 'https://hooks.example.com/pipeline-notify',
+  1331→      events: ['pipeline.success', 'pipeline.failed'],
+  1332→      secretKey: 'whk_aBcDeFgH_jKlMnOpQ_rStUvWxY_zAbCdEfG',
+  1333→      description: 'Pipeline status notifications',
+  1334→      isActive: true,
+  1335→      lastTriggered: new Date(Date.now() - 3600000).toISOString(),
+  1336→      createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+  1337→    },
+  1338→    {
+  1339→      id: 'wh-2',
+  1340→      url: 'https://api.myapp.com/webhooks/scraper-done',
+  1341→      events: ['scraper.complete'],
+  1342→      secretKey: 'whk_XyZaBcDe_fGhIjKlM_nOpQrStU_vWxYzAbC',
+  1343→      description: 'Trigger post-scraper processing',
+  1344→      isActive: true,
+  1345→      lastTriggered: new Date(Date.now() - 7200000).toISOString(),
+  1346→      createdAt: new Date(Date.now() - 86400000 * 7).toISOString(),
+  1347→    },
+  1348→    {
+  1349→      id: 'wh-3',
+  1350→      url: 'https://alerts.example.com/function-errors',
+  1351→      events: ['function.error', 'alert.triggered'],
+  1352→      secretKey: 'whk_MnOpQrSt_UvWxYzAb_CdEfGhIj_KlMnOpQr',
+  1353→      description: '',
+  1354→      isActive: false,
+  1355→      lastTriggered: null,
+  1356→      createdAt: new Date(Date.now() - 86400000).toISOString(),
+  1357→    },
+  1358→  ])
+  1359→
+  1360→  const [showAddDialog, setShowAddDialog] = useState(false)
+  1361→  const [showEditDialog, setShowEditDialog] = useState(false)
+  1362→  const [editingWebhook, setEditingWebhook] = useState<WebhookItem | null>(null)
+  1363→  const [testingId, setTestingId] = useState<string | null>(null)
+  1364→  const [testResults, setTestResults] = useState<Record<string, { ok: boolean; ms: number }>>({})
+  1365→
+  1366→  // Add form state
+  1367→  const [addUrl, setAddUrl] = useState('')
+  1368→  const [addEvents, setAddEvents] = useState<WebhookEvent[]>([])
+  1369→  const [addDescription, setAddDescription] = useState('')
+  1370→  const [addActive, setAddActive] = useState(true)
+  1371→  const [addSecret, setAddSecret] = useState('')
+  1372→  const [addUrlError, setAddUrlError] = useState('')
+  1373→
+  1374→  // Edit form state
+  1375→  const [editUrl, setEditUrl] = useState('')
+  1376→  const [editEvents, setEditEvents] = useState<WebhookEvent[]>([])
+  1377→  const [editDescription, setEditDescription] = useState('')
+  1378→  const [editActive, setEditActive] = useState(true)
+  1379→  const [editUrlError, setEditUrlError] = useState('')
+  1380→
+  1381→  const resetAddForm = () => {
+  1382→    setAddUrl('')
+  1383→    setAddEvents([])
+  1384→    setAddDescription('')
+  1385→    setAddActive(true)
+  1386→    setAddSecret('')
+  1387→    setAddUrlError('')
+  1388→  }
+  1389→
+  1390→  const openAddDialog = () => {
+  1391→    resetAddForm()
+  1392→    setAddSecret(generateSecretKey())
+  1393→    setShowAddDialog(true)
+  1394→  }
+  1395→
+  1396→  const validateUrl = (url: string): string => {
+  1397→    if (!url) return 'URL is required'
+  1398→    if (!url.startsWith('https://')) return 'URL must start with https://'
+  1399→    try {
+  1400→      new URL(url)
+  1401→      return ''
+  1402→    } catch {
+  1403→      return 'Invalid URL format'
+  1404→    }
+  1405→  }
+  1406→
+  1407→  const handleAddWebhook = () => {
+  1408→    const error = validateUrl(addUrl)
+  1409→    if (error) {
+  1410→      setAddUrlError(error)
+  1411→      return
+  1412→    }
+  1413→    if (addEvents.length === 0) {
+  1414→      toast({ title: 'Select at least one event', variant: 'destructive' })
+  1415→      return
+  1416→    }
+  1417→
+  1418→    const newWebhook: WebhookItem = {
+  1419→      id: `wh-${Date.now()}`,
+  1420→      url: addUrl,
+  1421→      events: addEvents,
+  1422→      secretKey: addSecret,
+  1423→      description: addDescription,
+  1424→      isActive: addActive,
+  1425→      lastTriggered: null,
+  1426→      createdAt: new Date().toISOString(),
+  1427→    }
+  1428→    setWebhooks((prev) => [newWebhook, ...prev])
+  1429→    setShowAddDialog(false)
+  1430→    toast({ title: 'Webhook created', description: `Listening for ${addEvents.join(', ')}` })
+  1431→  }
+  1432→
+  1433→  const openEditDialog = (wh: WebhookItem) => {
+  1434→    setEditingWebhook(wh)
+  1435→    setEditUrl(wh.url)
+  1436→    setEditEvents([...wh.events])
+  1437→    setEditDescription(wh.description)
+  1438→    setEditActive(wh.isActive)
+  1439→    setEditUrlError('')
+  1440→    setShowEditDialog(true)
+  1441→  }
+  1442→
+  1443→  const handleEditWebhook = () => {
+  1444→    if (!editingWebhook) return
+  1445→    const error = validateUrl(editUrl)
+  1446→    if (error) {
+  1447→      setEditUrlError(error)
+  1448→      return
+  1449→    }
+  1450→    if (editEvents.length === 0) {
+  1451→      toast({ title: 'Select at least one event', variant: 'destructive' })
+  1452→      return
+  1453→    }
+  1454→    setWebhooks((prev) =>
+  1455→      prev.map((wh) =>
+  1456→        wh.id === editingWebhook.id
+  1457→          ? { ...wh, url: editUrl, events: editEvents, description: editDescription, isActive: editActive }
+  1458→          : wh,
+  1459→      ),
+  1460→    )
+  1461→    setShowEditDialog(false)
+  1462→    toast({ title: 'Webhook updated' })
+  1463→  }
+  1464→
+  1465→  const handleDelete = (id: string) => {
+  1466→    setWebhooks((prev) => prev.filter((wh) => wh.id !== id))
+  1467→    toast({ title: 'Webhook deleted' })
+  1468→  }
+  1469→
+  1470→  const handleTest = async (wh: WebhookItem) => {
+  1471→    setTestingId(wh.id)
+  1472→    setTestResults((prev) => {
+  1473→      const next = { ...prev }
+  1474→      delete next[wh.id]
+  1475→      return next
+  1476→    })
+  1477→
+  1478→    // Simulate sending a test payload
+  1479→    const start = Date.now()
+  1480→    await new Promise((r) => setTimeout(r, 800 + Math.random() * 700))
+  1481→    const elapsed = Date.now() - start
+  1482→    const ok = Math.random() > 0.2 // 80% success rate for demo
+  1483→
+  1484→    setTestResults((prev) => ({ ...prev, [wh.id]: { ok, ms: elapsed } }))
+  1485→    setTestingId(null)
+  1486→
+  1487→    toast({
+  1488→      title: ok ? 'Test successful' : 'Test failed',
+  1489→      description: ok
+  1490→        ? `${wh.url} responded in ${elapsed}ms`
+  1491→        : `${wh.url} returned an error after ${elapsed}ms`,
+  1492→      variant: ok ? 'default' : 'destructive',
+  1493→    })
+  1494→  }
+  1495→
+  1496→  const copyToClipboard = (text: string, label: string) => {
+  1497→    navigator.clipboard.writeText(text).then(
+  1498→      () => toast({ title: `${label} copied` }),
+  1499→      () => toast({ title: 'Failed to copy', variant: 'destructive' }),
+  1500→    )
+  1501→  }
+  1502→
+  1503→  const toggleEvent = (
+  1504→    event: WebhookEvent,
+  1505→    current: WebhookEvent[],
+  1506→    setter: React.Dispatch<React.SetStateAction<WebhookEvent[]>>,
+  1507→  ) => {
+  1508→    setter(current.includes(event) ? current.filter((e) => e !== event) : [...current, event])
+  1509→  }
+  1510→
+  1511→  return (
+  1512→    <div className="space-y-6">
+  1513→      <div className="flex items-center justify-between">
+  1514→        <div>
+  1515→          <h2 className="text-lg font-semibold">Webhooks</h2>
+  1516→          <p className="text-sm text-muted-foreground">
+  1517→            Configure outgoing webhooks to receive real-time event notifications.
+  1518→          </p>
+  1519→        </div>
+  1520→        <Button
+  1521→          onClick={openAddDialog}
+  1522→          size="sm"
+  1523→          className="gap-1.5 bg-emerald-600 text-xs hover:bg-emerald-700 active:scale-[0.97] transition-transform"
+  1524→        >
+  1525→          <Plus className="h-3.5 w-3.5" />
+  1526→          Add Webhook
+  1527→        </Button>
+  1528→      </div>
+  1529→
+  1530→      {/* Webhook List Table */}
+  1531→      {webhooks.length === 0 ? (
+  1532→        <Card>
+  1533→          <CardContent className="flex flex-col items-center justify-center gap-2 py-10">
+  1534→            <div className="rounded-full bg-emerald-500/10 p-3 text-emerald-600">
+  1535→              <Webhook className="h-6 w-6" />
+  1536→            </div>
+  1537→            <p className="text-sm font-medium">No webhooks configured</p>
+  1538→            <p className="text-xs text-muted-foreground">Add a webhook to receive event notifications.</p>
+  1539→            <Button
+  1540→              onClick={openAddDialog}
+  1541→              variant="outline"
+  1542→              size="sm"
+  1543→              className="mt-2 gap-1.5 active:scale-[0.97] transition-transform"
+  1544→            >
+  1545→              <Plus className="h-3.5 w-3.5" />
+  1546→              Add Webhook
+  1547→            </Button>
+  1548→          </CardContent>
+  1549→        </Card>
+  1550→      ) : (
+  1551→        <Card>
+  1552→          <CardContent className="p-0">
+  1553→            <div className="overflow-x-auto">
+  1554→              <Table>
+  1555→                <TableHeader>
+  1556→                  <TableRow>
+  1557→                    <TableHead className="w-[280px]">URL</TableHead>
+  1558→                    <TableHead>Events</TableHead>
+  1559→                    <TableHead className="w-[100px]">Status</TableHead>
+  1560→                    <TableHead className="w-[140px]">Last Triggered</TableHead>
+  1561→                    <TableHead className="w-[140px] text-right">Actions</TableHead>
+  1562→                  </TableRow>
+  1563→                </TableHeader>
+  1564→                <TableBody>
+  1565→                  {webhooks.map((wh) => (
+  1566→                    <TableRow key={wh.id}>
+  1567→                      <TableCell>
+  1568→                        <div className="flex items-center gap-1.5">
+  1569→                          <code className="max-w-[200px] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+  1570→                            {wh.url.length > 40 ? `${wh.url.slice(0, 40)}…` : wh.url}
+  1571→                          </code>
+  1572→                          <Tooltip>
+  1573→                            <TooltipTrigger asChild>
+  1574→                              <Button
+  1575→                                variant="ghost"
+  1576→                                size="icon"
+  1577→                                className="h-6 w-6"
+  1578→                                onClick={() => copyToClipboard(wh.url, 'URL')}
+  1579→                              >
+  1580→                                <Copy className="h-3 w-3" />
+  1581→                              </Button>
+  1582→                            </TooltipTrigger>
+  1583→                            <TooltipContent>Copy URL</TooltipContent>
+  1584→                          </Tooltip>
+  1585→                        </div>
+  1586→                      </TableCell>
+  1587→                      <TableCell>
+  1588→                        <div className="flex flex-wrap gap-1">
+  1589→                          {wh.events.map((ev) => (
+  1590→                            <Badge
+  1591→                              key={ev}
+  1592→                              variant="outline"
+  1593→                              className="border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400"
+  1594→                            >
+  1595→                              {ev}
+  1596→                            </Badge>
+  1597→                          ))}
+  1598→                        </div>
+  1599→                      </TableCell>
+  1600→                      <TableCell>
+  1601→                        <Badge
+  1602→                          variant="outline"
+  1603→                          className={
+  1604→                            wh.isActive
+  1605→                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400'
+  1606→                              : 'border-muted bg-muted/50 text-muted-foreground'
+  1607→                          }
+  1608→                        >
+  1609→                          <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${wh.isActive ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground'}`} />
+  1610→                          {wh.isActive ? 'Active' : 'Disabled'}
+  1611→                        </Badge>
+  1612→                      </TableCell>
+  1613→                      <TableCell className="text-xs text-muted-foreground">
+  1614→                        {wh.lastTriggered ? formatWebhookTime(wh.lastTriggered) : 'Never'}
+  1615→                      </TableCell>
+  1616→                      <TableCell>
+  1617→                        <div className="flex items-center justify-end gap-1">
+  1618→                          <Tooltip>
+  1619→                            <TooltipTrigger asChild>
+  1620→                              <Button
+  1621→                                variant="ghost"
+  1622→                                size="icon"
+  1623→                                className="h-7 w-7"
+  1624→                                onClick={() => openEditDialog(wh)}
+  1625→                              >
+  1626→                                <Pencil className="h-3 w-3" />
+  1627→                              </Button>
+  1628→                            </TooltipTrigger>
+  1629→                            <TooltipContent>Edit</TooltipContent>
+  1630→                          </Tooltip>
+  1631→                          <Tooltip>
+  1632→                            <TooltipTrigger asChild>
+  1633→                              <Button
+  1634→                                variant="ghost"
+  1635→                                size="icon"
+  1636→                                className="h-7 w-7"
+  1637→                                disabled={testingId === wh.id}
+  1638→                                onClick={() => void handleTest(wh)}
+  1639→                              >
+  1640→                                {testingId === wh.id ? (
+  1641→                                  <Loader2 className="h-3 w-3 animate-spin" />
+  1642→                                ) : testResults[wh.id]?.ok ? (
+  1643→                                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+  1644→                                ) : testResults[wh.id] && !testResults[wh.id].ok ? (
+  1645→                                  <XCircle className="h-3 w-3 text-red-500" />
+  1646→                                ) : (
+  1647→                                  <Zap className="h-3 w-3" />
+  1648→                                )}
+  1649→                              </Button>
+  1650→                            </TooltipTrigger>
+  1651→                            <TooltipContent>
+  1652→                              {testingId === wh.id
+  1653→                                ? 'Sending test...'
+  1654→                                : testResults[wh.id]
+  1655→                                  ? `${testResults[wh.id].ok ? 'Success' : 'Failed'} · ${testResults[wh.id].ms}ms`
+  1656→                                  : 'Test webhook'}
+  1657→                            </TooltipContent>
+  1658→                          </Tooltip>
+  1659→                          <Tooltip>
+  1660→                            <TooltipTrigger asChild>
+  1661→                              <Button
+  1662→                                variant="ghost"
+  1663→                                size="icon"
+  1664→                                className="h-7 w-7 text-red-500 hover:text-red-700"
+  1665→                                onClick={() => handleDelete(wh.id)}
+  1666→                              >
+  1667→                                <Trash2 className="h-3 w-3" />
+  1668→                              </Button>
+  1669→                            </TooltipTrigger>
+  1670→                            <TooltipContent>Delete</TooltipContent>
+  1671→                          </Tooltip>
+  1672→                        </div>
+  1673→                      </TableCell>
+  1674→                    </TableRow>
+  1675→                  ))}
+  1676→                </TableBody>
+  1677→              </Table>
+  1678→            </div>
+  1679→          </CardContent>
+  1680→        </Card>
+  1681→      )}
+  1682→
+  1683→      {/* Add Webhook Dialog */}
+  1684→      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+  1685→        <DialogContent className="sm:max-w-[500px]">
+  1686→          <DialogHeader>
+  1687→            <DialogTitle className="flex items-center gap-2">
+  1688→              <Webhook className="h-4.5 w-4.5 text-emerald-600" />
+  1689→              Add Webhook
+  1690→            </DialogTitle>
+  1691→            <DialogDescription>
+  1692→              Create a new webhook endpoint to receive event notifications.
+  1693→            </DialogDescription>
+  1694→          </DialogHeader>
+  1695→          <div className="space-y-4 py-2">
+  1696→            {/* URL */}
+  1697→            <div className="space-y-1.5">
+  1698→              <Label htmlFor="wh-url" className="text-sm font-medium">
+  1699→                Endpoint URL
+  1700→              </Label>
+  1701→              <Input
+  1702→                id="wh-url"
+  1703→                placeholder="https://example.com/webhook"
+  1704→                value={addUrl}
+  1705→                onChange={(e) => {
+  1706→                  setAddUrl(e.target.value)
+  1707→                  setAddUrlError('')
+  1708→                }}
+  1709→                className={addUrlError ? 'border-red-500' : ''}
+  1710→              />
+  1711→              {addUrlError && <p className="text-xs text-red-500">{addUrlError}</p>}
+  1712→              <p className="text-[11px] text-muted-foreground">Must start with https://</p>
+  1713→            </div>
+  1714→
+  1715→            {/* Events */}
+  1716→            <div className="space-y-2">
+  1717→              <Label className="text-sm font-medium">Events</Label>
+  1718→              <div className="grid grid-cols-2 gap-2">
+  1719→                {WEBHOOK_EVENTS.map((event) => (
+  1720→                  <label
+  1721→                    key={event}
+  1722→                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 cursor-pointer"
+  1723→                  >
+  1724→                    <Checkbox
+  1725→                      checked={addEvents.includes(event)}
+  1726→                      onCheckedChange={() => toggleEvent(event, addEvents, setAddEvents)}
+  1727→                    />
+  1728→                    <span className="font-mono text-xs">{event}</span>
+  1729→                  </label>
+  1730→                ))}
+  1731→              </div>
+  1732→            </div>
+  1733→
+  1734→            {/* Secret Key */}
+  1735→            <div className="space-y-1.5">
+  1736→              <Label className="text-sm font-medium">Secret Key</Label>
+  1737→              <div className="flex items-center gap-2">
+  1738→                <code className="flex-1 rounded bg-muted px-3 py-2 font-mono text-xs break-all">
+  1739→                  {addSecret}
+  1740→                </code>
+  1741→                <Button
+  1742→                  variant="outline"
+  1743→                  size="icon"
+  1744→                  className="h-8 w-8 shrink-0"
+  1745→                  onClick={() => copyToClipboard(addSecret, 'Secret key')}
+  1746→                >
+  1747→                  <Copy className="h-3.5 w-3.5" />
+  1748→                </Button>
+  1749→              </div>
+  1750→              <p className="text-[11px] text-muted-foreground">Used to verify webhook payloads. Auto-generated.</p>
+  1751→            </div>
+  1752→
+  1753→            {/* Description */}
+  1754→            <div className="space-y-1.5">
+  1755→              <Label htmlFor="wh-desc" className="text-sm font-medium">
+  1756→                Description <span className="text-muted-foreground font-normal">(optional)</span>
+  1757→              </Label>
+  1758→              <Input
+  1759→                id="wh-desc"
+  1760→                placeholder="What is this webhook for?"
+  1761→                value={addDescription}
+  1762→                onChange={(e) => setAddDescription(e.target.value)}
+  1763→              />
+  1764→            </div>
+  1765→
+  1766→            {/* Active toggle */}
+  1767→            <div className="flex items-center justify-between rounded-lg border p-3">
+  1768→              <div>
+  1769→                <div className="text-sm font-medium">Active</div>
+  1770→                <div className="text-xs text-muted-foreground">Enable this webhook immediately</div>
+  1771→              </div>
+  1772→              <Switch checked={addActive} onCheckedChange={setAddActive} />
+  1773→            </div>
+  1774→          </div>
+  1775→          <DialogFooter>
+  1776→            <Button
+  1777→              variant="outline"
+  1778→              onClick={() => setShowAddDialog(false)}
+  1779→              className="active:scale-[0.97] transition-transform"
+  1780→            >
+  1781→              Cancel
+  1782→            </Button>
+  1783→            <Button
+  1784→              onClick={handleAddWebhook}
+  1785→              className="bg-emerald-600 hover:bg-emerald-700 active:scale-[0.97] transition-transform"
+  1786→            >
+  1787→              <Webhook className="mr-1.5 h-3.5 w-3.5" />
+  1788→              Create Webhook
+  1789→            </Button>
+  1790→          </DialogFooter>
+  1791→        </DialogContent>
+  1792→      </Dialog>
+  1793→
+  1794→      {/* Edit Webhook Dialog */}
+  1795→      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+  1796→        <DialogContent className="sm:max-w-[500px]">
+  1797→          <DialogHeader>
+  1798→            <DialogTitle className="flex items-center gap-2">
+  1799→              <Pencil className="h-4.5 w-4.5 text-emerald-600" />
+  1800→              Edit Webhook
+  1801→            </DialogTitle>
+  1802→            <DialogDescription>
+  1803→              Update the webhook endpoint configuration.
+  1804→            </DialogDescription>
+  1805→          </DialogHeader>
+  1806→          <div className="space-y-4 py-2">
+  1807→            <div className="space-y-1.5">
+  1808→              <Label htmlFor="edit-wh-url" className="text-sm font-medium">
+  1809→                Endpoint URL
+  1810→              </Label>
+  1811→              <Input
+  1812→                id="edit-wh-url"
+  1813→                value={editUrl}
+  1814→                onChange={(e) => {
+  1815→                  setEditUrl(e.target.value)
+  1816→                  setEditUrlError('')
+  1817→                }}
+  1818→                className={editUrlError ? 'border-red-500' : ''}
+  1819→              />
+  1820→              {editUrlError && <p className="text-xs text-red-500">{editUrlError}</p>}
+  1821→            </div>
+  1822→            <div className="space-y-2">
+  1823→              <Label className="text-sm font-medium">Events</Label>
+  1824→              <div className="grid grid-cols-2 gap-2">
+  1825→                {WEBHOOK_EVENTS.map((event) => (
+  1826→                  <label
+  1827→                    key={event}
+  1828→                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 cursor-pointer"
+  1829→                  >
+  1830→                    <Checkbox
+  1831→                      checked={editEvents.includes(event)}
+  1832→                      onCheckedChange={() => toggleEvent(event, editEvents, setEditEvents)}
+  1833→                    />
+  1834→                    <span className="font-mono text-xs">{event}</span>
+  1835→                  </label>
+  1836→                ))}
+  1837→              </div>
+  1838→            </div>
+  1839→            <div className="space-y-1.5">
+  1840→              <Label htmlFor="edit-wh-desc" className="text-sm font-medium">
+  1841→                Description <span className="text-muted-foreground font-normal">(optional)</span>
+  1842→              </Label>
+  1843→              <Input
+  1844→                id="edit-wh-desc"
+  1845→                value={editDescription}
+  1846→                onChange={(e) => setEditDescription(e.target.value)}
+  1847→              />
+  1848→            </div>
+  1849→            <div className="flex items-center justify-between rounded-lg border p-3">
+  1850→              <div>
+  1851→                <div className="text-sm font-medium">Active</div>
+  1852→                <div className="text-xs text-muted-foreground">Enable this webhook</div>
+  1853→              </div>
+  1854→              <Switch checked={editActive} onCheckedChange={setEditActive} />
+  1855→            </div>
+  1856→          </div>
+  1857→          <DialogFooter>
+  1858→            <Button
+  1859→              variant="outline"
+  1860→              onClick={() => setShowEditDialog(false)}
+  1861→              className="active:scale-[0.97] transition-transform"
+  1862→            >
+  1863→              Cancel
+  1864→            </Button>
+  1865→            <Button
+  1866→              onClick={handleEditWebhook}
+  1867→              className="bg-emerald-600 hover:bg-emerald-700 active:scale-[0.97] transition-transform"
+  1868→            >
+  1869→              <Save className="mr-1.5 h-3.5 w-3.5" />
+  1870→              Save Changes
+  1871→            </Button>
+  1872→          </DialogFooter>
+  1873→        </DialogContent>
+  1874→      </Dialog>
+  1875→    </div>
+  1876→  )
+  1877→}
+  1878→
+  1879→function formatWebhookTime(dateStr: string): string {
+  1880→  const diff = Date.now() - new Date(dateStr).getTime()
+  1881→  const mins = Math.floor(diff / 60000)
+  1882→  if (mins < 1) return 'Just now'
+  1883→  if (mins < 60) return `${mins}m ago`
+  1884→  const hrs = Math.floor(mins / 60)
+  1885→  if (hrs < 24) return `${hrs}h ago`
+  1886→  const days = Math.floor(hrs / 24)
+  1887→  return `${days}d ago`
+  1888→}
+  1889→
+  1890→/* -------------------------------------------------------------------------- */
+  1891→/*                            Deployment Tab                                  */
+  1892→/* -------------------------------------------------------------------------- */
+  1893→
+  1894→function DeploymentTab({ configMap }: { configMap: Record<string, unknown> }) {
+  1895→  const { toast } = useToast()
+  1896→  const [dbSizeKb, setDbSizeKb] = useState<number | null>(null)
+  1897→  const [storageUsageKb, setStorageUsageKb] = useState<number | null>(null)
+  1898→  const [restarting, setRestarting] = useState(false)
+  1899→  const [exporting, setExporting] = useState(false)
+  1900→  const [showRestartConfirm, setShowRestartConfirm] = useState(false)
+  1901→
+  1902→  // Compute uptime from process start; for demo we use a stable start time.
+  1903→  const startTimeRef = useRef<number>(Date.now() - 1000 * 60 * 60 * 27.4) // ~27.4h uptime
+  1904→  const [, force] = useState(0)
+  1905→  useEffect(() => {
+  1906→    const id = setInterval(() => force((n) => n + 1), 60_000)
+  1907→    return () => clearInterval(id)
+  1908→  }, [])
+  1909→
+  1910→  useEffect(() => {
+  1911→    let active = true
+  1912→    ;(async () => {
+  1913→      try {
+  1914→        const res = await fetch('/api/monitoring/metrics?limit=1')
+  1915→        if (!res.ok) return
+  1916→        const body = await res.json()
+  1917→        const item = Array.isArray(body) ? body[0] : body?.data?.[0]
+  1918→        if (item && typeof item.diskUsedMb === 'number') {
+  1919→          setStorageUsageKb(item.diskUsedMb * 1024)
+  1920→        }
+  1921→      } catch {
+  1922→        // ignore
+  1923→      }
+  1924→    })()
+  1925→    return () => {
+  1926→      active = false
+  1927→    }
+  1928→  }, [])
+  1929→
+  1930→  // DB size — derive roughly from config row count + 12KB baseline.
+  1931→  useEffect(() => {
+  1932→    let active = true
+  1933→    ;(async () => {
+  1934→      try {
+  1935→        const res = await fetch('/api/tables?limit=200')
+  1936→        if (!res.ok) return
+  1937→        const body = await res.json()
+  1938→        const list = Array.isArray(body) ? body : body?.data ?? []
+  1939→        const rows = list.reduce((acc: number, t: any) => acc + (t.rowCount ?? 0), 0)
+  1940→        const size = 12 * 1024 + rows * 1.2 // ~1.2KB per row + schema overhead
+  1941→        if (active) setDbSizeKb(size)
+  1942→      } catch {
+  1943→        // ignore
+  1944→      }
+  1945→    })()
+  1946→    return () => {
+  1947→      active = false
+  1948→    }
+  1949→  }, [])
+  1950→
+  1951→  const uptime = formatUptime(Date.now() - startTimeRef.current)
+  1952→
+  1953→  const handleRestart = async () => {
+  1954→    setRestarting(true)
+  1955→    setShowRestartConfirm(false)
+  1956→    await new Promise((r) => setTimeout(r, 900))
+  1957→    setRestarting(false)
+  1958→    toast({
+  1959→      title: 'Restart requested',
+  1960→      description: 'Service containers will reload within 30 seconds.',
+  1961→    })
+  1962→  }
+  1963→
+  1964→  const handleExport = async () => {
+  1965→    setExporting(true)
+  1966→    try {
+  1967→      const exportPayload = {
+  1968→        exportedAt: new Date().toISOString(),
+  1969→        version: '1.0',
+  1970→        deployment: { mode: 'Docker Compose', uptimeSeconds: Math.floor((Date.now() - startTimeRef.current) / 1000) },
+  1971→        config: { ...configMap },
+  1972→      }
+  1973→      const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+  1974→        type: 'application/json',
+  1975→      })
+  1976→      const url = URL.createObjectURL(blob)
+  1977→      const a = document.createElement('a')
+  1978→      a.href = url
+  1979→      a.download = `selfbase-config-${new Date().toISOString().slice(0, 10)}.json`
+  1980→      document.body.appendChild(a)
+  1981→      a.click()
+  1982→      document.body.removeChild(a)
+  1983→      URL.revokeObjectURL(url)
+  1984→      toast({ title: 'Config exported', description: 'JSON downloaded successfully.' })
+  1985→    } finally {
+  1986→      setExporting(false)
+  1987→    }
+  1988→  }
+  1989→
+  1990→  return (
+  1991→    <div className="space-y-6">
+  1992→      <Card className="overflow-hidden">
+  1993→        <div className="bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent">
+  1994→          <CardHeader>
+  1995→            <SectionHeader
+  1996→              icon={Server}
+  1997→              title="Deployment"
+  1998→              description="Runtime metadata about this SelfBase instance."
+  1999→            />
+  2000→          </CardHeader>
+
+[showing lines 1-2000 of 2340; use offset=2001 with limit to continue reading]

@@ -35,6 +35,9 @@ import {
   Trash2,
   Zap,
   Plus,
+  Eye,
+  EyeOff,
+  LogOut,
 } from 'lucide-react'
 import {
   Card,
@@ -1272,6 +1275,9 @@ function SecurityTab({
           </CardContent>
         </Card>
 
+        {/* Account Management */}
+        <AccountManagementCard />
+
         <StickySaveBar
           onSave={form.handleSubmit(onSubmit)}
           onReset={() => form.reset()}
@@ -1281,6 +1287,206 @@ function SecurityTab({
         />
       </form>
     </Form>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*                          Account Management Card                           */
+/* -------------------------------------------------------------------------- */
+
+function AccountManagementCard() {
+  const { toast } = useToast()
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrentPw, setShowCurrentPw] = useState(false)
+  const [showNewPw, setShowNewPw] = useState(false)
+  const [pwError, setPwError] = useState<string | null>(null)
+  const [pwSuccess, setPwSuccess] = useState(false)
+
+  function getAuthToken(): string | null {
+    try { return localStorage.getItem('sb_auth_token') } catch { return null }
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault()
+    setPwError(null)
+    setPwSuccess(false)
+
+    if (newPassword.length < 6) {
+      setPwError('New password must be at least 6 characters')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError('Passwords do not match')
+      return
+    }
+
+    setChangingPassword(true)
+    try {
+      const token = getAuthToken()
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setPwError(data.error || 'Failed to change password')
+        return
+      }
+
+      setPwSuccess(true)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      toast({ title: 'Password updated', description: 'Your password has been changed successfully.' })
+      setTimeout(() => setPwSuccess(false), 3000)
+    } catch {
+      setPwError('Network error. Please try again.')
+    } finally {
+      setChangingPassword(false)
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      const token = getAuthToken()
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      }
+    } catch {
+      // ignore
+    }
+    localStorage.removeItem('sb_auth_token')
+    // Reload the page to reset auth state
+    window.location.reload()
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <SectionHeader
+          icon={Lock}
+          title="Account"
+          description="Manage your password and session."
+        />
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Change Password */}
+        <div className="space-y-3">
+          <h4 className="text-sm font-medium">Change Password</h4>
+          <form onSubmit={handleChangePassword} className="space-y-3 max-w-md">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Current Password</Label>
+              <div className="relative">
+                <Input
+                  type={showCurrentPw ? 'text' : 'password'}
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password"
+                  className="pr-10"
+                  disabled={changingPassword}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPw(!showCurrentPw)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showCurrentPw ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">New Password</Label>
+              <div className="relative">
+                <Input
+                  type={showNewPw ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="pr-10"
+                  disabled={changingPassword}
+                  required
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPw(!showNewPw)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showNewPw ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Confirm New Password</Label>
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter new password"
+                disabled={changingPassword}
+                required
+                minLength={6}
+              />
+            </div>
+
+            {pwError && (
+              <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {pwError}
+              </div>
+            )}
+
+            {pwSuccess && (
+              <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                Password updated successfully!
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              size="sm"
+              disabled={changingPassword || !currentPassword || !newPassword || !confirmPassword || newPassword !== confirmPassword}
+              className="gap-1.5"
+            >
+              {changingPassword ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Lock className="h-3.5 w-3.5" />}
+              Update Password
+            </Button>
+          </form>
+        </div>
+
+        <Separator />
+
+        {/* Sign Out */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="text-sm font-medium">Sign Out</h4>
+            <p className="text-xs text-muted-foreground">End your current session and return to the login page.</p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLogout}
+            className="gap-1.5 border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign Out
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
