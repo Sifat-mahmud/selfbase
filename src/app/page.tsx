@@ -30,6 +30,7 @@ import {
   Activity,
   Brain,
   FileText,
+  ArrowRightLeft,
   Search,
   Command,
   Settings,
@@ -63,6 +64,7 @@ import { AiView } from '@/components/admin/ai'
 import { LogsView } from '@/components/admin/logs'
 import { PlaygroundView } from '@/components/admin/playground'
 import { SettingsView } from '@/components/admin/settings'
+import DataTransfer from '@/components/admin/data-transfer'
 import { RealtimeIndicator } from '@/components/admin/realtime-indicator'
 import { NotificationsBell } from '@/components/admin/notifications-bell'
 import { ThemeToggle } from '@/components/theme-toggle'
@@ -80,6 +82,7 @@ const navItems: { section: AdminSection; label: string; icon: React.ComponentTyp
   { section: 'monitoring', label: 'Monitoring', icon: Activity, color: 'text-orange-500' },
   { section: 'ai', label: 'AI', icon: Brain, color: 'text-violet-500' },
   { section: 'logs', label: 'Logs', icon: FileText, color: 'text-slate-500' },
+  { section: 'data-transfer', label: 'Data Transfer', icon: ArrowRightLeft, color: 'text-emerald-500' },
   { section: 'playground' as AdminSection, label: 'API Playground', icon: Terminal, color: 'text-pink-500' },
   { section: 'settings', label: 'Settings', icon: Settings, color: 'text-gray-500' },
 ]
@@ -190,6 +193,7 @@ function SectionContent({ section }: { section: AdminSection }) {
     case 'monitoring': return <MonitoringView />
     case 'ai': return <AiView />
     case 'logs': return <LogsView />
+    case 'data-transfer': return <DataTransfer />
     case 'playground': return <PlaygroundView />
     case 'settings': return <SettingsView />
     default: return <DashboardView />

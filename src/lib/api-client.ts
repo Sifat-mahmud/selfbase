@@ -28,10 +28,27 @@ function unwrap<T>(value: unknown): T {
   return value as T
 }
 
+/** Get the stored auth token from localStorage */
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return localStorage.getItem('sb_auth_token')
+  } catch {
+    return null
+  }
+}
+
+/** Build auth headers for API requests */
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken()
+  if (token) return { Authorization: `Bearer ${token}` }
+  return {}
+}
+
 export async function apiGet<T = unknown>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
+    headers: { Accept: 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
   })
   const text = await res.text()
   let json: unknown
@@ -64,6 +81,7 @@ export async function apiSend<T = unknown>(
     headers: {
       Accept: 'application/json',
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...authHeaders(),
       ...(init?.headers ?? {}),
     },
     ...init,

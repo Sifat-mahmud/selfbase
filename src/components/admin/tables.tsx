@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
   Database,
@@ -274,6 +274,8 @@ export function TablesView() {
   const [showDataDialog, setShowDataDialog] = useState(false)
   const [dataRows, setDataRows] = useState<SbRowItem[]>([])
   const [dataLoading, setDataLoading] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
 
   // Inline row editing state
   const [editingRowId, setEditingRowId] = useState<string | null>(null) // null | row.id | NEW_ROW_ID
@@ -286,10 +288,12 @@ export function TablesView() {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
 
-  // View Data dialog: client-side search/sort
+  // View Data dialog: server-side pagination + search
   const [searchQuery, setSearchQuery] = useState('')
   const [sortColumn, setSortColumn] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [serverPagination, setServerPagination] = useState<{ total: number; totalPages: number; hasMore: boolean }>({ total: 0, totalPages: 0, hasMore: false })
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // New table form
   const [newTableName, setNewTableName] = useState('')
@@ -448,45 +452,59 @@ export function TablesView() {
   const handleViewData = async (table: SbTableItem) => {
     setShowDataDialog(true)
     setDataLoading(true)
-    // Reset any in-progress edit/selection/search/sort state when opening a fresh view
     setEditingRowId(null)
     setEditBuffer({})
     setSelectedRowIds(new Set())
     setSearchQuery('')
     setSortColumn(null)
     setSortDirection('asc')
+    setCurrentPage(1)
+    setPageSize(50)
+    setServerPagination({ total: 0, totalPages: 0, hasMore: false })
     try {
-      const rows = await apiGet<SbRowItem[]>(`/api/tables/${table.id}/rows`)
-      setDataRows(Array.isArray(rows) ? rows : [])
+      const data = await apiGet<{ rows: SbRowItem[]; pagination: { total: number; totalPages: number; hasMore: boolean } }>(`/api/tables/${table.id}/rows?page=1&pageSize=50`)
+      if (data && 'rows' in data) {
+        setDataRows(data.rows)
+        setServerPagination(data.pagination)
+      } else {
+        setDataRows(Array.isArray(data as unknown) ? data as unknown as SbRowItem[] : [])
+      }
     } catch (err) {
-      toast({
-        title: 'Failed to load rows',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
-      })
+      toast({ title: 'Failed to load rows', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
       setDataRows([])
     } finally {
       setDataLoading(false)
     }
   }
 
-  // Reload rows for the currently selected table without resetting the dialog state
-  const refreshRows = useCallback(async () => {
-    if (!selectedTable) return
+  // Fetch rows with server-side pagination and search
+  const fetchRows = useCallback(async (tableId: string, page: number, size: number, search: string) => {
     setDataLoading(true)
     try {
-      const rows = await apiGet<SbRowItem[]>(`/api/tables/${selectedTable.id}/rows`)
-      setDataRows(Array.isArray(rows) ? rows : [])
+      const params = new URLSearchParams({ page: String(page), pageSize: String(size) })
+      if (search) params.set('search', search)
+      const data = await apiGet<{ rows: SbRowItem[]; pagination: { total: number; totalPages: number; hasMore: boolean } }>(`/api/tables/${tableId}/rows?${params}`)
+      if (data && 'rows' in data) {
+        setDataRows(data.rows)
+        setServerPagination(data.pagination)
+      } else {
+        setDataRows(Array.isArray(data as unknown) ? data as unknown as SbRowItem[] : [])
+        setServerPagination({ total: 0, totalPages: 0, hasMore: false })
+      }
+      setCurrentPage(page)
+      setPageSize(size)
     } catch (err) {
-      toast({
-        title: 'Failed to load rows',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
-      })
+      toast({ title: 'Failed to load rows', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
     } finally {
       setDataLoading(false)
     }
-  }, [selectedTable, toast])
+  }, [toast])
+
+  // Reload rows for the currently selected table
+  const refreshRows = useCallback(async () => {
+    if (!selectedTable) return
+    await fetchRows(selectedTable.id, currentPage, pageSize, searchQuery)
+  }, [selectedTable, currentPage, pageSize, searchQuery, fetchRows])
 
   // Keep the displayed row count in sync after add/delete operations
   const adjustRowCount = useCallback(
@@ -657,21 +675,10 @@ export function TablesView() {
     }
   }
 
-  // Client-side filter: any cell value contains the query (case-insensitive)
+  // Filtered rows: search is now server-side, only apply column filters client-side
   const filteredRows = useMemo(() => {
-    if (!searchQuery.trim()) return dataRows
-    const q = searchQuery.toLowerCase()
-    return dataRows.filter((row) => {
-      try {
-        const parsed = JSON.parse(row.data)
-        return Object.values(parsed).some(
-          (v) => v !== null && v !== undefined && String(v).toLowerCase().includes(q),
-        )
-      } catch {
-        return false
-      }
-    })
-  }, [dataRows, searchQuery])
+    return dataRows
+  }, [dataRows])
 
   // Client-side sort: applied after filter
   const sortedRows = useMemo(() => {
@@ -1304,12 +1311,19 @@ export function TablesView() {
                 <div className="relative flex-1 min-w-[200px]">
                   <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search rows by any cell value..."
+                    placeholder="Search all rows (server-side)..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 h-9"
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value)
+                      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+                      searchTimeoutRef.current = setTimeout(() => {
+                        if (selectedTable) fetchRows(selectedTable.id, 1, pageSize, e.target.value)
+                      }, 300)
+                    }}
+                    className="pl-9 h-9 pr-8"
                     aria-label="Search rows"
                   />
+                  {dataLoading && <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -1373,46 +1387,44 @@ export function TablesView() {
                   <Plus className="mr-1 h-3.5 w-3.5" /> Add Row
                 </Button>
               </div>
-              {/* Filter / sort status line */}
-              {(searchQuery.trim() || sortColumn) && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
-                  <span>
-                    Showing <span className="font-medium text-foreground">{sortedRows.length}</span> of{' '}
-                    <span className="font-medium text-foreground">{dataRows.length}</span> row{dataRows.length !== 1 ? 's' : ''}
-                  </span>
-                  {sortColumn && (
-                    <Badge variant="outline" className="text-xs gap-1 font-mono">
-                      <ArrowUpDown className="h-3 w-3" />
-                      {sortColumn}
-                      <span className="text-emerald-600 dark:text-emerald-400">
-                        {sortDirection === 'asc' ? '↑' : '↓'}
-                      </span>
-                      <button
-                        type="button"
-                        className="ml-1 text-muted-foreground hover:text-foreground"
-                        onClick={() => {
-                          setSortColumn(null)
-                          setSortDirection('asc')
-                        }}
-                        aria-label="Clear sort"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  )}
-                  {searchQuery.trim() && (
+              {/* Filter / sort status line + server pagination info */}
+              <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1 flex-wrap">
+                <span>
+                  Showing <span className="font-medium text-foreground">{((currentPage - 1) * pageSize) + 1}-{Math.min(currentPage * pageSize, serverPagination.total)}</span> of{' '}
+                  <span className="font-medium text-foreground">{serverPagination.total}</span> row{serverPagination.total !== 1 ? 's' : ''}
+                </span>
+                {sortColumn && (
+                  <Badge variant="outline" className="text-xs gap-1 font-mono">
+                    <ArrowUpDown className="h-3 w-3" />
+                    {sortColumn}
+                    <span className="text-emerald-600 dark:text-emerald-400">
+                      {sortDirection === 'asc' ? '↑' : '↓'}
+                    </span>
                     <button
                       type="button"
-                      className="text-muted-foreground hover:text-foreground"
-                      onClick={() => setSearchQuery('')}
-                      aria-label="Clear search"
+                      className="ml-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => { setSortColumn(null); setSortDirection('asc') }}
+                      aria-label="Clear sort"
                     >
-                      <X className="h-3 w-3 inline mr-1" />
-                      clear search
+                      <X className="h-3 w-3" />
                     </button>
-                  )}
-                </div>
-              )}
+                  </Badge>
+                )}
+                {searchQuery.trim() && (
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      setSearchQuery('')
+                      if (selectedTable) fetchRows(selectedTable.id, 1, pageSize, '')
+                    }}
+                    aria-label="Clear search"
+                  >
+                    <X className="h-3 w-3 inline mr-1" />
+                    clear search
+                  </button>
+                )}
+              </div>
             </DialogHeader>
 
             {selectedRowIds.size > 0 && (
@@ -1695,6 +1707,44 @@ export function TablesView() {
                     })}
                   </TableBody>
                 </Table>
+              )}
+              {/* Server-side pagination controls */}
+              {serverPagination.total > 0 && (
+                <div className="flex items-center justify-between border-t px-3 py-2 bg-muted/30">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Rows:</span>
+                    {[25, 50, 100, 250, 500].map(size => (
+                      <Button
+                        key={size}
+                        variant={pageSize === size ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() => { if (selectedTable) fetchRows(selectedTable.id, 1, size, searchQuery) }}
+                      >
+                        {size}
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline" size="sm" className="h-7 px-2 text-xs"
+                      disabled={currentPage <= 1 || dataLoading}
+                      onClick={() => { if (selectedTable) fetchRows(selectedTable.id, currentPage - 1, pageSize, searchQuery) }}
+                    >
+                      Prev
+                    </Button>
+                    <span className="text-xs text-muted-foreground px-2">
+                      {currentPage} / {serverPagination.totalPages || 1}
+                    </span>
+                    <Button
+                      variant="outline" size="sm" className="h-7 px-2 text-xs"
+                      disabled={!serverPagination.hasMore || dataLoading}
+                      onClick={() => { if (selectedTable) fetchRows(selectedTable.id, currentPage + 1, pageSize, searchQuery) }}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           </DialogContent>

@@ -11,6 +11,7 @@ export type AdminSection =
   | 'monitoring'
   | 'ai'
   | 'logs'
+  | 'data-transfer'
   | 'playground'
   | 'settings'
 

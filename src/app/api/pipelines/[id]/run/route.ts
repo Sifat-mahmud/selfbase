@@ -8,13 +8,16 @@ import {
 } from '@/lib/api-utils';
 import { pipelineFetch, scrapeHtmlTables, applyColumnMappings } from '@/lib/fetch-utils';
 
-// POST /api/pipelines/[id]/run - Trigger a manual pipeline run
+// POST /api/pipelines/[id]/run - Trigger a pipeline run (manual or scheduled)
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
+
+    // Detect if triggered by scheduler
+    const isScheduler = request.headers.get('x-trigger-type') === 'scheduler';
 
     const source = await db.pipelineSource.findUnique({ where: { id } });
     if (!source) {
@@ -30,7 +33,7 @@ export async function POST(
       data: {
         sourceId: id,
         status: 'pending',
-        isManual: true,
+        isManual: !isScheduler,
       },
     });
 
@@ -344,6 +347,14 @@ export async function POST(
           completedAt: new Date(),
         },
       });
+
+      // Update lastAutoRunAt for scheduler-triggered runs
+      if (isScheduler) {
+        await db.pipelineSource.update({
+          where: { id },
+          data: { lastAutoRunAt: new Date() },
+        });
+      }
 
       return successResponse({
         runId: run.id,

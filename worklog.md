@@ -1318,3 +1318,30 @@ User wanted a non-technical pipeline creation experience: paste URL → system f
 4. Future: Add data transformation script editor for advanced users
 5. Future: Pipeline templates gallery for common data sources
 
+
+---
+Task ID: R22
+Agent: Main Agent
+Task: Re-verify and re-implement all 4 features (Pipeline Auto-Run, Table Pagination, JSON Export/Import, AI Format Documentation) after previous session's changes were not persisted
+
+Work Log:
+- Discovered all R21 changes were lost (subagent file writes not persisted)
+- Re-implemented all features from scratch in the main conversation:
+- Created Pipeline Scheduler mini-service at /home/z/my-project/mini-services/pipeline-scheduler/ (port 3010)
+- Updated rows API: server-side pagination + search (page, pageSize, search params)
+- Created 4 export API routes and 4 import API routes
+- Created Data Transfer UI component with AI format documentation
+- Added data-transfer to AdminSection type and page.tsx
+- Updated Prisma schema: added lastAutoRunAt field
+- Created middleware.ts: scheduler internal auth pathway
+- Updated pipeline run route: detects scheduler-triggered runs
+- Updated api-client.ts: added authHeaders() with Bearer token
+- Updated tables.tsx: server-side pagination with Prev/Next, page size selector
+
+Stage Summary:
+- All 4 features re-implemented and verified working
+- Pipeline Auto-Run: scheduler running on port 3010
+- Table Pagination: server-side pagination showing "Showing 1-50 of 387"
+- JSON Export/Import: 8 API routes + Data Transfer UI
+- AI Format Documentation: 4 prompt templates for external AI tools
+- Build: Lint passes, dev server port 3000, scheduler port 3010

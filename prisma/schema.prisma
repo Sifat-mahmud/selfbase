@@ -211,6 +211,7 @@ model PipelineSource {
   ssrfProtection  Boolean  @default(true)
   autoSchema      Boolean  @default(true)
   validationRules String?  // JSON: per-column validators
+  lastAutoRunAt   DateTime? // Last time the scheduler auto-ran this pipeline
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
