@@ -52,9 +52,15 @@ Rules:
 - Include 3-5 realistic sample rows matching the column definitions
 - Add indexes on frequently queried columns (foreign keys, status fields)
 
+⚠️ IMPORTANT — DO NOT ASSUME:
+- If the user does not specify a table name, ASK them what they want to store
+- If the user's description is vague, ASK clarifying questions before generating
+- Do NOT guess column names or types — confirm with the user if unsure
+- Do NOT invent business logic the user didn't mention
+
 Generate a table for: [DESCRIBE YOUR TABLE HERE]`,
 
-  pipelines: `You are a SelfBase pipeline designer. SelfBase is a self-hosted BaaS platform. Generate a data pipeline configuration in this JSON format:
+  pipelines: `You are a SelfBase pipeline designer. SelfBase is a self-hosted BaaS platform that fetches data from external sources and writes to local tables. Generate a data pipeline configuration in this JSON format:
 
 {
   "selfbase_format": "1.0",
@@ -64,7 +70,7 @@ Generate a table for: [DESCRIBE YOUR TABLE HERE]`,
       "name": "string (descriptive pipeline name)",
       "description": "string",
       "sourceType": "rest | rss | websocket | scraper",
-      "url": "string (API endpoint URL)",
+      "url": "string (MUST be a real, accessible API endpoint URL — do NOT guess or invent URLs)",
       "method": "GET | POST",
       "headers": { "key": "value" },
       "authType": "none | bearer | basic | api_key",
@@ -73,7 +79,7 @@ Generate a table for: [DESCRIBE YOUR TABLE HERE]`,
       "fetchInterval": 300,
       "isActive": true,
       "onConflict": "update | insert | skip | replace | truncate",
-      "targetTableName": "string (name of existing table to write to)",
+      "targetTableName": "string (MUST be the name of an existing or planned table — do NOT leave empty)",
       "columnMappings": [{ "src": "source_field", "target": "db_column", "type": "TEXT" }],
       "primaryKeyCols": ["id"],
       "preRunAction": "none | truncate | archive"
@@ -81,15 +87,36 @@ Generate a table for: [DESCRIBE YOUR TABLE HERE]`,
   ]
 }
 
-Rules:
-- fetchInterval is in seconds (minimum 5)
-- jsonPath extracts the data array from JSON responses
-- columnMappings map API fields to database columns
-- Include primaryKeyCols for upsert/update logic
+⚠️ CRITICAL RULES — READ CAREFULLY:
 
-Generate a pipeline for: [DESCRIBE YOUR DATA SOURCE]`,
+1. **URL is REQUIRED and must be real:**
+   - You MUST provide an actual, working API URL in the "url" field.
+   - Do NOT guess, invent, or assume URLs. If you don't know the exact API endpoint, DO NOT make one up.
+   - If you do NOT have live internet access to verify the URL, you MUST:
+     a) Tell the user: "I don't have live URL access. Please verify this URL works, or use Gemini/Grok/Perplexity which can access live URLs."
+     b) Provide your best educated URL but clearly mark it with a comment: ⚠️ UNVERIFIED — please test this URL
+   - If the user hasn't told you which API to use, ASK them: "Which API endpoint should this pipeline fetch from? Please provide the full URL."
 
-  scrapers: `You are a SelfBase web scraper designer. SelfBase is a self-hosted BaaS platform. Generate a web scraper configuration in this JSON format:
+2. **targetTableName is REQUIRED:**
+   - You MUST provide a targetTableName. Do NOT leave it empty or null.
+   - If the user hasn't specified which table to write to, ASK them: "Which table should the data be written to? You may need to create a table first using the Tables prompt."
+
+3. **fetchInterval is REQUIRED:**
+   - Minimum is 5 seconds. Do NOT set it to 0 or leave it out.
+   - If the user hasn't specified how often to fetch, ASK: "How often should this pipeline run? (e.g., every 5 minutes, every hour, once a day?)"
+
+4. **jsonPath is important:**
+   - If you don't know the API response structure, you MUST say: "I cannot verify the API response structure. The jsonPath I've provided is a guess — please test the API first and adjust the jsonPath to match the actual response."
+   - Consider suggesting the user test the API with curl or Postman first.
+
+5. **DO NOT ASSUME:**
+   - Do NOT assume authentication requirements — if the API needs auth and the user hasn't specified, ASK
+   - Do NOT assume column mappings — if you haven't seen the actual API response, state that your mappings are unverified
+   - Do NOT assume conflict resolution strategy — ASK the user if they want update/insert/skip/replace
+
+Generate a pipeline for: [DESCRIBE YOUR DATA SOURCE — MUST INCLUDE THE API URL]`,
+
+  scrapers: `You are a SelfBase web scraper designer. SelfBase is a self-hosted BaaS platform that scrapes web pages and writes data to local tables. Generate a web scraper configuration in this JSON format:
 
 {
   "selfbase_format": "1.0",
@@ -98,11 +125,11 @@ Generate a pipeline for: [DESCRIBE YOUR DATA SOURCE]`,
     {
       "name": "string (descriptive scraper name)",
       "description": "string",
-      "startUrl": "string (URL to start scraping)",
+      "startUrl": "string (MUST be a real, accessible webpage URL — do NOT guess or invent URLs)",
       "selectorTree": { "container": "CSS selector", "fields": { "title": "h2.title", "price": ".price" } },
       "paginationType": "none | click | scroll | url_pattern",
       "paginationConfig": { "nextSelector": "a.next", "maxPages": 5 },
-      "targetTableName": "string (table to write scraped data)",
+      "targetTableName": "string (MUST be the name of an existing or planned table — do NOT leave empty)",
       "outputFormat": "json",
       "isActive": true,
       "fetchInterval": 3600,
@@ -115,15 +142,42 @@ Generate a pipeline for: [DESCRIBE YOUR DATA SOURCE]`,
   ]
 }
 
-Rules:
-- selectorTree uses CSS selectors to extract data from HTML
-- fetchInterval is in seconds
-- rateLimitMs controls delay between requests
-- Set respectRobotsTxt: true for ethical scraping
+⚠️ CRITICAL RULES — READ CAREFULLY:
 
-Generate a scraper for: [DESCRIBE THE WEBSITE]`,
+1. **startUrl is REQUIRED and must be real:**
+   - You MUST provide an actual, working webpage URL in the "startUrl" field.
+   - Do NOT guess, invent, or assume URLs. If you don't know the exact page to scrape, DO NOT make one up.
+   - If you do NOT have live internet access to verify the URL and inspect the page, you MUST:
+     a) Tell the user: "I don't have live web access to inspect this page. The CSS selectors I provide may not work. Please use Gemini/Grok/Perplexity which can access live pages and generate accurate selectors."
+     b) Provide your best guess at selectors but clearly mark them: ⚠️ UNVERIFIED — please inspect the page and adjust selectors
+   - If the user hasn't told you which page to scrape, ASK them: "Which webpage should I scrape? Please provide the full URL."
 
-  functions: `You are a SelfBase function designer. SelfBase is a self-hosted BaaS platform. Generate a serverless function in this JSON format:
+2. **selectorTree must match the actual page:**
+   - CSS selectors depend entirely on the page's HTML structure. Without seeing the page, selectors are unreliable.
+   - If you haven't seen the page, you MUST warn: "I cannot verify these selectors without accessing the page. Please inspect the page (right-click → Inspect Element) and adjust the selectors to match the actual HTML."
+   - Strongly suggest the user test with Gemini or another AI that has live web access for accurate selector generation.
+
+3. **targetTableName is REQUIRED:**
+   - You MUST provide a targetTableName. Do NOT leave it empty or null.
+   - If the user hasn't specified which table to write to, ASK them: "Which table should scraped data go into? You may need to create a table first using the Tables prompt."
+
+4. **fetchInterval is REQUIRED:**
+   - Minimum is 5 seconds. Do NOT set it to 0 or leave it out.
+   - If the user hasn't specified how often to scrape, ASK: "How often should this scraper run? Be respectful of the target site — don't scrape too frequently."
+
+5. **Ethical scraping:**
+   - Always set respectRobotsTxt: true unless the user explicitly opts out
+   - Use reasonable rateLimitMs (at least 1000ms between requests)
+   - Do NOT help scrape private/authenticated pages without the owner's consent
+
+6. **DO NOT ASSUME:**
+   - Do NOT assume the page structure — if you haven't seen the page, say so
+   - Do NOT assume pagination exists — ask the user if the data spans multiple pages
+   - Do NOT assume how many pages to scrape — ask the user
+
+Generate a scraper for: [DESCRIBE THE WEBSITE — MUST INCLUDE THE URL]`,
+
+  functions: `You are a SelfBase function designer. SelfBase is a self-hosted BaaS platform that runs serverless functions. Generate a serverless function in this JSON format:
 
 {
   "selfbase_format": "1.0",
@@ -151,6 +205,13 @@ Rules:
 - Use envVars for secrets (never hardcode)
 - timeoutMs max is 300000 (5 minutes)
 - For schedule triggers, triggerConfig.cron uses standard cron format
+
+⚠️ IMPORTANT — DO NOT ASSUME:
+- If the user says "send an email" but doesn't specify the provider/API, ASK which email service to use
+- If the user says "call an API" but doesn't give the URL, ASK for the exact endpoint
+- If the user wants a schedule but doesn't specify the frequency, ASK how often it should run
+- Do NOT invent API keys, tokens, or credentials — use envVars placeholders and tell the user to fill them in
+- If you need an external API URL to make the function work and the user hasn't provided one, ASK — do NOT guess URLs
 
 Generate a function for: [DESCRIBE WHAT IT SHOULD DO]`,
 }
@@ -187,8 +248,11 @@ export default function DataTransfer() {
   const [importPreview, setImportPreview] = useState<string>('')
   const [importMode, setImportMode] = useState<'append' | 'replace'>('append')
   const [importProgress, setImportProgress] = useState(false)
+  const [importMethod, setImportMethod] = useState<'file' | 'paste'>('file')
+  const [pastedJson, setPastedJson] = useState<string>('')
   const [lastAction, setLastAction] = useState<Record<string, string>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const pasteAreaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => { loadCounts() }, [])
 
@@ -232,6 +296,8 @@ export default function DataTransfer() {
     setImportPreview('')
     setImportMode('append')
     setImportProgress(false)
+    setImportMethod('file')
+    setPastedJson('')
     setImportDialogOpen(true)
   }
 
@@ -247,11 +313,18 @@ export default function DataTransfer() {
   }
 
   async function executeImport() {
-    if (!importEntity || !importFile) return
+    if (!importEntity) return
     setImportProgress(true)
     try {
-      const text = await importFile.text()
-      const json = JSON.parse(text)
+      let jsonText: string
+      if (importMethod === 'paste') {
+        jsonText = pastedJson.trim()
+        if (!jsonText) { setImportProgress(false); return }
+      } else {
+        if (!importFile) { setImportProgress(false); return }
+        jsonText = await importFile.text()
+      }
+      const json = JSON.parse(jsonText)
       const result = await apiPost<{ imported: number; skipped: number; errors: string[] }>(
         importEntity.importUrl,
         { ...json, mode: importMode }
