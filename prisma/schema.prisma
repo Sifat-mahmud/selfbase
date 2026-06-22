@@ -47,19 +47,36 @@ model Session {
 model ApiKey {
   id          String   @id @default(cuid())
   userId      String
-  name        String
+  name        String   // App name e.g. "My iOS App"
   keyHash     String   @unique
   prefix      String   // first 8 chars for identification
-  permissions String   @default("read") // read, write, admin (comma-separated)
+  keyPlain    String?  // Only stored on creation, shown once
+  permissions String   @default("read,write") // read, write, admin (comma-separated)
   lastUsedAt  DateTime?
   expiresAt   DateTime?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appTokens   AppToken[]
 
   @@index([userId])
   @@index([keyHash])
+}
+
+// Short-lived token issued to external apps after API key login
+model AppToken {
+  id         String   @id @default(cuid())
+  apiKeyId   String
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  apiKey     ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([apiKeyId])
+  @@index([token])
+  @@index([expiresAt])
 }
 
 model OAuthProvider {

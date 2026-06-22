@@ -1,0 +1,1173 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useCallback, useEffect } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import {
+     6→  Terminal,
+     7→  Play,
+     8→  Copy,
+     9→  Plus,
+    10→  Trash2,
+    11→  Send,
+    12→  Clock,
+    13→  Search,
+    14→  ChevronDown,
+    15→  ChevronRight,
+    16→  CheckCircle2,
+    17→  XCircle,
+    18→  AlertTriangle,
+    19→  Loader2,
+    20→  RotateCcw,
+    21→  FileJson,
+    22→  ArrowDownToLine,
+    23→  Hash,
+    24→  Zap,
+    25→  Activity,
+    26→  Gauge,
+    27→} from 'lucide-react'
+    28→import {
+    29→  Card,
+    30→  CardContent,
+    31→  CardDescription,
+    32→  CardHeader,
+    33→  CardTitle,
+    34→} from '@/components/ui/card'
+    35→import { Button } from '@/components/ui/button'
+    36→import { Input } from '@/components/ui/input'
+    37→import { Textarea } from '@/components/ui/textarea'
+    38→import { Badge } from '@/components/ui/badge'
+    39→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    40→import {
+    41→  Select,
+    42→  SelectContent,
+    43→  SelectItem,
+    44→  SelectTrigger,
+    45→  SelectValue,
+    46→} from '@/components/ui/select'
+    47→import {
+    48→  Collapsible,
+    49→  CollapsibleContent,
+    50→  CollapsibleTrigger,
+    51→} from '@/components/ui/collapsible'
+    52→import { useToast } from '@/hooks/use-toast'
+    53→
+    54→// =====================================================================
+    55→// TYPES
+    56→// =====================================================================
+    57→
+    58→type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+    59→
+    60→interface EndpointTemplate {
+    61→  id: string
+    62→  category: string
+    63→  method: HttpMethod
+    64→  path: string
+    65→  description: string
+    66→  defaultBody?: string
+    67→  defaultParams?: Array<{ key: string; value: string }>
+    68→  defaultHeaders?: Array<{ key: string; value: string }>
+    69→}
+    70→
+    71→interface KeyValueRow {
+    72→  id: string
+    73→  key: string
+    74→  value: string
+    75→}
+    76→
+    77→interface ResponseData {
+    78→  status: number
+    79→  statusText: string
+    80→  headers: Record<string, string>
+    81→  body: string
+    82→  durationMs: number
+    83→  sizeBytes: number
+    84→  ok: boolean
+    85→}
+    86→
+    87→interface HistoryEntry {
+    88→  status: number
+    89→  durationMs: number
+    90→  timestamp: number
+    91→  ok: boolean
+    92→}
+    93→
+    94→// =====================================================================
+    95→// CONSTANTS
+    96→// =====================================================================
+    97→
+    98→const methodColors: Record<HttpMethod, string> = {
+    99→  GET: 'bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-400 dark:border-emerald-900',
+   100→  POST: 'bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-900',
+   101→  PUT: 'bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-400 dark:border-amber-900',
+   102→  DELETE: 'bg-red-500/10 text-red-700 border-red-200 dark:text-red-400 dark:border-red-900',
+   103→  PATCH: 'bg-purple-500/10 text-purple-700 border-purple-200 dark:text-purple-400 dark:border-purple-900',
+   104→}
+   105→
+   106→const methodSelectColors: Record<HttpMethod, string> = {
+   107→  GET: 'text-emerald-600 dark:text-emerald-400',
+   108→  POST: 'text-blue-600 dark:text-blue-400',
+   109→  PUT: 'text-amber-600 dark:text-amber-400',
+   110→  DELETE: 'text-red-600 dark:text-red-400',
+   111→  PATCH: 'text-purple-600 dark:text-purple-400',
+   112→}
+   113→
+   114→const ENDPOINT_TEMPLATES: EndpointTemplate[] = [
+   115→  // Data API (REST SDK)
+   116→  {
+   117→    id: 'data-query-collection',
+   118→    category: 'Data API',
+   119→    method: 'GET',
+   120→    path: '/api/v1/data/{table}',
+   121→    description: 'Query rows from a collection (REST SDK)',
+   122→    defaultParams: [
+   123→      { key: 'limit', value: '50' },
+   124→      { key: 'offset', value: '0' },
+   125→    ],
+   126→  },
+   127→  {
+   128→    id: 'data-version-hash',
+   129→    category: 'Data API',
+   130→    method: 'GET',
+   131→    path: '/api/v1/version/{table}',
+   132→    description: 'Get the version hash for a collection',
+   133→  },
+   134→  {
+   135→    id: 'data-insert-row',
+   136→    category: 'Data API',
+   137→    method: 'POST',
+   138→    path: '/api/tables/{id}/rows',
+   139→    description: 'Insert a new row into a table',
+   140→    defaultBody: '{\n  "data": {\n    "name": "Example",\n    "value": 42\n  }\n}',
+   141→  },
+   142→  {
+   143→    id: 'data-update-row',
+   144→    category: 'Data API',
+   145→    method: 'PUT',
+   146→    path: '/api/tables/{id}/rows/{rowId}',
+   147→    description: 'Update an existing row by ID',
+   148→    defaultBody: '{\n  "data": {\n    "name": "Updated Example",\n    "value": 100\n  }\n}',
+   149→  },
+   150→  {
+   151→    id: 'data-delete-row',
+   152→    category: 'Data API',
+   153→    method: 'DELETE',
+   154→    path: '/api/tables/{id}/rows/{rowId}',
+   155→    description: 'Delete a row by ID',
+   156→  },
+   157→  // Tables
+   158→  {
+   159→    id: 'tables-list',
+   160→    category: 'Tables',
+   161→    method: 'GET',
+   162→    path: '/api/tables',
+   163→    description: 'List all tables in the workspace',
+   164→  },
+   165→  {
+   166→    id: 'tables-create',
+   167→    category: 'Tables',
+   168→    method: 'POST',
+   169→    path: '/api/tables',
+   170→    description: 'Create a new table with schema',
+   171→    defaultBody: '{\n  "name": "items",\n  "displayName": "Items",\n  "description": "Demo table",\n  "columns": [\n    { "name": "title", "type": "TEXT", "nullable": false },\n    { "name": "qty", "type": "INTEGER", "nullable": true }\n  ]\n}',
+   172→  },
+   173→  {
+   174→    id: 'tables-detail',
+   175→    category: 'Tables',
+   176→    method: 'GET',
+   177→    path: '/api/tables/{id}',
+   178→    description: 'Get detailed schema for a table',
+   179→  },
+   180→  {
+   181→    id: 'tables-delete',
+   182→    category: 'Tables',
+   183→    method: 'DELETE',
+   184→    path: '/api/tables/{id}',
+   185→    description: 'Delete a table by ID',
+   186→  },
+   187→  // Pipelines
+   188→  {
+   189→    id: 'pipelines-list',
+   190→    category: 'Pipelines',
+   191→    method: 'GET',
+   192→    path: '/api/pipelines',
+   193→    description: 'List all pipeline sources',
+   194→    defaultParams: [{ key: 'isActive', value: 'true' }],
+   195→  },
+   196→  {
+   197→    id: 'pipelines-preview',
+   198→    category: 'Pipelines',
+   199→    method: 'POST',
+   200→    path: '/api/pipelines/{id}/preview',
+   201→    description: 'Preview pipeline fetch + transformation',
+   202→  },
+   203→  {
+   204→    id: 'pipelines-run',
+   205→    category: 'Pipelines',
+   206→    method: 'POST',
+   207→    path: '/api/pipelines/{id}/run',
+   208→    description: 'Trigger a manual pipeline run',
+   209→  },
+   210→  // Auth
+   211→  {
+   212→    id: 'auth-users',
+   213→    category: 'Auth',
+   214→    method: 'GET',
+   215→    path: '/api/auth/users',
+   216→    description: 'List registered users',
+   217→  },
+   218→  {
+   219→    id: 'auth-create-key',
+   220→    category: 'Auth',
+   221→    method: 'POST',
+   222→    path: '/api/auth/api-keys',
+   223→    description: 'Create a new API key',
+   224→    defaultBody: '{\n  "name": "playground-key",\n  "scopes": ["read", "write"]\n}',
+   225→  },
+   226→  {
+   227→    id: 'auth-sessions',
+   228→    category: 'Auth',
+   229→    method: 'GET',
+   230→    path: '/api/auth/sessions',
+   231→    description: 'List active sessions',
+   232→  },
+   233→  // Monitoring
+   234→  {
+   235→    id: 'monitoring-load',
+   236→    category: 'Monitoring',
+   237→    method: 'GET',
+   238→    path: '/api/monitoring/load',
+   239→    description: 'Server load snapshot (CPU, RAM, jobs)',
+   240→  },
+   241→  {
+   242→    id: 'monitoring-uptime',
+   243→    category: 'Monitoring',
+   244→    method: 'GET',
+   245→    path: '/api/monitoring/uptime',
+   246→    description: 'Uptime statistics',
+   247→  },
+   248→  {
+   249→    id: 'monitoring-heartbeat',
+   250→    category: 'Monitoring',
+   251→    method: 'GET',
+   252→    path: '/api/monitoring/heartbeat',
+   253→    description: 'Recent heartbeats',
+   254→    defaultParams: [{ key: 'limit', value: '60' }],
+   255→  },
+   256→  {
+   257→    id: 'monitoring-alerts',
+   258→    category: 'Monitoring',
+   259→    method: 'GET',
+   260→    path: '/api/monitoring/alerts',
+   261→    description: 'List active alerts',
+   262→  },
+   263→  // AI
+   264→  {
+   265→    id: 'ai-chat',
+   266→    category: 'AI',
+   267→    method: 'POST',
+   268→    path: '/api/ai/chat',
+   269→    description: 'Send a chat completion request',
+   270→    defaultBody: '{\n  "messages": [\n    { "role": "user", "content": "Hello, what is SelfBase?" }\n  ],\n  "model": "default"\n}',
+   271→  },
+   272→  {
+   273→    id: 'ai-embed',
+   274→    category: 'AI',
+   275→    method: 'POST',
+   276→    path: '/api/ai/embed',
+   277→    description: 'Generate embeddings for input text',
+   278→    defaultBody: '{\n  "input": "SelfBase is a local-first BaaS"\n}',
+   279→  },
+   280→  {
+   281→    id: 'ai-search',
+   282→    category: 'AI',
+   283→    method: 'POST',
+   284→    path: '/api/ai/search',
+   285→    description: 'Semantic vector search',
+   286→    defaultBody: '{\n  "query": "backend as a service",\n  "topK": 5\n}',
+   287→  },
+   288→  // Functions
+   289→  {
+   290→    id: 'functions-list',
+   291→    category: 'Functions',
+   292→    method: 'GET',
+   293→    path: '/api/functions',
+   294→    description: 'List deployed functions',
+   295→  },
+   296→  {
+   297→    id: 'functions-run',
+   298→    category: 'Functions',
+   299→    method: 'POST',
+   300→    path: '/api/functions/{id}/run',
+   301→    description: 'Invoke a function with input',
+   302→    defaultBody: '{\n  "input": {\n    "key": "value"\n  }\n}',
+   303→  },
+   304→  // Storage
+   305→  {
+   306→    id: 'storage-list',
+   307→    category: 'Storage',
+   308→    method: 'GET',
+   309→    path: '/api/storage',
+   310→    description: 'List uploaded files',
+   311→  },
+   312→  {
+   313→    id: 'storage-upload-url',
+   314→    category: 'Storage',
+   315→    method: 'POST',
+   316→    path: '/api/storage/upload-url',
+   317→    description: 'Get a presigned upload URL',
+   318→    defaultBody: '{\n  "filename": "example.png",\n  "contentType": "image/png"\n}',
+   319→  },
+   320→  // Queue
+   321→  {
+   322→    id: 'queue-status',
+   323→    category: 'Queue',
+   324→    method: 'GET',
+   325→    path: '/api/queue',
+   326→    description: 'Deferred request queue status',
+   327→  },
+   328→  {
+   329→    id: 'queue-drain',
+   330→    category: 'Queue',
+   331→    method: 'POST',
+   332→    path: '/api/queue/drain',
+   333→    description: 'Drain the queue (process all pending)',
+   334→  },
+   335→]
+   336→
+   337→const ALL_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+   338→
+   339→let _rowIdCounter = 0
+   340→function newRowId() {
+   341→  _rowIdCounter += 1
+   342→  return `row-${Date.now()}-${_rowIdCounter}`
+   343→}
+   344→
+   345→function toKv(arr: Array<{ key: string; value: string }> | undefined): KeyValueRow[] {
+   346→  if (!arr || arr.length === 0) {
+   347→    return [{ id: newRowId(), key: '', value: '' }]
+   348→  }
+   349→  return arr.map((r) => ({ id: newRowId(), key: r.key, value: r.value }))
+   350→}
+   351→
+   352→// =====================================================================
+   353→// SUB-COMPONENTS
+   354→// =====================================================================
+   355→
+   356→function MethodBadge({ method, className }: { method: HttpMethod; className?: string }) {
+   357→  return (
+   358→    <span
+   359→      className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-[10px] font-bold tracking-wide ${methodColors[method]} ${className ?? ''}`}
+   360→    >
+   361→      {method}
+   362→    </span>
+   363→  )
+   364→}
+   365→
+   366→function StatusBadge({ status }: { status: number }) {
+   367→  const firstDigit = String(status).charAt(0)
+   368→  const colorMap: Record<string, string> = {
+   369→    '2': 'bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-400 dark:border-emerald-900',
+   370→    '3': 'bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-900',
+   371→    '4': 'bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-400 dark:border-amber-900',
+   372→    '5': 'bg-red-500/10 text-red-700 border-red-200 dark:text-red-400 dark:border-red-900',
+   373→  }
+   374→  const cls = colorMap[firstDigit] ?? 'bg-muted text-muted-foreground border-border'
+   375→  return (
+   376→    <span className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-bold ${cls}`}>
+   377→      {status}
+   378→    </span>
+   379→  )
+   380→}
+   381→
+   382→function formatBytes(n: number) {
+   383→  if (n < 1024) return `${n} B`
+   384→  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+   385→  return `${(n / (1024 * 1024)).toFixed(2)} MB`
+   386→}
+   387→
+   388→function formatDuration(ms: number) {
+   389→  if (ms < 1000) return `${ms} ms`
+   390→  return `${(ms / 1000).toFixed(2)} s`
+   391→}
+   392→
+   393→// =====================================================================
+   394→// KEY-VALUE EDITOR
+   395→// =====================================================================
+   396→
+   397→interface KvEditorProps {
+   398→  rows: KeyValueRow[]
+   399→  onChange: (rows: KeyValueRow[]) => void
+   400→  keyPlaceholder?: string
+   401→  valuePlaceholder?: string
+   402→}
+   403→
+   404→function KvEditor({ rows, onChange, keyPlaceholder = 'key', valuePlaceholder = 'value' }: KvEditorProps) {
+   405→  const updateRow = (id: string, field: 'key' | 'value', val: string) => {
+   406→    onChange(rows.map((r) => (r.id === id ? { ...r, [field]: val } : r)))
+   407→  }
+   408→  const removeRow = (id: string) => {
+   409→    onChange(rows.filter((r) => r.id !== id))
+   410→  }
+   411→  const addRow = () => {
+   412→    onChange([...rows, { id: newRowId(), key: '', value: '' }])
+   413→  }
+   414→
+   415→  return (
+   416→    <div className="space-y-2">
+   417→      {rows.length === 0 && (
+   418→        <p className="text-xs text-muted-foreground italic py-2">No entries. Click &quot;Add row&quot; to add one.</p>
+   419→      )}
+   420→      {rows.map((row) => (
+   421→        <div key={row.id} className="flex items-center gap-2">
+   422→          <Input
+   423→            value={row.key}
+   424→            onChange={(e) => updateRow(row.id, 'key', e.target.value)}
+   425→            placeholder={keyPlaceholder}
+   426→            className="h-8 font-mono text-xs flex-1"
+   427→          />
+   428→          <span className="text-muted-foreground text-xs">:</span>
+   429→          <Input
+   430→            value={row.value}
+   431→            onChange={(e) => updateRow(row.id, 'value', e.target.value)}
+   432→            placeholder={valuePlaceholder}
+   433→            className="h-8 font-mono text-xs flex-1"
+   434→          />
+   435→          <Button
+   436→            variant="ghost"
+   437→            size="icon"
+   438→            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+   439→            onClick={() => removeRow(row.id)}
+   440→            aria-label="Remove row"
+   441→          >
+   442→            <Trash2 className="h-3.5 w-3.5" />
+   443→          </Button>
+   444→        </div>
+   445→      ))}
+   446→      <Button
+   447→        variant="outline"
+   448→        size="sm"
+   449→        className="h-7 text-xs gap-1"
+   450→        onClick={addRow}
+   451→      >
+   452→        <Plus className="h-3 w-3" />
+   453→        Add row
+   454→      </Button>
+   455→    </div>
+   456→  )
+   457→}
+   458→
+   459→// =====================================================================
+   460→// MAIN COMPONENT
+   461→// =====================================================================
+   462→
+   463→export function PlaygroundView() {
+   464→  const { toast } = useToast()
+   465→
+   466→  const [selectedTemplate, setSelectedTemplate] = useState<EndpointTemplate | null>(null)
+   467→  const [method, setMethod] = useState<HttpMethod>('GET')
+   468→  const [url, setUrl] = useState('')
+   469→  const [params, setParams] = useState<KeyValueRow[]>(toKv([]))
+   470→  const [headers, setHeaders] = useState<KeyValueRow[]>(toKv([]))
+   471→  const [body, setBody] = useState('')
+   472→  const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body'>('params')
+   473→  const [response, setResponse] = useState<ResponseData | null>(null)
+   474→  const [loading, setLoading] = useState(false)
+   475→  const [error, setError] = useState<string | null>(null)
+   476→  const [search, setSearch] = useState('')
+   477→  const [history, setHistory] = useState<HistoryEntry[]>([])
+   478→  const [headersOpen, setHeadersOpen] = useState(false)
+   479→
+   480→  // Stats
+   481→  const successRate = useMemo(() => {
+   482→    if (history.length === 0) return 0
+   483→    const ok = history.filter((h) => h.ok).length
+   484→    return Math.round((ok / history.length) * 100)
+   485→  }, [history])
+   486→  const lastDuration = useMemo(() => {
+   487→    if (history.length === 0) return null
+   488→    return history[history.length - 1].durationMs
+   489→  }, [history])
+   490→
+   491→  // Filtered templates
+   492→  const filteredTemplates = useMemo(() => {
+   493→    const q = search.trim().toLowerCase()
+   494→    if (!q) return ENDPOINT_TEMPLATES
+   495→    return ENDPOINT_TEMPLATES.filter(
+   496→      (t) =>
+   497→        t.path.toLowerCase().includes(q) ||
+   498→        t.description.toLowerCase().includes(q) ||
+   499→        t.category.toLowerCase().includes(q) ||
+   500→        t.method.toLowerCase().includes(q),
+   501→    )
+   502→  }, [search])
+   503→
+   504→  const groupedTemplates = useMemo(() => {
+   505→    const map = new Map<string, EndpointTemplate[]>()
+   506→    filteredTemplates.forEach((t) => {
+   507→      if (!map.has(t.category)) map.set(t.category, [])
+   508→      map.get(t.category)!.push(t)
+   509→    })
+   510→    return Array.from(map.entries())
+   511→  }, [filteredTemplates])
+   512→
+   513→  // Load template into request builder
+   514→  const loadTemplate = useCallback((template: EndpointTemplate) => {
+   515→    setSelectedTemplate(template)
+   516→    setMethod(template.method)
+   517→    setUrl(template.path)
+   518→    setParams(toKv(template.defaultParams))
+   519→    setHeaders(toKv(template.defaultHeaders))
+   520→    setBody(template.defaultBody ?? '')
+   521→    setResponse(null)
+   522→    setError(null)
+   523→    if (template.method === 'GET' || template.method === 'DELETE') {
+   524→      setActiveTab('params')
+   525→    } else {
+   526→      setActiveTab('body')
+   527→    }
+   528→  }, [])
+   529→
+   530→  // Send request
+   531→  const sendRequest = useCallback(async () => {
+   532→    if (!url) {
+   533→      toast({
+   534→        title: 'URL is required',
+   535→        description: 'Pick a template from the library or type a URL.',
+   536→        variant: 'destructive',
+   537→      })
+   538→      return
+   539→    }
+   540→    setLoading(true)
+   541→    setError(null)
+   542→    setResponse(null)
+   543→    const startTime = performance.now()
+   544→    try {
+   545→      // Build URL with params
+   546→      const urlObj = new URL(url, window.location.origin)
+   547→      params.forEach((p) => {
+   548→        if (p.key.trim()) {
+   549→          urlObj.searchParams.set(p.key, p.value)
+   550→        }
+   551→      })
+   552→
+   553→      // Build headers
+   554→      const headerObj: Record<string, string> = {}
+   555→      headers.forEach((h) => {
+   556→        if (h.key.trim()) headerObj[h.key] = h.value
+   557→      })
+   558→      const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+   559→      if (!headerObj['Content-Type'] && hasBody) {
+   560→        headerObj['Content-Type'] = 'application/json'
+   561→      }
+   562→
+   563→      const res = await fetch(urlObj.toString(), {
+   564→        method,
+   565→        headers: headerObj,
+   566→        body: hasBody && body ? body : undefined,
+   567→      })
+   568→
+   569→      const responseText = await res.text()
+   570→      const durationMs = Math.round(performance.now() - startTime)
+   571→
+   572→      // Parse response headers
+   573→      const responseHeaders: Record<string, string> = {}
+   574→      res.headers.forEach((value, key) => {
+   575→        responseHeaders[key] = value
+   576→      })
+   577→
+   578→      // Try to pretty-print JSON
+   579→      let responseBody = responseText
+   580→      try {
+   581→        const parsed = JSON.parse(responseText)
+   582→        responseBody = JSON.stringify(parsed, null, 2)
+   583→      } catch {
+   584→        // not JSON, keep raw text
+   585→      }
+   586→
+   587→      const sizeBytes = new Blob([responseText]).size
+   588→      const newResponse: ResponseData = {
+   589→        status: res.status,
+   590→        statusText: res.statusText,
+   591→        headers: responseHeaders,
+   592→        body: responseBody,
+   593→        durationMs,
+   594→        sizeBytes,
+   595→        ok: res.ok,
+   596→      }
+   597→      setResponse(newResponse)
+   598→      setHistory((prev) => [...prev, {
+   599→        status: res.status,
+   600→        durationMs,
+   601→        timestamp: Date.now(),
+   602→        ok: res.ok,
+   603→      }].slice(-20))
+   604→      toast({
+   605→        title: res.ok ? 'Request completed' : 'Request returned non-OK',
+   606→        description: `${res.status} ${res.statusText} · ${formatDuration(durationMs)} · ${formatBytes(sizeBytes)}`,
+   607→        variant: res.ok ? 'default' : 'destructive',
+   608→      })
+   609→    } catch (e) {
+   610→      const msg = e instanceof Error ? e.message : 'Request failed'
+   611→      setError(msg)
+   612→      setHistory((prev) => [...prev, {
+   613→        status: 0,
+   614→        durationMs: Math.round(performance.now() - startTime),
+   615→        timestamp: Date.now(),
+   616→        ok: false,
+   617→      }].slice(-20))
+   618→      toast({
+   619→        title: 'Request failed',
+   620→        description: msg,
+   621→        variant: 'destructive',
+   622→      })
+   623→    } finally {
+   624→      setLoading(false)
+   625→    }
+   626→  }, [url, params, headers, body, method, toast])
+   627→
+   628→  // Copy as cURL
+   629→  const copyAsCurl = useCallback(() => {
+   630→    if (!url) {
+   631→      toast({ title: 'Nothing to copy', description: 'URL is empty.', variant: 'destructive' })
+   632→      return
+   633→    }
+   634→    let cmd = `curl -X ${method} '${url}'`
+   635→    headers.forEach((h) => {
+   636→      if (h.key.trim()) cmd += ` \\\n  -H '${h.key}: ${h.value}'`
+   637→    })
+   638→    const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+   639→    if (hasBody && body.trim()) {
+   640→      cmd += ` \\\n  -d '${body.replace(/'/g, "'\\''")}'`
+   641→    }
+   642→    navigator.clipboard.writeText(cmd)
+   643→    toast({ title: 'Copied as cURL', description: 'Command copied to clipboard.' })
+   644→  }, [url, method, headers, body, toast])
+   645→
+   646→  // Copy response body
+   647→  const copyResponse = useCallback(() => {
+   648→    if (!response) return
+   649→    navigator.clipboard.writeText(response.body)
+   650→    toast({ title: 'Response copied', description: 'Body copied to clipboard.' })
+   651→  }, [response, toast])
+   652→
+   653→  // Reset state
+   654→  const reset = useCallback(() => {
+   655→    setSelectedTemplate(null)
+   656→    setMethod('GET')
+   657→    setUrl('')
+   658→    setParams(toKv([]))
+   659→    setHeaders(toKv([]))
+   660→    setBody('')
+   661→    setResponse(null)
+   662→    setError(null)
+   663→  }, [])
+   664→
+   665→  // Keyboard shortcut: Ctrl/Cmd + Enter to send
+   666→  useEffect(() => {
+   667→    const handler = (e: KeyboardEvent) => {
+   668→      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+   669→        e.preventDefault()
+   670→        if (!loading) sendRequest()
+   671→      }
+   672→    }
+   673→    window.addEventListener('keydown', handler)
+   674→    return () => window.removeEventListener('keydown', handler)
+   675→  }, [sendRequest, loading])
+   676→
+   677→  const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+   678→
+   679→  return (
+   680→    <div className="space-y-6">
+   681→      {/* Header */}
+   682→      <div className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-emerald-50 via-teal-50 to-background dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-background p-6">
+   683→        <div className="absolute inset-0 bg-animated-gradient opacity-30 pointer-events-none" style={{ background: 'linear-gradient(135deg, oklch(0.65 0.17 162 / 0.15), oklch(0.55 0.15 180 / 0.1))' }} />
+   684→        <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+   685→          <div className="space-y-1">
+   686→            <div className="flex items-center gap-2">
+   687→              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-sm">
+   688→                <Terminal className="h-5 w-5" />
+   689→              </div>
+   690→              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gradient-emerald">
+   691→                API Playground
+   692→              </h1>
+   693→            </div>
+   694→            <p className="text-sm text-muted-foreground">
+   695→              Test your SelfBase REST API endpoints interactively
+   696→            </p>
+   697→          </div>
+   698→
+   699→          {/* Stats */}
+   700→          <div className="flex flex-wrap gap-3">
+   701→            <div className="rounded-lg border border-border bg-background/70 backdrop-blur px-3 py-2 min-w-[120px]">
+   702→              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   703→                <Hash className="h-3 w-3" />
+   704→                Endpoints
+   705→              </div>
+   706→              <div className="text-lg font-bold text-foreground">{ENDPOINT_TEMPLATES.length}</div>
+   707→            </div>
+   708→            <div className="rounded-lg border border-border bg-background/70 backdrop-blur px-3 py-2 min-w-[120px]">
+   709→              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   710→                <Clock className="h-3 w-3" />
+   711→                Last Time
+   712→              </div>
+   713→              <div className="text-lg font-bold text-foreground">
+   714→                {lastDuration !== null ? formatDuration(lastDuration) : '—'}
+   715→              </div>
+   716→            </div>
+   717→            <div className="rounded-lg border border-border bg-background/70 backdrop-blur px-3 py-2 min-w-[120px]">
+   718→              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   719→                <Gauge className="h-3 w-3" />
+   720→                Success Rate
+   721→              </div>
+   722→              <div className="text-lg font-bold text-foreground">{successRate}%</div>
+   723→            </div>
+   724→          </div>
+   725→        </div>
+   726→      </div>
+   727→
+   728→      {/* Main layout: 2 columns on desktop */}
+   729→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+   730→        {/* Left: Endpoint Library */}
+   731→        <Card className="lg:col-span-1 flex flex-col">
+   732→          <CardHeader className="pb-3">
+   733→            <div className="flex items-center justify-between">
+   734→              <div>
+   735→                <CardTitle className="text-base flex items-center gap-2">
+   736→                  <FileJson className="h-4 w-4 text-emerald-500" />
+   737→                  Endpoint Library
+   738→                </CardTitle>
+   739→                <CardDescription className="text-xs mt-1">
+   740→                  {filteredTemplates.length} of {ENDPOINT_TEMPLATES.length} endpoints
+   741→                </CardDescription>
+   742→              </div>
+   743→            </div>
+   744→            <div className="relative mt-2">
+   745→              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+   746→              <Input
+   747→                value={search}
+   748→                onChange={(e) => setSearch(e.target.value)}
+   749→                placeholder="Search endpoints..."
+   750→                className="h-8 pl-8 text-xs"
+   751→              />
+   752→            </div>
+   753→          </CardHeader>
+   754→          <CardContent className="flex-1 overflow-y-auto max-h-[70vh] scrollbar-thin pr-2 -mr-2">
+   755→            <div className="space-y-5">
+   756→              {groupedTemplates.map(([category, endpoints], gIdx) => (
+   757→                <div key={category} className="space-y-1.5">
+   758→                  <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   759→                    <span>{category}</span>
+   760→                    <Badge variant="outline" className="text-[9px] h-4 px-1.5">{endpoints.length}</Badge>
+   761→                  </div>
+   762→                  <div className="space-y-1">
+   763→                    {endpoints.map((tpl, idx) => (
+   764→                      <motion.button
+   765→                        key={tpl.id}
+   766→                        initial={{ opacity: 0, y: 6 }}
+   767→                        animate={{ opacity: 1, y: 0 }}
+   768→                        transition={{ delay: (gIdx * 0.02) + (idx * 0.015), duration: 0.2 }}
+   769→                        whileHover={{ x: 2 }}
+   770→                        onClick={() => loadTemplate(tpl)}
+   771→                        className={`w-full text-left rounded-md border px-2.5 py-2 transition-colors ${
+   772→                          selectedTemplate?.id === tpl.id
+   773→                            ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40'
+   774→                            : 'border-border bg-background hover:bg-accent/50'
+   775→                        }`}
+   776→                      >
+   777→                        <div className="flex items-center gap-2">
+   778→                          <MethodBadge method={tpl.method} />
+   779→                          <code className="text-[11px] font-mono text-foreground truncate flex-1">{tpl.path}</code>
+   780→                        </div>
+   781→                        <p className="text-[10px] text-muted-foreground mt-1 line-clamp-1">{tpl.description}</p>
+   782→                      </motion.button>
+   783→                    ))}
+   784→                  </div>
+   785→                </div>
+   786→              ))}
+   787→              {filteredTemplates.length === 0 && (
+   788→                <div className="text-center py-10 text-muted-foreground">
+   789→                  <Search className="h-8 w-8 mx-auto mb-2 opacity-40" />
+   790→                  <p className="text-sm">No endpoints match &quot;{search}&quot;</p>
+   791→                </div>
+   792→              )}
+   793→            </div>
+   794→          </CardContent>
+   795→        </Card>
+   796→
+   797→        {/* Right: Request Builder + Response Viewer */}
+   798→        <div className="lg:col-span-2 space-y-4">
+   799→          {/* Request Builder */}
+   800→          <Card>
+   801→            <CardHeader className="pb-3">
+   802→              <div className="flex items-center justify-between">
+   803→                <div>
+   804→                  <CardTitle className="text-base flex items-center gap-2">
+   805→                    <Zap className="h-4 w-4 text-emerald-500" />
+   806→                    Request Builder
+   807→                  </CardTitle>
+   808→                  <CardDescription className="text-xs mt-1">
+   809→                    {selectedTemplate ? selectedTemplate.description : 'Pick an endpoint to start'}
+   810→                  </CardDescription>
+   811→                </div>
+   812→                <Button
+   813→                  variant="ghost"
+   814→                  size="sm"
+   815→                  className="h-7 text-xs gap-1 text-muted-foreground"
+   816→                  onClick={reset}
+   817→                >
+   818→                  <RotateCcw className="h-3 w-3" />
+   819→                  Reset
+   820→                </Button>
+   821→              </div>
+   822→            </CardHeader>
+   823→            <CardContent className="space-y-3">
+   824→              {/* URL row */}
+   825→              <div className="flex flex-col sm:flex-row gap-2">
+   826→                <Select value={method} onValueChange={(v) => setMethod(v as HttpMethod)}>
+   827→                  <SelectTrigger className={`w-full sm:w-[120px] font-bold text-sm ${methodSelectColors[method]}`}>
+   828→                    <SelectValue />
+   829→                  </SelectTrigger>
+   830→                  <SelectContent>
+   831→                    {ALL_METHODS.map((m) => (
+   832→                      <SelectItem key={m} value={m} className={`font-bold ${methodSelectColors[m]}`}>
+   833→                        {m}
+   834→                      </SelectItem>
+   835→                    ))}
+   836→                  </SelectContent>
+   837→                </Select>
+   838→                <Input
+   839→                  value={url}
+   840→                  onChange={(e) => setUrl(e.target.value)}
+   841→                  placeholder="/api/tables"
+   842→                  className="flex-1 font-mono text-xs h-9"
+   843→                />
+   844→                <div className="flex gap-2">
+   845→                  <Button
+   846→                    variant="outline"
+   847→                    size="sm"
+   848→                    className="h-9 gap-1.5"
+   849→                    onClick={copyAsCurl}
+   850→                  >
+   851→                    <Copy className="h-3.5 w-3.5" />
+   852→                    <span className="hidden sm:inline">cURL</span>
+   853→                  </Button>
+   854→                  <Button
+   855→                    size="sm"
+   856→                    className="h-9 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+   857→                    onClick={sendRequest}
+   858→                    disabled={loading}
+   859→                  >
+   860→                    {loading ? (
+   861→                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   862→                    ) : (
+   863→                      <Send className="h-3.5 w-3.5" />
+   864→                    )}
+   865→                    Send
+   866→                    <kbd className="hidden sm:inline-flex h-4 items-center gap-0.5 rounded border border-emerald-700/50 bg-emerald-700/30 px-1 font-mono text-[10px] text-emerald-50">
+   867→                      ⌘↵
+   868→                    </kbd>
+   869→                  </Button>
+   870→                </div>
+   871→              </div>
+   872→
+   873→              {/* Tabs */}
+   874→              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+   875→                <TabsList className="h-8">
+   876→                  <TabsTrigger value="params" className="text-xs gap-1.5">
+   877→                    <Hash className="h-3 w-3" />
+   878→                    Params
+   879→                    {params.filter((p) => p.key.trim()).length > 0 && (
+   880→                      <Badge variant="secondary" className="h-4 px-1 text-[9px]">{params.filter((p) => p.key.trim()).length}</Badge>
+   881→                    )}
+   882→                  </TabsTrigger>
+   883→                  <TabsTrigger value="headers" className="text-xs gap-1.5">
+   884→                    <Activity className="h-3 w-3" />
+   885→                    Headers
+   886→                    {headers.filter((h) => h.key.trim()).length > 0 && (
+   887→                      <Badge variant="secondary" className="h-4 px-1 text-[9px]">{headers.filter((h) => h.key.trim()).length}</Badge>
+   888→                    )}
+   889→                  </TabsTrigger>
+   890→                  <TabsTrigger value="body" className="text-xs gap-1.5" disabled={!hasBody}>
+   891→                    <FileJson className="h-3 w-3" />
+   892→                    Body
+   893→                  </TabsTrigger>
+   894→                </TabsList>
+   895→
+   896→                <TabsContent value="params" className="mt-3">
+   897→                  <KvEditor
+   898→                    rows={params}
+   899→                    onChange={setParams}
+   900→                    keyPlaceholder="param name"
+   901→                    valuePlaceholder="value"
+   902→                  />
+   903→                </TabsContent>
+   904→
+   905→                <TabsContent value="headers" className="mt-3">
+   906→                  <KvEditor
+   907→                    rows={headers}
+   908→                    onChange={setHeaders}
+   909→                    keyPlaceholder="header name"
+   910→                    valuePlaceholder="value"
+   911→                  />
+   912→                </TabsContent>
+   913→
+   914→                <TabsContent value="body" className="mt-3">
+   915→                  {hasBody ? (
+   916→                    <div className="space-y-2">
+   917→                      <Textarea
+   918→                        value={body}
+   919→                        onChange={(e) => setBody(e.target.value)}
+   920→                        placeholder='{\n  "key": "value"\n}'
+   921→                        className="font-mono text-xs min-h-[180px] scrollbar-thin"
+   922→                      />
+   923→                      <div className="flex items-center justify-between">
+   924→                        <p className="text-[10px] text-muted-foreground">
+   925→                          Content-Type: application/json (added automatically if missing)
+   926→                        </p>
+   927→                        <Button
+   928→                          variant="ghost"
+   929→                          size="sm"
+   930→                          className="h-6 text-[10px] gap-1"
+   931→                          onClick={() => {
+   932→                            try {
+   933→                              const parsed = JSON.parse(body)
+   934→                              setBody(JSON.stringify(parsed, null, 2))
+   935→                              toast({ title: 'JSON formatted' })
+   936→                            } catch {
+   937→                              toast({ title: 'Invalid JSON', variant: 'destructive' })
+   938→                            }
+   939→                          }}
+   940→                        >
+   941→                          <FileJson className="h-3 w-3" />
+   942→                          Format
+   943→                        </Button>
+   944→                      </div>
+   945→                    </div>
+   946→                  ) : (
+   947→                    <p className="text-xs text-muted-foreground italic py-4 text-center">
+   948→                      Body is only available for POST, PUT, and PATCH requests
+   949→                    </p>
+   950→                  )}
+   951→                </TabsContent>
+   952→              </Tabs>
+   953→            </CardContent>
+   954→          </Card>
+   955→
+   956→          {/* Response Viewer */}
+   957→          <Card>
+   958→            <CardHeader className="pb-3">
+   959→              <div className="flex items-center justify-between">
+   960→                <div>
+   961→                  <CardTitle className="text-base flex items-center gap-2">
+   962→                    <Activity className="h-4 w-4 text-emerald-500" />
+   963→                    Response
+   964→                  </CardTitle>
+   965→                  <CardDescription className="text-xs mt-1">
+   966→                    {response ? 'API response' : loading ? 'Waiting for response...' : 'No request sent yet'}
+   967→                  </CardDescription>
+   968→                </div>
+   969→                {response && (
+   970→                  <Button
+   971→                    variant="outline"
+   972→                    size="sm"
+   973→                    className="h-7 text-xs gap-1"
+   974→                    onClick={copyResponse}
+   975→                  >
+   976→                    <Copy className="h-3 w-3" />
+   977→                    Copy
+   978→                  </Button>
+   979→                )}
+   980→              </div>
+   981→            </CardHeader>
+   982→            <CardContent>
+   983→              <AnimatePresence mode="wait">
+   984→                {/* Empty state */}
+   985→                {!loading && !response && !error && (
+   986→                  <motion.div
+   987→                    key="empty"
+   988→                    initial={{ opacity: 0 }}
+   989→                    animate={{ opacity: 1 }}
+   990→                    exit={{ opacity: 0 }}
+   991→                    className="flex flex-col items-center justify-center py-16 text-center"
+   992→                  >
+   993→                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 mb-3">
+   994→                      <Play className="h-6 w-6" />
+   995→                    </div>
+   996→                    <p className="text-sm font-medium text-foreground">Ready to send</p>
+   997→                    <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+   998→                      Select an endpoint from the library and click <span className="font-mono text-emerald-600">Send</span> to see the response here.
+   999→                    </p>
+  1000→                  </motion.div>
+  1001→                )}
+  1002→
+  1003→                {/* Loading state */}
+  1004→                {loading && (
+  1005→                  <motion.div
+  1006→                    key="loading"
+  1007→                    initial={{ opacity: 0 }}
+  1008→                    animate={{ opacity: 1 }}
+  1009→                    exit={{ opacity: 0 }}
+  1010→                    className="space-y-3"
+  1011→                  >
+  1012→                    <div className="flex items-center gap-3 py-2">
+  1013→                      <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
+  1014→                      <div className="space-y-1">
+  1015→                        <p className="text-sm font-medium">Sending {method} request...</p>
+  1016→                        <p className="text-xs text-muted-foreground font-mono">{url}</p>
+  1017→                      </div>
+  1018→                    </div>
+  1019→                    <div className="space-y-2">
+  1020→                      <div className="h-4 w-1/3 bg-accent rounded shimmer" />
+  1021→                      <div className="h-32 w-full bg-accent rounded shimmer" />
+  1022→                    </div>
+  1023→                  </motion.div>
+  1024→                )}
+  1025→
+  1026→                {/* Error state */}
+  1027→                {error && !loading && (
+  1028→                  <motion.div
+  1029→                    key="error"
+  1030→                    initial={{ opacity: 0, y: 8 }}
+  1031→                    animate={{ opacity: 1, y: 0 }}
+  1032→                    exit={{ opacity: 0 }}
+  1033→                    className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4"
+  1034→                  >
+  1035→                    <div className="flex items-start gap-3">
+  1036→                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0">
+  1037→                        <XCircle className="h-5 w-5" />
+  1038→                      </div>
+  1039→                      <div className="space-y-1 flex-1 min-w-0">
+  1040→                        <p className="text-sm font-semibold text-red-700 dark:text-red-300">Request failed</p>
+  1041→                        <p className="text-xs text-red-600 dark:text-red-400 font-mono break-all">{error}</p>
+  1042→                      </div>
+  1043→                    </div>
+  1044→                  </motion.div>
+  1045→                )}
+  1046→
+  1047→                {/* Response state */}
+  1048→                {response && !loading && !error && (
+  1049→                  <motion.div
+  1050→                    key="response"
+  1051→                    initial={{ opacity: 0, y: 12 }}
+  1052→                    animate={{ opacity: 1, y: 0 }}
+  1053→                    exit={{ opacity: 0, y: -8 }}
+  1054→                    transition={{ duration: 0.25, ease: 'easeOut' }}
+  1055→                    className="space-y-3"
+  1056→                  >
+  1057→                    {/* Status row */}
+  1058→                    <div className="flex flex-wrap items-center gap-2">
+  1059→                      <StatusBadge status={response.status} />
+  1060→                      <span className="text-xs text-muted-foreground">{response.statusText || '—'}</span>
+  1061→                      <div className="flex items-center gap-1 ml-auto text-xs text-muted-foreground">
+  1062→                        <Clock className="h-3 w-3" />
+  1063→                        <span>{formatDuration(response.durationMs)}</span>
+  1064→                      </div>
+  1065→                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+  1066→                        <ArrowDownToLine className="h-3 w-3" />
+  1067→                        <span>{formatBytes(response.sizeBytes)}</span>
+  1068→                      </div>
+  1069→                      <div className="flex items-center gap-1">
+  1070→                        {response.ok ? (
+  1071→                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+  1072→                            <CheckCircle2 className="h-3 w-3" />
+  1073→                            Success
+  1074→                          </span>
+  1075→                        ) : (
+  1076→                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+  1077→                            <AlertTriangle className="h-3 w-3" />
+  1078→                            Non-2xx
+  1079→                          </span>
+  1080→                        )}
+  1081→                      </div>
+  1082→                    </div>
+  1083→
+  1084→                    {/* Response Headers (collapsible) */}
+  1085→                    <Collapsible open={headersOpen} onOpenChange={setHeadersOpen}>
+  1086→                      <CollapsibleTrigger asChild>
+  1087→                        <Button variant="ghost" size="sm" className="h-7 w-full justify-between text-xs text-muted-foreground hover:text-foreground">
+  1088→                          <span className="flex items-center gap-1.5">
+  1089→                            {headersOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+  1090→                            Response Headers ({Object.keys(response.headers).length})
+  1091→                          </span>
+  1092→                        </Button>
+  1093→                      </CollapsibleTrigger>
+  1094→                      <CollapsibleContent>
+  1095→                        <div className="mt-2 rounded-md border border-border bg-muted/30 p-3 max-h-48 overflow-y-auto scrollbar-thin">
+  1096→                          <div className="space-y-1">
+  1097→                            {Object.entries(response.headers).map(([k, v]) => (
+  1098→                              <div key={k} className="flex items-baseline gap-2 text-xs">
+  1099→                                <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">{k}:</span>
+  1100→                                <span className="font-mono text-muted-foreground break-all">{v}</span>
+  1101→                              </div>
+  1102→                            ))}
+  1103→                          </div>
+  1104→                        </div>
+  1105→                      </CollapsibleContent>
+  1106→                    </Collapsible>
+  1107→
+  1108→                    {/* Response Body */}
+  1109→                    <div>
+  1110→                      <div className="flex items-center justify-between mb-1.5">
+  1111→                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+  1112→                          Response Body
+  1113→                        </span>
+  1114→                        <span className="text-[10px] text-muted-foreground font-mono">
+  1115→                          {response.body.length} chars
+  1116→                        </span>
+  1117→                      </div>
+  1118→                      <pre className="rounded-md border border-border bg-muted/30 p-3 overflow-auto max-h-[400px] scrollbar-thin font-mono text-xs leading-relaxed text-foreground">
+  1119→                        <code>{response.body || '(empty body)'}</code>
+  1120→                      </pre>
+  1121→                    </div>
+  1122→                  </motion.div>
+  1123→                )}
+  1124→              </AnimatePresence>
+  1125→            </CardContent>
+  1126→          </Card>
+  1127→
+  1128→          {/* History */}
+  1129→          {history.length > 0 && (
+  1130→            <Card>
+  1131→              <CardHeader className="pb-3">
+  1132→                <CardTitle className="text-sm flex items-center gap-2">
+  1133→                  <Clock className="h-4 w-4 text-emerald-500" />
+  1134→                  Recent Requests
+  1135→                  <Badge variant="outline" className="text-[10px] h-4 px-1.5">{history.length}</Badge>
+  1136→                </CardTitle>
+  1137→              </CardHeader>
+  1138→              <CardContent>
+  1139→                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto scrollbar-thin">
+  1140→                  {[...history].reverse().map((h, i) => (
+  1141→                    <div
+  1142→                      key={`${h.timestamp}-${i}`}
+  1143→                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-mono ${
+  1144→                        h.status === 0
+  1145→                          ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
+  1146→                          : h.ok
+  1147→                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400'
+  1148→                            : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400'
+  1149→                      }`}
+  1150→                      title={new Date(h.timestamp).toLocaleString()}
+  1151→                    >
+  1152→                      {h.status === 0 ? (
+  1153→                        <XCircle className="h-3 w-3" />
+  1154→                      ) : h.ok ? (
+  1155→                        <CheckCircle2 className="h-3 w-3" />
+  1156→                      ) : (
+  1157→                        <AlertTriangle className="h-3 w-3" />
+  1158→                      )}
+  1159→                      <span>{h.status === 0 ? 'ERR' : h.status}</span>
+  1160→                      <span className="opacity-70">·</span>
+  1161→                      <span>{formatDuration(h.durationMs)}</span>
+  1162→                    </div>
+  1163→                  ))}
+  1164→                </div>
+  1165→              </CardContent>
+  1166→            </Card>
+  1167→          )}
+  1168→        </div>
+  1169→      </div>
+  1170→    </div>
+  1171→  )
+  1172→}
+  1173→

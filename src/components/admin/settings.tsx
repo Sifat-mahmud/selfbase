@@ -138,6 +138,7 @@ const CONFIG_DEFAULTS: Record<string, string | number | boolean> = {
   'storage.cdnBaseUrl': 'https://cdn.selfbase.local',
   // Security
   'security.jwtExpiration': 60,
+  'security.apiTokenExpiryMinutes': 60,
   'security.apiKeyRotationPeriod': 90,
   'security.mfaRequiredForAdmin': false,
   'security.ipWhitelist': '',
@@ -180,6 +181,7 @@ const storageSchema = z.object({
 
 const securitySchema = z.object({
   'security.jwtExpiration': z.coerce.number().int().min(1, 'Min 1 min').max(10080),
+  'security.apiTokenExpiryMinutes': z.coerce.number().int().min(1, 'Min 1 min').max(10080),
   'security.apiKeyRotationPeriod': z.coerce.number().int().min(1, 'Min 1 day').max(365),
   'security.mfaRequiredForAdmin': z.boolean(),
   'security.ipWhitelist': z.string(),
@@ -1127,6 +1129,7 @@ function SecurityTab({
     values: deriveInitial<SecurityValues>(
       [
         'security.jwtExpiration',
+        'security.apiTokenExpiryMinutes',
         'security.apiKeyRotationPeriod',
         'security.mfaRequiredForAdmin',
         'security.ipWhitelist',
@@ -1198,6 +1201,23 @@ function SecurityTab({
                   </FormControl>
                   <FormDescription>
                     Recommended rotation cadence surfaced in the Auth section.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="security.apiTokenExpiryMinutes"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>API Token Expiry (minutes)</FormLabel>
+                  <FormControl>
+                    <Input type="number" min={1} max={10080} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    How long external app tokens remain valid after login. Default: 60 min (1 hour).
+                    Used by /api/v1/auth/login.
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

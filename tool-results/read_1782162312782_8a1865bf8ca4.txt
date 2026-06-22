@@ -1,0 +1,524 @@
+   650→   650→    toast({ title: 'Response copied', description: 'Body copied to clipboard.' })
+   651→   651→  }, [response, toast])
+   652→   652→
+   653→   653→  // Reset state
+   654→   654→  const reset = useCallback(() => {
+   655→   655→    setSelectedTemplate(null)
+   656→   656→    setMethod('GET')
+   657→   657→    setUrl('')
+   658→   658→    setParams(toKv([]))
+   659→   659→    setHeaders(toKv([]))
+   660→   660→    setBody('')
+   661→   661→    setResponse(null)
+   662→   662→    setError(null)
+   663→   663→  }, [])
+   664→   664→
+   665→   665→  // Keyboard shortcut: Ctrl/Cmd + Enter to send
+   666→   666→  useEffect(() => {
+   667→   667→    const handler = (e: KeyboardEvent) => {
+   668→   668→      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+   669→   669→        e.preventDefault()
+   670→   670→        if (!loading) sendRequest()
+   671→   671→      }
+   672→   672→    }
+   673→   673→    window.addEventListener('keydown', handler)
+   674→   674→    return () => window.removeEventListener('keydown', handler)
+   675→   675→  }, [sendRequest, loading])
+   676→   676→
+   677→   677→  const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+   678→   678→
+   679→   679→  return (
+   680→   680→    <div className="space-y-6">
+   681→   681→      {/* Header */}
+   682→   682→      <div className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-emerald-50 via-teal-50 to-background dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-background p-6">
+   683→   683→        <div className="absolute inset-0 bg-animated-gradient opacity-30 pointer-events-none" style={{ background: 'linear-gradient(135deg, oklch(0.65 0.17 162 / 0.15), oklch(0.55 0.15 180 / 0.1))' }} />
+   684→   684→        <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+   685→   685→          <div className="space-y-1">
+   686→   686→            <div className="flex items-center gap-2">
+   687→   687→              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500 text-white shadow-sm">
+   688→   688→                <Terminal className="h-5 w-5" />
+   689→   689→              </div>
+   690→   690→              <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gradient-emerald">
+   691→   691→                API Playground
+   692→   692→              </h1>
+   693→   693→            </div>
+   694→   694→            <p className="text-sm text-muted-foreground">
+   695→   695→              Test your SelfBase REST API endpoints interactively
+   696→   696→            </p>
+   697→   697→          </div>
+   698→   698→
+   699→   699→          {/* Stats */}
+   700→   700→          <div className="flex flex-wrap gap-3">
+   701→   701→            <div className="rounded-lg border border-border bg-background/70 backdrop-blur px-3 py-2 min-w-[120px]">
+   702→   702→              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   703→   703→                <Hash className="h-3 w-3" />
+   704→   704→                Endpoints
+   705→   705→              </div>
+   706→   706→              <div className="text-lg font-bold text-foreground">{ENDPOINT_TEMPLATES.length}</div>
+   707→   707→            </div>
+   708→   708→            <div className="rounded-lg border border-border bg-background/70 backdrop-blur px-3 py-2 min-w-[120px]">
+   709→   709→              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   710→   710→                <Clock className="h-3 w-3" />
+   711→   711→                Last Time
+   712→   712→              </div>
+   713→   713→              <div className="text-lg font-bold text-foreground">
+   714→   714→                {lastDuration !== null ? formatDuration(lastDuration) : '—'}
+   715→   715→              </div>
+   716→   716→            </div>
+   717→   717→            <div className="rounded-lg border border-border bg-background/70 backdrop-blur px-3 py-2 min-w-[120px]">
+   718→   718→              <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+   719→   719→                <Gauge className="h-3 w-3" />
+   720→   720→                Success Rate
+   721→   721→              </div>
+   722→   722→              <div className="text-lg font-bold text-foreground">{successRate}%</div>
+   723→   723→            </div>
+   724→   724→          </div>
+   725→   725→        </div>
+   726→   726→      </div>
+   727→   727→
+   728→   728→      {/* Main layout: 2 columns on desktop */}
+   729→   729→      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+   730→   730→        {/* Left: Endpoint Library */}
+   731→   731→        <Card className="lg:col-span-1 flex flex-col">
+   732→   732→          <CardHeader className="pb-3">
+   733→   733→            <div className="flex items-center justify-between">
+   734→   734→              <div>
+   735→   735→                <CardTitle className="text-base flex items-center gap-2">
+   736→   736→                  <FileJson className="h-4 w-4 text-emerald-500" />
+   737→   737→                  Endpoint Library
+   738→   738→                </CardTitle>
+   739→   739→                <CardDescription className="text-xs mt-1">
+   740→   740→                  {filteredTemplates.length} of {ENDPOINT_TEMPLATES.length} endpoints
+   741→   741→                </CardDescription>
+   742→   742→              </div>
+   743→   743→            </div>
+   744→   744→            <div className="relative mt-2">
+   745→   745→              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+   746→   746→              <Input
+   747→   747→                value={search}
+   748→   748→                onChange={(e) => setSearch(e.target.value)}
+   749→   749→                placeholder="Search endpoints..."
+   750→   750→                className="h-8 pl-8 text-xs"
+   751→   751→              />
+   752→   752→            </div>
+   753→   753→          </CardHeader>
+   754→   754→          <CardContent className="flex-1 overflow-y-auto max-h-[70vh] scrollbar-thin pr-2 -mr-2">
+   755→   755→            <div className="space-y-5">
+   756→   756→              {groupedTemplates.map(([category, endpoints], gIdx) => (
+   757→   757→                <div key={category} className="space-y-1.5">
+   758→   758→                  <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+   759→   759→                    <span>{category}</span>
+   760→   760→                    <Badge variant="outline" className="text-[9px] h-4 px-1.5">{endpoints.length}</Badge>
+   761→   761→                  </div>
+   762→   762→                  <div className="space-y-1">
+   763→   763→                    {endpoints.map((tpl, idx) => (
+   764→   764→                      <motion.button
+   765→   765→                        key={tpl.id}
+   766→   766→                        initial={{ opacity: 0, y: 6 }}
+   767→   767→                        animate={{ opacity: 1, y: 0 }}
+   768→   768→                        transition={{ delay: (gIdx * 0.02) + (idx * 0.015), duration: 0.2 }}
+   769→   769→                        whileHover={{ x: 2 }}
+   770→   770→                        onClick={() => loadTemplate(tpl)}
+   771→   771→                        className={`w-full text-left rounded-md border px-2.5 py-2 transition-colors ${
+   772→   772→                          selectedTemplate?.id === tpl.id
+   773→   773→                            ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40'
+   774→   774→                            : 'border-border bg-background hover:bg-accent/50'
+   775→   775→                        }`}
+   776→   776→                      >
+   777→   777→                        <div className="flex items-center gap-2">
+   778→   778→                          <MethodBadge method={tpl.method} />
+   779→   779→                          <code className="text-[11px] font-mono text-foreground truncate flex-1">{tpl.path}</code>
+   780→   780→                        </div>
+   781→   781→                        <p className="text-[10px] text-muted-foreground mt-1 line-clamp-1">{tpl.description}</p>
+   782→   782→                      </motion.button>
+   783→   783→                    ))}
+   784→   784→                  </div>
+   785→   785→                </div>
+   786→   786→              ))}
+   787→   787→              {filteredTemplates.length === 0 && (
+   788→   788→                <div className="text-center py-10 text-muted-foreground">
+   789→   789→                  <Search className="h-8 w-8 mx-auto mb-2 opacity-40" />
+   790→   790→                  <p className="text-sm">No endpoints match &quot;{search}&quot;</p>
+   791→   791→                </div>
+   792→   792→              )}
+   793→   793→            </div>
+   794→   794→          </CardContent>
+   795→   795→        </Card>
+   796→   796→
+   797→   797→        {/* Right: Request Builder + Response Viewer */}
+   798→   798→        <div className="lg:col-span-2 space-y-4">
+   799→   799→          {/* Request Builder */}
+   800→   800→          <Card>
+   801→   801→            <CardHeader className="pb-3">
+   802→   802→              <div className="flex items-center justify-between">
+   803→   803→                <div>
+   804→   804→                  <CardTitle className="text-base flex items-center gap-2">
+   805→   805→                    <Zap className="h-4 w-4 text-emerald-500" />
+   806→   806→                    Request Builder
+   807→   807→                  </CardTitle>
+   808→   808→                  <CardDescription className="text-xs mt-1">
+   809→   809→                    {selectedTemplate ? selectedTemplate.description : 'Pick an endpoint to start'}
+   810→   810→                  </CardDescription>
+   811→   811→                </div>
+   812→   812→                <Button
+   813→   813→                  variant="ghost"
+   814→   814→                  size="sm"
+   815→   815→                  className="h-7 text-xs gap-1 text-muted-foreground"
+   816→   816→                  onClick={reset}
+   817→   817→                >
+   818→   818→                  <RotateCcw className="h-3 w-3" />
+   819→   819→                  Reset
+   820→   820→                </Button>
+   821→   821→              </div>
+   822→   822→            </CardHeader>
+   823→   823→            <CardContent className="space-y-3">
+   824→   824→              {/* URL row */}
+   825→   825→              <div className="flex flex-col sm:flex-row gap-2">
+   826→   826→                <Select value={method} onValueChange={(v) => setMethod(v as HttpMethod)}>
+   827→   827→                  <SelectTrigger className={`w-full sm:w-[120px] font-bold text-sm ${methodSelectColors[method]}`}>
+   828→   828→                    <SelectValue />
+   829→   829→                  </SelectTrigger>
+   830→   830→                  <SelectContent>
+   831→   831→                    {ALL_METHODS.map((m) => (
+   832→   832→                      <SelectItem key={m} value={m} className={`font-bold ${methodSelectColors[m]}`}>
+   833→   833→                        {m}
+   834→   834→                      </SelectItem>
+   835→   835→                    ))}
+   836→   836→                  </SelectContent>
+   837→   837→                </Select>
+   838→   838→                <Input
+   839→   839→                  value={url}
+   840→   840→                  onChange={(e) => setUrl(e.target.value)}
+   841→   841→                  placeholder="/api/tables"
+   842→   842→                  className="flex-1 font-mono text-xs h-9"
+   843→   843→                />
+   844→   844→                <div className="flex gap-2">
+   845→   845→                  <Button
+   846→   846→                    variant="outline"
+   847→   847→                    size="sm"
+   848→   848→                    className="h-9 gap-1.5"
+   849→   849→                    onClick={copyAsCurl}
+   850→   850→                  >
+   851→   851→                    <Copy className="h-3.5 w-3.5" />
+   852→   852→                    <span className="hidden sm:inline">cURL</span>
+   853→   853→                  </Button>
+   854→   854→                  <Button
+   855→   855→                    size="sm"
+   856→   856→                    className="h-9 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+   857→   857→                    onClick={sendRequest}
+   858→   858→                    disabled={loading}
+   859→   859→                  >
+   860→   860→                    {loading ? (
+   861→   861→                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+   862→   862→                    ) : (
+   863→   863→                      <Send className="h-3.5 w-3.5" />
+   864→   864→                    )}
+   865→   865→                    Send
+   866→   866→                    <kbd className="hidden sm:inline-flex h-4 items-center gap-0.5 rounded border border-emerald-700/50 bg-emerald-700/30 px-1 font-mono text-[10px] text-emerald-50">
+   867→   867→                      ⌘↵
+   868→   868→                    </kbd>
+   869→   869→                  </Button>
+   870→   870→                </div>
+   871→   871→              </div>
+   872→   872→
+   873→   873→              {/* Tabs */}
+   874→   874→              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+   875→   875→                <TabsList className="h-8">
+   876→   876→                  <TabsTrigger value="params" className="text-xs gap-1.5">
+   877→   877→                    <Hash className="h-3 w-3" />
+   878→   878→                    Params
+   879→   879→                    {params.filter((p) => p.key.trim()).length > 0 && (
+   880→   880→                      <Badge variant="secondary" className="h-4 px-1 text-[9px]">{params.filter((p) => p.key.trim()).length}</Badge>
+   881→   881→                    )}
+   882→   882→                  </TabsTrigger>
+   883→   883→                  <TabsTrigger value="headers" className="text-xs gap-1.5">
+   884→   884→                    <Activity className="h-3 w-3" />
+   885→   885→                    Headers
+   886→   886→                    {headers.filter((h) => h.key.trim()).length > 0 && (
+   887→   887→                      <Badge variant="secondary" className="h-4 px-1 text-[9px]">{headers.filter((h) => h.key.trim()).length}</Badge>
+   888→   888→                    )}
+   889→   889→                  </TabsTrigger>
+   890→   890→                  <TabsTrigger value="body" className="text-xs gap-1.5" disabled={!hasBody}>
+   891→   891→                    <FileJson className="h-3 w-3" />
+   892→   892→                    Body
+   893→   893→                  </TabsTrigger>
+   894→   894→                </TabsList>
+   895→   895→
+   896→   896→                <TabsContent value="params" className="mt-3">
+   897→   897→                  <KvEditor
+   898→   898→                    rows={params}
+   899→   899→                    onChange={setParams}
+   900→   900→                    keyPlaceholder="param name"
+   901→   901→                    valuePlaceholder="value"
+   902→   902→                  />
+   903→   903→                </TabsContent>
+   904→   904→
+   905→   905→                <TabsContent value="headers" className="mt-3">
+   906→   906→                  <KvEditor
+   907→   907→                    rows={headers}
+   908→   908→                    onChange={setHeaders}
+   909→   909→                    keyPlaceholder="header name"
+   910→   910→                    valuePlaceholder="value"
+   911→   911→                  />
+   912→   912→                </TabsContent>
+   913→   913→
+   914→   914→                <TabsContent value="body" className="mt-3">
+   915→   915→                  {hasBody ? (
+   916→   916→                    <div className="space-y-2">
+   917→   917→                      <Textarea
+   918→   918→                        value={body}
+   919→   919→                        onChange={(e) => setBody(e.target.value)}
+   920→   920→                        placeholder='{\n  "key": "value"\n}'
+   921→   921→                        className="font-mono text-xs min-h-[180px] scrollbar-thin"
+   922→   922→                      />
+   923→   923→                      <div className="flex items-center justify-between">
+   924→   924→                        <p className="text-[10px] text-muted-foreground">
+   925→   925→                          Content-Type: application/json (added automatically if missing)
+   926→   926→                        </p>
+   927→   927→                        <Button
+   928→   928→                          variant="ghost"
+   929→   929→                          size="sm"
+   930→   930→                          className="h-6 text-[10px] gap-1"
+   931→   931→                          onClick={() => {
+   932→   932→                            try {
+   933→   933→                              const parsed = JSON.parse(body)
+   934→   934→                              setBody(JSON.stringify(parsed, null, 2))
+   935→   935→                              toast({ title: 'JSON formatted' })
+   936→   936→                            } catch {
+   937→   937→                              toast({ title: 'Invalid JSON', variant: 'destructive' })
+   938→   938→                            }
+   939→   939→                          }}
+   940→   940→                        >
+   941→   941→                          <FileJson className="h-3 w-3" />
+   942→   942→                          Format
+   943→   943→                        </Button>
+   944→   944→                      </div>
+   945→   945→                    </div>
+   946→   946→                  ) : (
+   947→   947→                    <p className="text-xs text-muted-foreground italic py-4 text-center">
+   948→   948→                      Body is only available for POST, PUT, and PATCH requests
+   949→   949→                    </p>
+   950→   950→                  )}
+   951→   951→                </TabsContent>
+   952→   952→              </Tabs>
+   953→   953→            </CardContent>
+   954→   954→          </Card>
+   955→   955→
+   956→   956→          {/* Response Viewer */}
+   957→   957→          <Card>
+   958→   958→            <CardHeader className="pb-3">
+   959→   959→              <div className="flex items-center justify-between">
+   960→   960→                <div>
+   961→   961→                  <CardTitle className="text-base flex items-center gap-2">
+   962→   962→                    <Activity className="h-4 w-4 text-emerald-500" />
+   963→   963→                    Response
+   964→   964→                  </CardTitle>
+   965→   965→                  <CardDescription className="text-xs mt-1">
+   966→   966→                    {response ? 'API response' : loading ? 'Waiting for response...' : 'No request sent yet'}
+   967→   967→                  </CardDescription>
+   968→   968→                </div>
+   969→   969→                {response && (
+   970→   970→                  <Button
+   971→   971→                    variant="outline"
+   972→   972→                    size="sm"
+   973→   973→                    className="h-7 text-xs gap-1"
+   974→   974→                    onClick={copyResponse}
+   975→   975→                  >
+   976→   976→                    <Copy className="h-3 w-3" />
+   977→   977→                    Copy
+   978→   978→                  </Button>
+   979→   979→                )}
+   980→   980→              </div>
+   981→   981→            </CardHeader>
+   982→   982→            <CardContent>
+   983→   983→              <AnimatePresence mode="wait">
+   984→   984→                {/* Empty state */}
+   985→   985→                {!loading && !response && !error && (
+   986→   986→                  <motion.div
+   987→   987→                    key="empty"
+   988→   988→                    initial={{ opacity: 0 }}
+   989→   989→                    animate={{ opacity: 1 }}
+   990→   990→                    exit={{ opacity: 0 }}
+   991→   991→                    className="flex flex-col items-center justify-center py-16 text-center"
+   992→   992→                  >
+   993→   993→                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500 mb-3">
+   994→   994→                      <Play className="h-6 w-6" />
+   995→   995→                    </div>
+   996→   996→                    <p className="text-sm font-medium text-foreground">Ready to send</p>
+   997→   997→                    <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+   998→   998→                      Select an endpoint from the library and click <span className="font-mono text-emerald-600">Send</span> to see the response here.
+   999→   999→                    </p>
+  1000→  1000→                  </motion.div>
+  1001→  1001→                )}
+  1002→  1002→
+  1003→  1003→                {/* Loading state */}
+  1004→  1004→                {loading && (
+  1005→  1005→                  <motion.div
+  1006→  1006→                    key="loading"
+  1007→  1007→                    initial={{ opacity: 0 }}
+  1008→  1008→                    animate={{ opacity: 1 }}
+  1009→  1009→                    exit={{ opacity: 0 }}
+  1010→  1010→                    className="space-y-3"
+  1011→  1011→                  >
+  1012→  1012→                    <div className="flex items-center gap-3 py-2">
+  1013→  1013→                      <Loader2 className="h-5 w-5 animate-spin text-emerald-500" />
+  1014→  1014→                      <div className="space-y-1">
+  1015→  1015→                        <p className="text-sm font-medium">Sending {method} request...</p>
+  1016→  1016→                        <p className="text-xs text-muted-foreground font-mono">{url}</p>
+  1017→  1017→                      </div>
+  1018→  1018→                    </div>
+  1019→  1019→                    <div className="space-y-2">
+  1020→  1020→                      <div className="h-4 w-1/3 bg-accent rounded shimmer" />
+  1021→  1021→                      <div className="h-32 w-full bg-accent rounded shimmer" />
+  1022→  1022→                    </div>
+  1023→  1023→                  </motion.div>
+  1024→  1024→                )}
+  1025→  1025→
+  1026→  1026→                {/* Error state */}
+  1027→  1027→                {error && !loading && (
+  1028→  1028→                  <motion.div
+  1029→  1029→                    key="error"
+  1030→  1030→                    initial={{ opacity: 0, y: 8 }}
+  1031→  1031→                    animate={{ opacity: 1, y: 0 }}
+  1032→  1032→                    exit={{ opacity: 0 }}
+  1033→  1033→                    className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4"
+  1034→  1034→                  >
+  1035→  1035→                    <div className="flex items-start gap-3">
+  1036→  1036→                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0">
+  1037→  1037→                        <XCircle className="h-5 w-5" />
+  1038→  1038→                      </div>
+  1039→  1039→                      <div className="space-y-1 flex-1 min-w-0">
+  1040→  1040→                        <p className="text-sm font-semibold text-red-700 dark:text-red-300">Request failed</p>
+  1041→  1041→                        <p className="text-xs text-red-600 dark:text-red-400 font-mono break-all">{error}</p>
+  1042→  1042→                      </div>
+  1043→  1043→                    </div>
+  1044→  1044→                  </motion.div>
+  1045→  1045→                )}
+  1046→  1046→
+  1047→  1047→                {/* Response state */}
+  1048→  1048→                {response && !loading && !error && (
+  1049→  1049→                  <motion.div
+  1050→  1050→                    key="response"
+  1051→  1051→                    initial={{ opacity: 0, y: 12 }}
+  1052→  1052→                    animate={{ opacity: 1, y: 0 }}
+  1053→  1053→                    exit={{ opacity: 0, y: -8 }}
+  1054→  1054→                    transition={{ duration: 0.25, ease: 'easeOut' }}
+  1055→  1055→                    className="space-y-3"
+  1056→  1056→                  >
+  1057→  1057→                    {/* Status row */}
+  1058→  1058→                    <div className="flex flex-wrap items-center gap-2">
+  1059→  1059→                      <StatusBadge status={response.status} />
+  1060→  1060→                      <span className="text-xs text-muted-foreground">{response.statusText || '—'}</span>
+  1061→  1061→                      <div className="flex items-center gap-1 ml-auto text-xs text-muted-foreground">
+  1062→  1062→                        <Clock className="h-3 w-3" />
+  1063→  1063→                        <span>{formatDuration(response.durationMs)}</span>
+  1064→  1064→                      </div>
+  1065→  1065→                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+  1066→  1066→                        <ArrowDownToLine className="h-3 w-3" />
+  1067→  1067→                        <span>{formatBytes(response.sizeBytes)}</span>
+  1068→  1068→                      </div>
+  1069→  1069→                      <div className="flex items-center gap-1">
+  1070→  1070→                        {response.ok ? (
+  1071→  1071→                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+  1072→  1072→                            <CheckCircle2 className="h-3 w-3" />
+  1073→  1073→                            Success
+  1074→  1074→                          </span>
+  1075→  1075→                        ) : (
+  1076→  1076→                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+  1077→  1077→                            <AlertTriangle className="h-3 w-3" />
+  1078→  1078→                            Non-2xx
+  1079→  1079→                          </span>
+  1080→  1080→                        )}
+  1081→  1081→                      </div>
+  1082→  1082→                    </div>
+  1083→  1083→
+  1084→  1084→                    {/* Response Headers (collapsible) */}
+  1085→  1085→                    <Collapsible open={headersOpen} onOpenChange={setHeadersOpen}>
+  1086→  1086→                      <CollapsibleTrigger asChild>
+  1087→  1087→                        <Button variant="ghost" size="sm" className="h-7 w-full justify-between text-xs text-muted-foreground hover:text-foreground">
+  1088→  1088→                          <span className="flex items-center gap-1.5">
+  1089→  1089→                            {headersOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+  1090→  1090→                            Response Headers ({Object.keys(response.headers).length})
+  1091→  1091→                          </span>
+  1092→  1092→                        </Button>
+  1093→  1093→                      </CollapsibleTrigger>
+  1094→  1094→                      <CollapsibleContent>
+  1095→  1095→                        <div className="mt-2 rounded-md border border-border bg-muted/30 p-3 max-h-48 overflow-y-auto scrollbar-thin">
+  1096→  1096→                          <div className="space-y-1">
+  1097→  1097→                            {Object.entries(response.headers).map(([k, v]) => (
+  1098→  1098→                              <div key={k} className="flex items-baseline gap-2 text-xs">
+  1099→  1099→                                <span className="font-mono font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">{k}:</span>
+  1100→  1100→                                <span className="font-mono text-muted-foreground break-all">{v}</span>
+  1101→  1101→                              </div>
+  1102→  1102→                            ))}
+  1103→  1103→                          </div>
+  1104→  1104→                        </div>
+  1105→  1105→                      </CollapsibleContent>
+  1106→  1106→                    </Collapsible>
+  1107→  1107→
+  1108→  1108→                    {/* Response Body */}
+  1109→  1109→                    <div>
+  1110→  1110→                      <div className="flex items-center justify-between mb-1.5">
+  1111→  1111→                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+  1112→  1112→                          Response Body
+  1113→  1113→                        </span>
+  1114→  1114→                        <span className="text-[10px] text-muted-foreground font-mono">
+  1115→  1115→                          {response.body.length} chars
+  1116→  1116→                        </span>
+  1117→  1117→                      </div>
+  1118→  1118→                      <pre className="rounded-md border border-border bg-muted/30 p-3 overflow-auto max-h-[400px] scrollbar-thin font-mono text-xs leading-relaxed text-foreground">
+  1119→  1119→                        <code>{response.body || '(empty body)'}</code>
+  1120→  1120→                      </pre>
+  1121→  1121→                    </div>
+  1122→  1122→                  </motion.div>
+  1123→  1123→                )}
+  1124→  1124→              </AnimatePresence>
+  1125→  1125→            </CardContent>
+  1126→  1126→          </Card>
+  1127→  1127→
+  1128→  1128→          {/* History */}
+  1129→  1129→          {history.length > 0 && (
+  1130→  1130→            <Card>
+  1131→  1131→              <CardHeader className="pb-3">
+  1132→  1132→                <CardTitle className="text-sm flex items-center gap-2">
+  1133→  1133→                  <Clock className="h-4 w-4 text-emerald-500" />
+  1134→  1134→                  Recent Requests
+  1135→  1135→                  <Badge variant="outline" className="text-[10px] h-4 px-1.5">{history.length}</Badge>
+  1136→  1136→                </CardTitle>
+  1137→  1137→              </CardHeader>
+  1138→  1138→              <CardContent>
+  1139→  1139→                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto scrollbar-thin">
+  1140→  1140→                  {[...history].reverse().map((h, i) => (
+  1141→  1141→                    <div
+  1142→  1142→                      key={`${h.timestamp}-${i}`}
+  1143→  1143→                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-mono ${
+  1144→  1144→                        h.status === 0
+  1145→  1145→                          ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
+  1146→  1146→                          : h.ok
+  1147→  1147→                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400'
+  1148→  1148→                            : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400'
+  1149→  1149→                      }`}
+  1150→  1150→                      title={new Date(h.timestamp).toLocaleString()}
+  1151→  1151→                    >
+  1152→  1152→                      {h.status === 0 ? (
+  1153→  1153→                        <XCircle className="h-3 w-3" />
+  1154→  1154→                      ) : h.ok ? (
+  1155→  1155→                        <CheckCircle2 className="h-3 w-3" />
+  1156→  1156→                      ) : (
+  1157→  1157→                        <AlertTriangle className="h-3 w-3" />
+  1158→  1158→                      )}
+  1159→  1159→                      <span>{h.status === 0 ? 'ERR' : h.status}</span>
+  1160→  1160→                      <span className="opacity-70">·</span>
+  1161→  1161→                      <span>{formatDuration(h.durationMs)}</span>
+  1162→  1162→                    </div>
+  1163→  1163→                  ))}
+  1164→  1164→                </div>
+  1165→  1165→              </CardContent>
+  1166→  1166→            </Card>
+  1167→  1167→          )}
+  1168→  1168→        </div>
+  1169→  1169→      </div>
+  1170→  1170→    </div>
+  1171→  1171→  )
+  1172→  1172→}
+  1173→  1173→
