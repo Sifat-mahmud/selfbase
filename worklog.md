@@ -176,3 +176,92 @@ AFTER:  Consumer uses sm:max-w-5xl → properly overrides sm:max-w-lg (1024px+ w
 5. Add column visibility toggle (hide/show columns)
 6. Add row detail expansion (click to expand full row data)
 7. Add keyboard navigation in data table (arrow keys between cells)
+
+---
+
+## Session R28 - Realtime Database Feature
+
+---
+Task ID: 1
+Agent: Main
+Task: Implement realtime database toggle with version tracking, WebSocket push, and API/playground updates
+
+Work Log:
+- Created `/src/lib/realtime-emit.ts` — server-side utility to emit events to Socket.IO service
+  - `emitRealtimeEvent(tableId, eventType, data)` — checks table's `enableRealtime` before emitting
+  - Fire-and-forget HTTP POST to `localhost:3003/emit` — no blocking on API routes
+  - Emits both `data-changed` and `update-available` events per mutation
+- Updated POST `/api/tables/[id]/rows` (Create row):
+  - Now updates `rowCount` and `versionHash` on the table (was missing before)
+  - Calls `emitRealtimeEvent(id, 'insert', ...)` after successful creation
+- Updated PUT `/api/tables/[id]/rows/[rowId]` (Update row):
+  - Added `emitRealtimeEvent(id, 'update', ...)` after successful update
+- Updated DELETE `/api/tables/[id]/rows/[rowId]` (Delete row):
+  - Added `emitRealtimeEvent(id, 'delete', ...)` after successful deletion
+- Fixed PUT `/api/tables/[id]` — added `include: { columns }` to Prisma update (was causing crash)
+- Wired realtime toggle switch in Tables UI (`tables.tsx`):
+  - `onCheckedChange` handler calls PUT API with `{ enableRealtime: checked }`
+  - Shows success toast: "Realtime enabled" / "Realtime disabled"
+- Added `RealtimeBanner` component in View Data dialog:
+  - Shows green pulsing dot + "Live — listening for changes" when connected
+  - Shows amber dot + "Connecting..." when disconnected
+  - Auto-refreshes row data when `data-changed` or `update-available` events received
+- Added "RT" badge in View Data dialog header (when realtime is enabled)
+- Added 5 new Realtime API endpoints to API Playground:
+  - `GET /api/v1/realtime/{table}` — Subscribe to real-time changes
+  - `GET /api/realtime/health` — Check service health
+  - `POST /api/realtime/emit` — Broadcast event to subscribers
+  - `PUT /api/tables/{id}` — Enable/disable realtime
+  - `GET /api/v1/data/{table}` — Fetch with ETag for change detection
+- Added "Realtime Connection" card in API Playground Auth tab:
+  - WebSocket connection URL with XTransformPort
+  - JavaScript code snippets (Socket.IO client)
+  - Swift (iOS) code snippets (Socket.IO-Client-Swift)
+  - Note about realtime-enabled tables only
+- Created `/api/realtime/health` proxy route — forwards to Socket.IO service
+- Verified all features with agent-browser:
+  - ✅ Realtime toggle works and persists
+  - ✅ RT badge appears in dialog header
+  - ✅ Live banner with auto-refresh
+  - ✅ 5 Realtime endpoints visible in playground
+  - ✅ WebSocket code snippets in Auth tab
+  - ✅ Health endpoint returns proper status
+
+Stage Summary:
+- ✅ Complete realtime database feature implemented end-to-end
+- ✅ Tables can be toggled to realtime mode via switch
+- ✅ Row CRUD operations emit Socket.IO events to subscribers
+- ✅ View Data dialog auto-refreshes when data changes
+- ✅ API Playground has full realtime API documentation
+- ✅ External apps can subscribe to table changes via WebSocket
+- ✅ Version tracking ensures local-first sync compatibility
+- ✅ Lint clean, dev server running without errors
+
+### Architecture:
+```
+Table Toggle → PUT /api/tables/{id} { enableRealtime: true }
+  ↓
+Row CRUD → emitRealtimeEvent() → HTTP POST localhost:3003/emit
+  ↓
+Socket.IO Service → broadcasts to room `table:{tableId}`
+  ↓
+All connected clients receive data-changed + update-available events
+  ↓
+View Data dialog auto-refreshes / external app updates
+```
+
+### Event Flow:
+```
+POST /api/tables/{id}/rows → create row → update rowCount/versionHash → emit "insert"
+PUT  /api/tables/{id}/rows/{rowId} → update row → increment version → emit "update"
+DELETE /api/tables/{id}/rows/{rowId} → delete row → update rowCount/versionHash → emit "delete"
+```
+
+### Priority Recommendations for Next Phase:
+1. Add auth token validation on Socket.IO connect (verify AppToken/session)
+2. Add subscription filtering (subscribe to specific eventTypes, row filters)
+3. Add reconnect with missed-change catchup (since parameter on subscribe)
+4. Add presence indicators (who else is viewing this table)
+5. Add realtime metrics per table (events/sec, subscriber count)
+6. Add bulk row operations with single version hash update
+7. Add conflict resolution UI for concurrent edits

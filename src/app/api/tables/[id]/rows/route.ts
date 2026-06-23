@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { generateVersionHash } from '@/lib/api-utils'
+import { emitRealtimeEvent } from '@/lib/realtime-emit'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -58,6 +60,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         data: JSON.stringify(body.data || {}),
       },
     })
+
+    // Update table row count and version hash
+    const table = await db.sbTable.findUnique({ where: { id } })
+    if (table) {
+      const newCount = table.rowCount + 1
+      const newHash = generateVersionHash(newCount, new Date().toISOString())
+      await db.sbTable.update({
+        where: { id },
+        data: { rowCount: newCount, versionHash: newHash },
+      })
+    }
+
+    // Emit realtime event (fire-and-forget, only if table has realtime enabled)
+    emitRealtimeEvent(id, 'insert', {
+      row: { id: row.id, data: JSON.parse(row.data), version: row.version, createdAt: row.createdAt, updatedAt: row.updatedAt },
+      rowId: row.id,
+    })
+
     return NextResponse.json(row, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Failed to create row' }, { status: 500 })

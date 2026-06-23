@@ -22,6 +22,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const table = await db.sbTable.update({
       where: { id },
       data: body,
+      include: { columns: { orderBy: { order: 'asc' } } },
     })
     return NextResponse.json(table)
   } catch {

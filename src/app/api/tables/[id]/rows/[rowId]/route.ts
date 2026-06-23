@@ -7,6 +7,7 @@ import {
   serverErrorResponse,
   generateVersionHash,
 } from '@/lib/api-utils';
+import { emitRealtimeEvent } from '@/lib/realtime-emit';
 
 // GET /api/tables/[id]/rows/[rowId] - Get a single row
 export async function GET(
@@ -76,6 +77,12 @@ export async function PUT(
       });
     }
 
+    // Emit realtime event (fire-and-forget, only if table has realtime enabled)
+    emitRealtimeEvent(id, 'update', {
+      row: { id: updated.id, data: JSON.parse(updated.data), version: updated.version, createdAt: updated.createdAt, updatedAt: updated.updatedAt },
+      rowId: updated.id,
+    })
+
     return successResponse({
       ...updated,
       data: JSON.parse(updated.data),
@@ -85,7 +92,7 @@ export async function PUT(
   }
 }
 
-// DELETE /api/tables/[id]/rows/[rowId] - Delete a row
+// DELETE handler updated below
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string; rowId: string }> }
@@ -116,6 +123,11 @@ export async function DELETE(
         },
       });
     }
+
+    // Emit realtime event (fire-and-forget, only if table has realtime enabled)
+    emitRealtimeEvent(id, 'delete', {
+      rowId,
+    })
 
     return successResponse({ deleted: true, id: rowId });
   } catch (error) {

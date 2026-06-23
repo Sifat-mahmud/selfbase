@@ -173,6 +173,55 @@ const ENDPOINT_TEMPLATES: EndpointTemplate[] = [
     defaultHeaders: [{ key: 'If-None-Match', value: '' }],
   },
 
+  // ====== Realtime API ======
+  {
+    id: 'realtime-subscribe',
+    category: '📡 Realtime',
+    method: 'GET',
+    path: '/api/v1/realtime/{table}',
+    description: 'Subscribe to real-time table changes (WebSocket)',
+    requiresAuth: true,
+    defaultHeaders: [{ key: 'Authorization', value: 'Bearer your_token_here' }],
+  },
+  {
+    id: 'realtime-health',
+    category: '📡 Realtime',
+    method: 'GET',
+    path: '/api/realtime/health',
+    description: 'Check realtime service health & connections',
+    requiresAuth: false,
+  },
+  {
+    id: 'realtime-emit',
+    category: '📡 Realtime',
+    method: 'POST',
+    path: '/api/realtime/emit',
+    description: 'Broadcast event to table subscribers (internal)',
+    requiresAuth: true,
+    defaultBody: '{\n  "event": "data-changed",\n  "room": "table:{tableId}",\n  "data": {\n    "table": "my_table",\n    "eventType": "update",\n    "row": {},\n    "versionHash": "abc123"\n  }\n}',
+  },
+  {
+    id: 'realtime-toggle',
+    category: '📡 Realtime',
+    method: 'PUT',
+    path: '/api/tables/{id}',
+    description: 'Enable/disable realtime on a table',
+    requiresAuth: true,
+    defaultBody: '{\n  "enableRealtime": true\n}',
+  },
+  {
+    id: 'realtime-changes',
+    category: '📡 Realtime',
+    method: 'GET',
+    path: '/api/v1/data/{table}',
+    description: 'Fetch with ETag — detect changes since last fetch',
+    requiresAuth: true,
+    defaultParams: [
+      { key: 'since', value: '2025-01-01T00:00:00Z' },
+    ],
+    defaultHeaders: [{ key: 'If-None-Match', value: '"previous_version_hash"' }],
+  },
+
   // ====== Data API — Tables ======
   {
     id: 'data-tables-list',
@@ -1313,6 +1362,57 @@ val request = Request.Builder()
   .build()
 val response = client.newCall(request).execute()`}</pre>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* WebSocket Connection Info */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="h-4 w-4 text-teal-500" />
+              Realtime Connection
+            </CardTitle>
+            <CardDescription>Connect to live data updates via WebSocket</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="rounded-lg bg-muted p-3 space-y-2">
+              <p className="text-xs font-medium">Connection URL</p>
+              <code className="text-[11px] font-mono block break-all">
+                {typeof window !== 'undefined' ? `${window.location.origin}/?XTransformPort=3003` : 'http://localhost:3003'}
+              </code>
+            </div>
+            <div className="rounded-lg bg-gray-950 p-3 text-xs font-mono text-gray-300 overflow-x-auto">
+              <pre>{`// JavaScript
+import { io } from 'socket.io-client'
+const socket = io('/?XTransformPort=3003')
+
+// Subscribe to a table
+socket.emit('subscribe', {
+  tableId: 'your-table-id',
+  eventTypes: ['insert', 'update', 'delete']
+})
+
+// Listen for changes
+socket.on('data-changed', (data) => {
+  console.log(data.eventType, data.row)
+  // data.table, data.eventType, data.row, data.rowId
+})
+
+// Listen for version changes
+socket.on('update-available', (data) => {
+  console.log('Version:', data.versionHash)
+  // data.table, data.versionHash, data.rowCount
+})
+
+// Swift (iOS) - use Socket.IO-Client-Swift
+let socket = SocketIOManager(socketURL: "${typeof window !== 'undefined' ? window.location.host : 'localhost'}",
+  config: [.connectParams(["XTransformPort": "3003"])])
+socket.on("data-changed") { data, ack in ... }`}</pre>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex h-2 w-2 rounded-full bg-teal-500" />
+              Only tables with <strong>Realtime enabled</strong> will push updates
             </div>
           </CardContent>
         </Card>

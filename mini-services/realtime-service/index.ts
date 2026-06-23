@@ -1,16 +1,5 @@
-import { createServer } from 'http'
+import { createServer, IncomingMessage, ServerResponse } from 'http'
 import { Server } from 'socket.io'
-
-const httpServer = createServer()
-const io = new Server(httpServer, {
-  path: '/',
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-})
 
 // ==================== Types ====================
 
@@ -41,6 +30,91 @@ const subscriptions = new Map<string, Set<Subscription>>() // socketId -> subscr
 const tableSubscribers = new Map<string, Set<string>>() // tableId -> socketIds
 const sessionSockets = new Map<string, string>() // sessionId -> socketId
 const loadScore = { value: 0, activeConnections: 0, reqPerSec: 0, cpuPct: 0 }
+
+// ==================== HTTP Server + Endpoints ====================
+// Register our HTTP handler on the httpServer BEFORE Socket.IO attaches.
+// Engine.io will capture our handler and call it for non-Socket.IO paths.
+
+const httpServer = createServer()
+
+// Declare io so the HTTP handler can reference it via closure.
+// It will be assigned after this request handler is registered.
+let io: Server
+
+// Register HTTP request handler FIRST (before Socket.IO attaches)
+// IMPORTANT: Engine.io removes existing request listeners and re-adds them as
+// secondary handlers. It calls our handler AFTER it processes the request.
+// We must check `res.headersSent` to avoid "Cannot set headers" errors when
+// engine.io has already handled the request (e.g., Socket.IO transport).
+httpServer.on('request', (req: IncomingMessage, res: ServerResponse) => {
+  // If engine.io already handled this request, skip our handler
+  if (res.headersSent) return
+
+  // Only handle our specific endpoints; let Socket.IO handle everything else
+  const urlPath = (req.url || '/').split('?')[0]
+
+  // Handle CORS preflight for our endpoints
+  if (req.method === 'OPTIONS' && (urlPath === '/health' || urlPath === '/emit')) {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    res.writeHead(204)
+    res.end()
+    return
+  }
+
+  // Health check
+  if (urlPath === '/health' && req.method === 'GET') {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      status: 'ok',
+      connections: io?.sockets?.sockets?.size ?? 0,
+      rooms: io ? Array.from(io.sockets.adapter.rooms.keys()).filter(r => r.startsWith('table:')) : [],
+      subscriptions: tableSubscribers.size,
+    }))
+    return
+  }
+
+  // Emit endpoint - allows API routes to broadcast events
+  if (urlPath === '/emit' && req.method === 'POST') {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { event, room, data } = JSON.parse(body)
+        if (event && room) {
+          io.to(room).emit(event, data)
+          console.log(`[SelfBase Realtime] HTTP emit: ${event} to ${room}`)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, event, room }))
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Missing event or room' }))
+        }
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Invalid JSON' }))
+      }
+    })
+    return
+  }
+
+  // For all other requests, do NOT respond — let Socket.IO handle them
+})
+
+// NOW attach Socket.IO (engine.io will capture our handler and call it for non-matching paths)
+io = new Server(httpServer, {
+  // Use the default path '/socket.io' instead of '/' so engine.io only
+  // intercepts /socket.io/* requests, leaving /health and /emit for our handler
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+})
 
 // ==================== Helpers ====================
 
@@ -300,6 +374,7 @@ setInterval(() => {
 const PORT = 3003
 httpServer.listen(PORT, () => {
   console.log(`[SelfBase Realtime] WebSocket server running on port ${PORT}`)
+  console.log(`[SelfBase Realtime] HTTP endpoints: GET /health, POST /emit`)
   console.log(`[SelfBase Realtime] Ready for subscriptions, version changes, and deferred queue events`)
 })
 

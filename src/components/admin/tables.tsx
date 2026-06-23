@@ -92,6 +92,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/hooks/use-toast'
+import { useRealtime } from '@/hooks/use-realtime'
 import { apiGet, apiPost, apiDelete, apiPut } from '@/lib/api-client'
 
 interface ColumnItem {
@@ -259,6 +260,33 @@ function renderCellInput(
       className="h-8 font-mono text-xs min-w-[100px]"
       aria-label={col.name}
     />
+  )
+}
+
+function RealtimeBanner({ tableId, tableName, onRefresh }: { tableId: string; tableName: string; onRefresh: () => void }) {
+  const { connected, subscribe, unsubscribe } = useRealtime({
+    tableId,
+    eventTypes: ['insert', 'update', 'delete'],
+    onVersionChange: () => { onRefresh() },
+    onDataChanged: (data) => {
+      onRefresh()
+    },
+  })
+
+  return (
+    <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
+      connected
+        ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/20'
+        : 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20'
+    }`}>
+      <span className={`flex h-2 w-2 rounded-full ${connected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+      <span className={connected ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}>
+        {connected ? `Live — listening for changes on ${tableName}` : 'Connecting to realtime...'}
+      </span>
+      <span className="ml-auto text-muted-foreground">
+        Auto-refresh on data changes
+      </span>
+    </div>
   )
 }
 
@@ -1073,7 +1101,25 @@ export function TablesView() {
           <CardContent>
             <div className="flex flex-wrap gap-6">
               <div className="flex items-center gap-2">
-                <Switch checked={selectedTable.enableRealtime} />
+                <Switch
+                  checked={selectedTable.enableRealtime}
+                  onCheckedChange={async (checked) => {
+                    try {
+                      const res = await fetch(`/api/tables/${selectedTable.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ enableRealtime: checked }),
+                      })
+                      if (res.ok) {
+                        const updated = await res.json()
+                        setSelectedTable(updated)
+                        toast({ title: checked ? 'Realtime enabled' : 'Realtime disabled', description: checked ? 'Changes will be pushed to subscribers in real-time' : 'Real-time updates stopped' })
+                      }
+                    } catch {
+                      toast({ title: 'Failed to toggle realtime', variant: 'destructive' })
+                    }
+                  }}
+                />
                 <Label className="flex items-center gap-1">
                   <Radio className="h-3.5 w-3.5 text-emerald-600" /> Realtime
                 </Label>
@@ -1301,6 +1347,11 @@ export function TablesView() {
                 <Badge variant="secondary" className="ml-1">
                   {dataRows.length} row{dataRows.length !== 1 ? 's' : ''}
                 </Badge>
+                {selectedTable.enableRealtime && (
+                  <Badge className="ml-1 gap-1 bg-emerald-100 text-emerald-700 border-emerald-200 text-[10px]">
+                    <Radio className="h-2.5 w-2.5" /> RT
+                  </Badge>
+                )}
               </DialogTitle>
               <DialogDescription>
                 Inline-edit cells, add new rows, or delete with confirmation. Search,
@@ -1448,6 +1499,8 @@ export function TablesView() {
                 </Button>
               </div>
             )}
+
+            {selectedTable.enableRealtime && <RealtimeBanner tableId={selectedTable.id} tableName={selectedTable.name} onRefresh={() => selectedTable && fetchRows(selectedTable.id, currentPage, pageSize, searchQuery)} />}
 
             <div className="flex-1 overflow-auto rounded-md border">
               {dataLoading ? (
