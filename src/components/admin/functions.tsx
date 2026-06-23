@@ -559,7 +559,7 @@ export function FunctionsView() {
 
         {/* Run Result Dialog */}
         <Dialog open={!!runResult} onOpenChange={(open) => !open && setRunResult(null)}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 {runResult?.result.status === 'success' ? (
@@ -676,7 +676,7 @@ export function FunctionsView() {
               <Plus className="mr-1 h-4 w-4" /> New Function
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-3xl">
+          <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>Create Function</DialogTitle>
               <DialogDescription>Deploy a new serverless function</DialogDescription>

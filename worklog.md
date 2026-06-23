@@ -118,3 +118,61 @@ Stage Summary:
 5. Add "Quick Start" guide for mobile developers in the auth tab
 6. Add environment variable support in playground (base URL toggle for staging vs production)
 7. Improve response viewer with syntax highlighting and JSON tree view
+
+---
+
+## Session R27 - Dialog & Table View Responsive Fix
+
+---
+Task ID: 1
+Agent: Main
+Task: Review all popup windows, fix table column widths and alignments, make visual easy to understand
+
+Work Log:
+- **ROOT CAUSE IDENTIFIED**: `sm:max-w-lg` in `DialogContent` base class (`src/components/ui/dialog.tsx`) overrode all non-responsive `max-w-*` classes on consuming components — every dialog was capped at 512px regardless of intended width
+- Added `overflow-hidden` to DialogContent base class to prevent content overflow
+- Changed all 12 `DialogContent` instances across 5 files from `max-w-*` to `sm:max-w-*` so they properly override the base class
+- Fixed Pipeline Wizard crash: `dp.sampleColumns` was undefined (API returns `sampleKeys`), added null coalescing + fallback
+- Fixed Pipeline Wizard `rowCount` fallback: API returns `count` instead of `rowCount` in some cases
+- Fixed Pipeline Preview dialog: added `max-h-[90vh] flex flex-col`, improved table cells with `whitespace-nowrap max-w-[200px] truncate`
+- **View Data dialog (tables.tsx)** — Major improvements:
+  - Upgraded from `sm:max-w-5xl` to `sm:max-w-6xl` for wider display
+  - Added `max-h-[90vh] flex flex-col` for proper dialog sizing
+  - Removed type annotations `(INTEGER)`, `(TEXT)`, etc. from column headers — moved to `title` attribute (hover to see)
+  - Added `whitespace-nowrap max-w-[180px] truncate` to data cells with title tooltip
+  - Boolean values now render as colored badges: `✓ true` (emerald) / `✗ false` (secondary)
+  - Version column simplified: plain text `v1` instead of Badge component, width `w-16`
+  - Actions column compacted: `w-20` instead of `w-32`
+  - Table scroll container changed from `max-h-[60vh]` to `flex-1` for better viewport usage
+- **Create Table dialog (tables.tsx)** — Enhanced:
+  - Widened from `sm:max-w-2xl` to `sm:max-w-3xl`
+  - Added 2 new columns: `Nullable` (checkbox) and `Unique` (checkbox) for better schema control
+  - Added placeholder text "column_name" in name input
+- **Scraper Preview dialog** — Widened to `sm:max-w-4xl`, added `whitespace-nowrap max-w-[200px] truncate`, null dashes styled
+- **Pipeline Wizard preview table** — Extended visible columns from 6 to 8, added type annotations, sticky header, null-safe preview rows
+- All fixes verified via agent-browser — dialogs now render at intended widths, tables fit properly
+
+Stage Summary:
+- ✅ **CRITICAL FIX**: Dialog width override bug resolved — all dialogs now render at their intended widths
+- ✅ **CRITICAL FIX**: Pipeline Wizard crash from undefined `sampleColumns` resolved
+- ✅ View Data dialog: 1152px wide (was 512px), clean headers, compact columns, proper scroll
+- ✅ Create Table dialog: 768px wide (was 512px), 4-column schema table with checkboxes
+- ✅ Pipeline Preview: 1024px wide, no overflow, type info on hover
+- ✅ Scraper Preview: wider dialog, proper cell constraints
+- ✅ Lint clean, dev server running without errors
+- ✅ Agent-browser verified all fixes working correctly
+
+### Key Architecture Change:
+```
+BEFORE: DialogContent base class has sm:max-w-lg → overrides max-w-5xl on consumer (512px cap)
+AFTER:  Consumer uses sm:max-w-5xl → properly overrides sm:max-w-lg (1024px+ width)
+```
+
+### Priority Recommendations for Next Phase:
+1. Add column resize capability to View Data table
+2. Add JSON tree view for complex cell values (nested objects)
+3. Add "Copy row as JSON" action in data table
+4. Improve inline editing UX with tab-to-next-cell
+5. Add column visibility toggle (hide/show columns)
+6. Add row detail expansion (click to expand full row data)
+7. Add keyboard navigation in data table (arrow keys between cells)

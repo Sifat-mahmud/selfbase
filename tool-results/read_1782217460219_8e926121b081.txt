@@ -1,0 +1,689 @@
+     1→import { NextRequest, NextResponse } from 'next/server'
+     2→import { db } from '@/lib/db'
+     3→
+     4→// Seed the database with demo data
+     5→export async function POST(request: NextRequest) {
+     6→  try {
+     7→    const results: string[] = []
+     8→
+     9→    // Create demo tables if they don't exist
+    10→    const existingTables = await db.sbTable.findMany()
+    11→    
+    12→    if (existingTables.length === 0) {
+    13→      const stocksTable = await db.sbTable.create({
+    14→        data: {
+    15→          name: 'stocks',
+    16→          displayName: 'Stock Prices',
+    17→          description: 'Real-time stock market data',
+    18→          priority: 1,
+    19→          versionHash: 'a1b2c3d4',
+    20→          rowCount: 12400,
+    21→          enableRealtime: true,
+    22→          enableEmbedding: true,
+    23→          embeddingColumns: '["symbol","name"]',
+    24→          columns: {
+    25→            create: [
+    26→              { name: 'symbol', type: 'TEXT', isPrimaryKey: true, isUnique: true, isIndexed: true, order: 0 },
+    27→              { name: 'name', type: 'TEXT', isIndexed: true, order: 1 },
+    28→              { name: 'price', type: 'DECIMAL', order: 2 },
+    29→              { name: 'change_pct', type: 'DECIMAL', order: 3 },
+    30→              { name: 'volume', type: 'INTEGER', order: 4 },
+    31→              { name: 'market_cap', type: 'DECIMAL', order: 5 },
+    32→              { name: 'fetched_at', type: 'TIMESTAMP', order: 6 },
+    33→            ]
+    34→          }
+    35→        }
+    36→      })
+    37→      results.push(`Created table: ${stocksTable.name}`)
+    38→
+    39→      const articlesTable = await db.sbTable.create({
+    40→        data: {
+    41→          name: 'articles',
+    42→          displayName: 'Articles',
+    43→          description: 'News articles from RSS feeds',
+    44→          priority: 2,
+    45→          versionHash: 'e5f6g7h8',
+    46→          rowCount: 8750,
+    47→          enableRealtime: true,
+    48→          enableEmbedding: true,
+    49→          embeddingColumns: '["title","content"]',
+    50→          columns: {
+    51→            create: [
+    52→              { name: 'id', type: 'INTEGER', isPrimaryKey: true, order: 0 },
+    53→              { name: 'title', type: 'TEXT', isIndexed: true, order: 1 },
+    54→              { name: 'content', type: 'TEXT', order: 2 },
+    55→              { name: 'source', type: 'TEXT', order: 3 },
+    56→              { name: 'published_at', type: 'TIMESTAMP', isIndexed: true, order: 4 },
+    57→              { name: 'url', type: 'TEXT', order: 5 },
+    58→            ]
+    59→          }
+    60→        }
+    61→      })
+    62→      results.push(`Created table: ${articlesTable.name}`)
+    63→
+    64→      const usersTable = await db.sbTable.create({
+    65→        data: {
+    66→          name: 'users',
+    67→          displayName: 'Users',
+    68→          description: 'Application users',
+    69→          priority: 1,
+    70→          versionHash: 'i9j0k1l2',
+    71→          rowCount: 3250,
+    72→          rlsEnabled: true,
+    73→          columns: {
+    74→            create: [
+    75→              { name: 'id', type: 'TEXT', isPrimaryKey: true, order: 0 },
+    76→              { name: 'email', type: 'TEXT', isUnique: true, isIndexed: true, order: 1 },
+    77→              { name: 'name', type: 'TEXT', order: 2 },
+    78→              { name: 'role', type: 'TEXT', defaultValue: '"user"', order: 3 },
+    79→              { name: 'created_at', type: 'TIMESTAMP', order: 4 },
+    80→            ]
+    81→          }
+    82→        }
+    83→      })
+    84→      results.push(`Created table: ${usersTable.name}`)
+    85→
+    86→      const ordersTable = await db.sbTable.create({
+    87→        data: {
+    88→          name: 'orders',
+    89→          displayName: 'Orders',
+    90→          description: 'Customer orders with priority tracking',
+    91→          priority: 2,
+    92→          versionHash: 'm3n4o5p6',
+    93→          rowCount: 45600,
+    94→          enableRealtime: true,
+    95→          columns: {
+    96→            create: [
+    97→              { name: 'id', type: 'INTEGER', isPrimaryKey: true, order: 0 },
+    98→              { name: 'user_id', type: 'TEXT', isIndexed: true, order: 1 },
+    99→              { name: 'total', type: 'DECIMAL', order: 2 },
+   100→              { name: 'status', type: 'TEXT', isIndexed: true, order: 3 },
+   101→              { name: 'created_at', type: 'TIMESTAMP', isIndexed: true, order: 4 },
+   102→              { name: 'updated_at', type: 'TIMESTAMP', order: 5 },
+   103→            ]
+   104→          }
+   105→        }
+   106→      })
+   107→      results.push(`Created table: ${ordersTable.name}`)
+   108→
+   109→      const logsTable = await db.sbTable.create({
+   110→        data: {
+   111→          name: 'app_logs',
+   112→          displayName: 'Application Logs',
+   113→          description: 'Application error and info logs',
+   114→          priority: 4,
+   115→          versionHash: 'q7r8s9t0',
+   116→          rowCount: 156000,
+   117→          isSystem: true,
+   118→          columns: {
+   119→            create: [
+   120→              { name: 'id', type: 'INTEGER', isPrimaryKey: true, order: 0 },
+   121→              { name: 'level', type: 'TEXT', isIndexed: true, order: 1 },
+   122→              { name: 'message', type: 'TEXT', order: 2 },
+   123→              { name: 'metadata', type: 'JSON', order: 3 },
+   124→              { name: 'timestamp', type: 'TIMESTAMP', isIndexed: true, order: 4 },
+   125→            ]
+   126→          }
+   127→        }
+   128→      })
+   129→      results.push(`Created table: ${logsTable.name}`)
+   130→    }
+   131→
+   132→    // Create demo pipeline sources
+   133→    const existingPipelines = await db.pipelineSource.findMany()
+   134→    if (existingPipelines.length === 0) {
+   135→      await db.pipelineSource.createMany({
+   136→        data: [
+   137→          {
+   138→            name: 'Market Data Feed',
+   139→            description: 'Real-time stock prices from Alpha Vantage',
+   140→            sourceType: 'rest',
+   141→            url: 'https://www.alphavantage.co/query',
+   142→            method: 'GET',
+   143→            jsonPath: '$.data.stocks',
+   144→            fetchInterval: 60,
+   145→            isActive: true,
+   146→            onConflict: 'update',
+   147→            columnMappings: JSON.stringify([
+   148→              { src: 'trading_code', target: 'symbol', type: 'TEXT' },
+   149→              { src: 'last_trade_price', target: 'price', type: 'DECIMAL' },
+   150→              { src: 'change_percent', target: 'change_pct', type: 'DECIMAL' },
+   151→              { src: 'volume', target: 'volume', type: 'INTEGER' },
+   152→              { src: '__auto__', target: 'fetched_at', type: 'TIMESTAMP' },
+   153→            ]),
+   154→          },
+   155→          {
+   156→            name: 'News RSS Feed',
+   157→            description: 'Tech news from multiple RSS sources',
+   158→            sourceType: 'rss',
+   159→            url: 'https://hnrss.org/newest',
+   160→            fetchInterval: 300,
+   161→            isActive: true,
+   162→            onConflict: 'insert',
+   163→            columnMappings: JSON.stringify([
+   164→              { src: 'title', target: 'title', type: 'TEXT' },
+   165→              { src: 'description', target: 'content', type: 'TEXT' },
+   166→              { src: 'link', target: 'url', type: 'TEXT' },
+   167→              { src: 'pubDate', target: 'published_at', type: 'TIMESTAMP' },
+   168→            ]),
+   169→          },
+   170→          {
+   171→            name: 'Weather API',
+   172→            description: 'Current weather data for major cities',
+   173→            sourceType: 'rest',
+   174→            url: 'https://api.openweathermap.org/data/2.5/group',
+   175→            method: 'GET',
+   176→            fetchInterval: 600,
+   177→            isActive: false,
+   178→            onConflict: 'replace',
+   179→            columnMappings: JSON.stringify([
+   180→              { src: 'name', target: 'city', type: 'TEXT' },
+   181→              { src: 'main.temp', target: 'temperature', type: 'DECIMAL' },
+   182→              { src: 'weather[0].description', target: 'conditions', type: 'TEXT' },
+   183→            ]),
+   184→          },
+   185→          {
+   186→            name: 'Crypto WebSocket',
+   187→            description: 'Live cryptocurrency prices',
+   188→            sourceType: 'websocket',
+   189→            url: 'wss://stream.binance.com:9443/ws/btcusdt',
+   190→            fetchInterval: 1,
+   191→            isActive: true,
+   192→            onConflict: 'update',
+   193→            columnMappings: JSON.stringify([
+   194→              { src: 's', target: 'symbol', type: 'TEXT' },
+   195→              { src: 'c', target: 'price', type: 'DECIMAL' },
+   196→              { src: 'v', target: 'volume', type: 'DECIMAL' },
+   197→            ]),
+   198→          },
+   199→        ]
+   200→      })
+   201→      results.push('Created 4 pipeline sources')
+   202→    }
+   203→
+   204→    // Create demo scraper sitemaps
+   205→    const existingScrapers = await db.scraperSitemap.findMany()
+   206→    if (existingScrapers.length === 0) {
+   207→      await db.scraperSitemap.createMany({
+   208→        data: [
+   209→          {
+   210→            name: 'E-commerce Products',
+   211→            startUrl: 'https://example-shop.com/products',
+   212→            selectorTree: JSON.stringify({
+   213→              id: 'product', type: 'Element', selector: '.product', multiple: true,
+   214→              children: [
+   215→                { id: 'name', type: 'Text', selector: '.title' },
+   216→                { id: 'price', type: 'Text', selector: '.price' },
+   217→                { id: 'image', type: 'Attribute', selector: 'img', attribute: 'src' },
+   218→              ]
+   219→            }),
+   220→            paginationType: 'click',
+   221→            paginationConfig: JSON.stringify({ nextSelector: '.next-page', maxPages: 10 }),
+   222→            fetchInterval: 3600,
+   223→            isActive: true,
+   224→          },
+   225→          {
+   226→            name: 'Blog Posts',
+   227→            startUrl: 'https://example-blog.com/posts',
+   228→            selectorTree: JSON.stringify({
+   229→              id: 'post', type: 'Element', selector: 'article.post', multiple: true,
+   230→              children: [
+   231→                { id: 'title', type: 'Text', selector: 'h2' },
+   232→                { id: 'excerpt', type: 'Text', selector: '.excerpt' },
+   233→                { id: 'author', type: 'Text', selector: '.author-name' },
+   234→                { id: 'date', type: 'Text', selector: 'time' },
+   235→              ]
+   236→            }),
+   237→            paginationType: 'url_pattern',
+   238→            paginationConfig: JSON.stringify({ pattern: '?page={1..20}' }),
+   239→            fetchInterval: 7200,
+   240→            isActive: false,
+   241→          },
+   242→        ]
+   243→      })
+   244→      results.push('Created 2 scraper sitemaps')
+   245→    }
+   246→
+   247→    // Create demo user
+   248→    const existingUsers = await db.user.findMany()
+   249→    if (existingUsers.length === 0) {
+   250→      await db.user.createMany({
+   251→        data: [
+   252→          { email: 'admin@selfbase.dev', name: 'Admin', role: 'admin', passwordHash: 'hashed_admin_pass' },
+   253→          { email: 'dev@selfbase.dev', name: 'Developer', role: 'user', passwordHash: 'hashed_dev_pass' },
+   254→          { email: 'viewer@selfbase.dev', name: 'Viewer', role: 'user', passwordHash: 'hashed_viewer_pass', isActive: false },
+   255→        ]
+   256→      })
+   257→      results.push('Created 3 demo users')
+   258→    }
+   259→
+   260→    // Create demo API keys
+   261→    const existingKeys = await db.apiKey.findMany()
+   262→    if (existingKeys.length === 0) {
+   263→      const adminUser = await db.user.findFirst({ where: { role: 'admin' } })
+   264→      if (adminUser) {
+   265→        await db.apiKey.createMany({
+   266→          data: [
+   267→            { userId: adminUser.id, name: 'Production Key', keyHash: 'sb_prod_xxxxxxxxxxxx', prefix: 'sb_prod', permissions: 'read,write', isActive: true },
+   268→            { userId: adminUser.id, name: 'Development Key', keyHash: 'sb_dev_xxxxxxxxxxxx', prefix: 'sb_dev', permissions: 'read', isActive: true },
+   269→            { userId: adminUser.id, name: 'Legacy Key (Revoked)', keyHash: 'sb_old_xxxxxxxxxxxx', prefix: 'sb_old', permissions: 'read', isActive: false },
+   270→          ]
+   271→        })
+   272→        results.push('Created 3 API keys')
+   273→      }
+   274→    }
+   275→
+   276→    // Create demo functions
+   277→    const existingFunctions = await db.sbFunction.findMany()
+   278→    if (existingFunctions.length === 0) {
+   279→      await db.sbFunction.createMany({
+   280→        data: [
+   281→          {
+   282→            name: 'emailWorker',
+   283→            description: 'Process email notifications for order events',
+   284→            code: `export default async function(ctx) {
+   285→  const { table, eventType, row } = ctx.event;
+   286→  if (eventType === 'insert' && table === 'orders') {
+   287→    const user = await ctx.db.query('SELECT email FROM users WHERE id = $1', [row.user_id]);
+   288→    await sendEmail(user.email, 'Order Confirmed', 'Your order #' + row.id + ' has been received.');
+   289→  }
+   290→}`,
+   291→            runtime: 'javascript',
+   292→            triggerType: 'event',
+   293→            triggerConfig: JSON.stringify({ table: 'orders', events: ['insert'] }),
+   294→            isActive: true,
+   295→          },
+   296→          {
+   297→            name: 'webhookHandler',
+   298→            description: 'Handle incoming webhooks from payment provider',
+   299→            code: `export default async function(ctx) {
+   300→  const sig = ctx.headers['x-signature'];
+   301→  if (!verifySignature(ctx.body, sig)) {
+   302→    return { status: 401, body: 'Invalid signature' };
+   303→  }
+   304→  const event = JSON.parse(ctx.body);
+   305→  await ctx.db.query('UPDATE orders SET status = $1 WHERE id = $2', [event.status, event.order_id]);
+   306→  return { status: 200, body: 'OK' };
+   307→}`,
+   308→            runtime: 'javascript',
+   309→            triggerType: 'http',
+   310→            isActive: true,
+   311→          },
+   312→          {
+   313→            name: 'dailyReport',
+   314→            description: 'Generate daily analytics report',
+   315→            code: `export default async function(ctx) {
+   316→  const stats = await ctx.db.query(\`
+   317→    SELECT COUNT(*) as total_orders, SUM(total) as revenue 
+   318→    FROM orders WHERE created_at >= CURRENT_DATE
+   319→  \`);
+   320→  await sendReport('daily', stats);
+   321→  return { status: 200, body: stats };
+   322→}`,
+   323→            runtime: 'javascript',
+   324→            triggerType: 'schedule',
+   325→            triggerConfig: JSON.stringify({ cron: '0 9 * * *' }),
+   326→            isActive: false,
+   327→          },
+   328→        ]
+   329→      })
+   330→      results.push('Created 3 serverless functions')
+   331→    }
+   332→
+   333→    // Create demo heartbeat data
+   334→    const existingHeartbeats = await db.heartbeat.findMany()
+   335→    if (existingHeartbeats.length === 0) {
+   336→      const now = Date.now()
+   337→      const heartbeatData = []
+   338→      for (let i = 60; i >= 0; i--) {
+   339→        const recordedAt = new Date(now - i * 60000)
+   340→        const cpuBase = 15 + Math.random() * 30
+   341→        heartbeatData.push({
+   342→          recordedAt,
+   343→          cpuTotal: Math.round(cpuBase),
+   344→          cpuScraper: Math.round(cpuBase * 0.25),
+   345→          cpuApi: Math.round(cpuBase * 0.5),
+   346→          cpuFunctions: Math.round(cpuBase * 0.25),
+   347→          ramUsedMb: Math.round(350 + Math.random() * 200),
+   348→          diskUsedMb: Math.round(1800 + Math.random() * 400),
+   349→          activeConnections: Math.round(8 + Math.random() * 30),
+   350→          reqPerSec: Math.round(50 + Math.random() * 200),
+   351→          intervalSec: 60,
+   352→          loadScore: Math.round(cpuBase * 0.8 + Math.random() * 15),
+   353→        })
+   354→      }
+   355→      await db.heartbeat.createMany({ data: heartbeatData })
+   356→      results.push(`Created ${heartbeatData.length} heartbeat records`)
+   357→    }
+   358→
+   359→    // Create demo table call metrics
+   360→    const existingCalls = await db.tableCall.findMany()
+   361→    if (existingCalls.length === 0) {
+   362→      const now = Date.now()
+   363→      const tables = ['stocks', 'articles', 'users', 'orders', 'app_logs']
+   364→      const callData = []
+   365→      for (let i = 30; i >= 0; i--) {
+   366→        for (const table of tables) {
+   367→          callData.push({
+   368→            windowStart: new Date(now - i * 60000),
+   369→            tableName: table,
+   370→            callCount: Math.round(10 + Math.random() * 100),
+   371→            avgLatencyMs: Math.round(5 + Math.random() * 50),
+   372→            maxLatencyMs: Math.round(50 + Math.random() * 200),
+   373→            errorCount: Math.round(Math.random() * 5),
+   374→          })
+   375→        }
+   376→      }
+   377→      await db.tableCall.createMany({ data: callData })
+   378→      results.push(`Created ${callData.length} table call records`)
+   379→    }
+   380→
+   381→    // Create demo LLM configs
+   382→    const existingLlm = await db.llmConfig.findMany()
+   383→    if (existingLlm.length === 0) {
+   384→      await db.llmConfig.createMany({
+   385→        data: [
+   386→          {
+   387→            provider: 'openai',
+   388→            name: 'GPT-4o',
+   389→            modelName: 'gpt-4o',
+   390→            isActive: true,
+   391→            maxTokens: 4096,
+   392→            temperature: 0.7,
+   393→            costPer1kInput: 0.005,
+   394→            costPer1kOutput: 0.015,
+   395→          },
+   396→          {
+   397→            provider: 'anthropic',
+   398→            name: 'Claude Sonnet',
+   399→            modelName: 'claude-3-sonnet',
+   400→            isActive: true,
+   401→            maxTokens: 4096,
+   402→            temperature: 0.5,
+   403→            costPer1kInput: 0.003,
+   404→            costPer1kOutput: 0.015,
+   405→          },
+   406→          {
+   407→            provider: 'ollama',
+   408→            name: 'Llama 3 Local',
+   409→            baseUrl: 'http://localhost:11434',
+   410→            modelName: 'llama3',
+   411→            isActive: false,
+   412→            maxTokens: 2048,
+   413→            temperature: 0.8,
+   414→          },
+   415→          {
+   416→            provider: 'custom',
+   417→            name: 'Fine-tuned Model',
+   418→            baseUrl: 'https://api.custom-llm.com/v1',
+   419→            modelName: 'custom-v2',
+   420→            isActive: false,
+   421→            maxTokens: 2048,
+   422→            temperature: 0.3,
+   423→          },
+   424→        ]
+   425→      })
+   426→      results.push('Created 4 LLM provider configs')
+   427→    }
+   428→
+   429→    // Create demo storage files
+   430→    const existingFiles = await db.storageFile.findMany()
+   431→    if (existingFiles.length === 0) {
+   432→      await db.storageFile.createMany({
+   433→        data: [
+   434→          { name: 'report-q1.pdf', originalName: 'Q1 Report.pdf', path: '/storage/reports/report-q1.pdf', bucket: 'reports', mimeType: 'application/pdf', sizeBytes: 2450000, isPublic: false },
+   435→          { name: 'logo.svg', originalName: 'Company Logo.svg', path: '/storage/assets/logo.svg', bucket: 'assets', mimeType: 'image/svg+xml', sizeBytes: 12400, isPublic: true },
+   436→          { name: 'export-users.csv', originalName: 'users-export.csv', path: '/storage/exports/export-users.csv', bucket: 'exports', mimeType: 'text/csv', sizeBytes: 890000, isPublic: false },
+   437→          { name: 'backup-2024-01.sql', originalName: 'backup-jan.sql', path: '/storage/backups/backup-2024-01.sql', bucket: 'backups', mimeType: 'application/sql', sizeBytes: 15600000, isPublic: false },
+   438→          { name: 'hero-banner.jpg', originalName: 'Hero Banner.jpg', path: '/storage/assets/hero-banner.jpg', bucket: 'assets', mimeType: 'image/jpeg', sizeBytes: 3400000, isPublic: true },
+   439→        ]
+   440→      })
+   441→      results.push('Created 5 storage files')
+   442→    }
+   443→
+   444→    // Create demo alert configs (idempotent: only create if no configs exist at all)
+   445→    const existingAlerts = await db.alertConfig.findMany()
+   446→    if (existingAlerts.length === 0) {
+   447→      await db.alertConfig.createMany({
+   448→        data: [
+   449→          { metricType: 'cpu', threshold: 80, operator: '>', duration: 300, webhookUrl: 'https://hooks.slack.com/services/xxx', isEnabled: true },
+   450→          { metricType: 'req_per_sec', threshold: 1000, operator: '>', duration: 60, isEnabled: true },
+   451→          { metricType: 'error_rate', threshold: 5, operator: '>', duration: 120, emailTo: 'admin@selfbase.dev', isEnabled: true },
+   452→          { metricType: 'disk', threshold: 90, operator: '>', duration: 600, isEnabled: false },
+   453→        ]
+   454→      })
+   455→      results.push('Created 4 alert configs')
+   456→    }
+   457→
+   458→    // Ensure a complete set of alert configs exists (add any missing metrics)
+   459→    const desiredMetricConfigs = [
+   460→      { metricType: 'cpu', threshold: 80, operator: '>', duration: 300, isEnabled: true },
+   461→      { metricType: 'req_per_sec', threshold: 1000, operator: '>', duration: 60, isEnabled: true },
+   462→      { metricType: 'error_rate', threshold: 5, operator: '>', duration: 120, isEnabled: true },
+   463→      { metricType: 'disk', threshold: 85, operator: '>', duration: 600, isEnabled: true },
+   464→      { metricType: 'ram', threshold: 90, operator: '>', duration: 180, isEnabled: true },
+   465→      { metricType: 'latency', threshold: 500, operator: '>', duration: 60, isEnabled: true },
+   466→    ]
+   467→    const currentConfigs = await db.alertConfig.findMany()
+   468→    let addedConfigs = 0
+   469→    for (const desired of desiredMetricConfigs) {
+   470→      const exists = currentConfigs.find(
+   471→        (c) => c.metricType === desired.metricType,
+   472→      )
+   473→      if (!exists) {
+   474→        await db.alertConfig.create({ data: desired })
+   475→        addedConfigs++
+   476→      }
+   477→    }
+   478→    if (addedConfigs > 0) {
+   479→      results.push(`Added ${addedConfigs} missing alert config(s)`)
+   480→    }
+   481→
+   482→    // Create demo alert events (only if none exist yet)
+   483→    const existingEvents = await db.alertEvent.count()
+   484→    if (existingEvents === 0) {
+   485→      const allConfigs = await db.alertConfig.findMany()
+   486→      const findConfig = (metric: string) =>
+   487→        allConfigs.find((c) => c.metricType === metric)
+   488→
+   489→      const cpuConfig = findConfig('cpu')
+   490→      const ramConfig = findConfig('ram')
+   491→      const diskConfig = findConfig('disk')
+   492→      const errorRateConfig = findConfig('error_rate')
+   493→      const latencyConfig = findConfig('latency')
+   494→      const reqPerSecConfig = findConfig('req_per_sec')
+   495→
+   496→      const now = Date.now()
+   497→      type EventSeed = {
+   498→        configId: string
+   499→        metricType: string
+   500→        metricValue: number
+   501→        threshold: number
+   502→        message: string
+   503→        hoursAgo: number
+   504→        resolved: boolean
+   505→      }
+   506→
+   507→      const eventSeeds: EventSeed[] = []
+   508→      if (cpuConfig) {
+   509→        eventSeeds.push(
+   510→          {
+   511→            configId: cpuConfig.id,
+   512→            metricType: 'cpu',
+   513→            metricValue: 87.3,
+   514→            threshold: cpuConfig.threshold,
+   515→            message: 'CPU usage exceeded 80% threshold',
+   516→            hoursAgo: 6,
+   517→            resolved: true,
+   518→          },
+   519→          {
+   520→            configId: cpuConfig.id,
+   521→            metricType: 'cpu',
+   522→            metricValue: 92.5,
+   523→            threshold: cpuConfig.threshold,
+   524→            message: 'CPU usage critical at 92.5% on api process',
+   525→            hoursAgo: 3,
+   526→            resolved: true,
+   527→          },
+   528→          {
+   529→            configId: cpuConfig.id,
+   530→            metricType: 'cpu',
+   531→            metricValue: 82.1,
+   532→            threshold: cpuConfig.threshold,
+   533→            message: 'CPU usage spike detected on scraper worker',
+   534→            hoursAgo: 1,
+   535→            resolved: false,
+   536→          },
+   537→        )
+   538→      }
+   539→      if (ramConfig) {
+   540→        eventSeeds.push(
+   541→          {
+   542→            configId: ramConfig.id,
+   543→            metricType: 'ram',
+   544→            metricValue: 94.2,
+   545→            threshold: ramConfig.threshold,
+   546→            message: 'RAM usage critical at 94.2% — possible memory leak',
+   547→            hoursAgo: 2,
+   548→            resolved: false,
+   549→          },
+   550→          {
+   551→            configId: ramConfig.id,
+   552→            metricType: 'ram',
+   553→            metricValue: 91.0,
+   554→            threshold: ramConfig.threshold,
+   555→            message: 'RAM usage exceeded 90% threshold',
+   556→            hoursAgo: 5,
+   557→            resolved: true,
+   558→          },
+   559→        )
+   560→      }
+   561→      if (diskConfig) {
+   562→        eventSeeds.push({
+   563→          configId: diskConfig.id,
+   564→          metricType: 'disk',
+   565→          metricValue: 88.4,
+   566→          threshold: diskConfig.threshold,
+   567→          message: 'Disk usage approaching 85% threshold',
+   568→          hoursAgo: 4,
+   569→          resolved: true,
+   570→        })
+   571→      }
+   572→      if (errorRateConfig) {
+   573→        eventSeeds.push({
+   574→          configId: errorRateConfig.id,
+   575→          metricType: 'error_rate',
+   576→          metricValue: 7.8,
+   577→          threshold: errorRateConfig.threshold,
+   578→          message: 'Error rate spike detected (7.8% of requests)',
+   579→          hoursAgo: 1.5,
+   580→          resolved: false,
+   581→        })
+   582→      }
+   583→      if (latencyConfig) {
+   584→        eventSeeds.push({
+   585→          configId: latencyConfig.id,
+   586→          metricType: 'latency',
+   587→          metricValue: 612,
+   588→          threshold: latencyConfig.threshold,
+   589→          message: 'API latency exceeded 500ms threshold (p95: 612ms)',
+   590→          hoursAgo: 0.5,
+   591→          resolved: false,
+   592→        })
+   593→      }
+   594→      if (reqPerSecConfig) {
+   595→        eventSeeds.push({
+   596→          configId: reqPerSecConfig.id,
+   597→          metricType: 'req_per_sec',
+   598→          metricValue: 1245,
+   599→          threshold: reqPerSecConfig.threshold,
+   600→          message: 'Request rate exceeded 1000 req/sec threshold',
+   601→          hoursAgo: 8,
+   602→          resolved: true,
+   603→        })
+   604→      }
+   605→
+   606→      for (const e of eventSeeds) {
+   607→        const createdAt = new Date(now - e.hoursAgo * 60 * 60 * 1000)
+   608→        await db.alertEvent.create({
+   609→          data: {
+   610→            configId: e.configId,
+   611→            metricType: e.metricType,
+   612→            metricValue: e.metricValue,
+   613→            threshold: e.threshold,
+   614→            message: e.message,
+   615→            isResolved: e.resolved,
+   616→            resolvedAt: e.resolved
+   617→              ? new Date(createdAt.getTime() + 20 * 60 * 1000)
+   618→              : null,
+   619→            createdAt,
+   620→          },
+   621→        })
+   622→      }
+   623→      results.push(`Created ${eventSeeds.length} alert events`)
+   624→
+   625→      // Update lastTriggeredAt on each affected config based on most recent event
+   626→      const configsById = new Map(allConfigs.map((c) => [c.id, c]))
+   627→      const latestByConfig = new Map<string, Date>()
+   628→      for (const e of eventSeeds) {
+   629→        const createdAt = new Date(now - e.hoursAgo * 60 * 60 * 1000)
+   630→        const existing = latestByConfig.get(e.configId)
+   631→        if (!existing || createdAt > existing) {
+   632→          latestByConfig.set(e.configId, createdAt)
+   633→        }
+   634→      }
+   635→      for (const [configId, latestAt] of latestByConfig.entries()) {
+   636→        const config = configsById.get(configId)
+   637→        if (config) {
+   638→          await db.alertConfig.update({
+   639→            where: { id: configId },
+   640→            data: { lastTriggeredAt: latestAt },
+   641→          })
+   642→        }
+   643→      }
+   644→    }
+   645→
+   646→    // Create demo pipeline runs
+   647→    const existingRuns = await db.pipelineRun.findMany()
+   648→    if (existingRuns.length === 0) {
+   649→      const sources = await db.pipelineSource.findMany()
+   650→      if (sources.length > 0) {
+   651→        const runData = []
+   652→        const now = Date.now()
+   653→        for (const source of sources) {
+   654→          for (let i = 10; i >= 0; i--) {
+   655→            const startedAt = new Date(now - i * source.fetchInterval * 1000)
+   656→            const status = Math.random() > 0.1 ? 'success' : 'failed'
+   657→            const duration = Math.round(200 + Math.random() * 3000)
+   658→            const rowsFetched = status === 'success' ? Math.round(50 + Math.random() * 2000) : 0
+   659→            runData.push({
+   660→              sourceId: source.id,
+   661→              status,
+   662→              startedAt,
+   663→              completedAt: status === 'success' ? new Date(startedAt.getTime() + duration) : null,
+   664→              durationMs: status === 'success' ? duration : null,
+   665→              rowsFetched,
+   666→              rowsWritten: status === 'success' ? Math.round(rowsFetched * 0.95) : 0,
+   667→              rowsFailed: status === 'success' ? Math.round(rowsFetched * 0.05) : rowsFetched,
+   668→              errorPayload: status === 'failed' ? JSON.stringify({ error: 'Connection timeout' }) : null,
+   669→            })
+   670→          }
+   671→        }
+   672→        await db.pipelineRun.createMany({ data: runData })
+   673→        results.push(`Created ${runData.length} pipeline run records`)
+   674→      }
+   675→    }
+   676→
+   677→    return NextResponse.json({
+   678→      success: true,
+   679→      data: { seeded: results },
+   680→      message: 'Demo data seeded successfully'
+   681→    })
+   682→  } catch (error: any) {
+   683→    return NextResponse.json({
+   684→      success: false,
+   685→      error: error.message
+   686→    }, { status: 500 })
+   687→  }
+   688→}
+   689→

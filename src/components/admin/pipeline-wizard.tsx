@@ -71,9 +71,12 @@ interface DataPath {
   path: string
   label: string
   rowCount: number
+  // API returns sampleKeys/count instead of sampleColumns/rowCount in some cases
+  sampleKeys?: string[]
+  count?: number
   sampleColumns: string[]
-  previewRows: Array<Record<string, unknown>>
-  columns: Array<{ name: string; type: string; sampleValues: unknown[] }>
+  previewRows?: Array<Record<string, unknown>>
+  columns?: Array<{ name: string; type: string; sampleValues: unknown[] }>
 }
 
 interface SmartPreviewResult {
@@ -620,17 +623,17 @@ export function PipelineWizard({ open, onOpenChange, onCreated, tables }: Pipeli
                 </CardHeader>
                 <CardContent className="pb-3 px-4 space-y-2">
                   <Badge variant="secondary" className="text-xs">
-                    {dp.rowCount} rows
+                    {dp.rowCount || dp.count || 0} rows
                   </Badge>
                   <div className="flex flex-wrap gap-1">
-                    {dp.sampleColumns.map((col) => (
+                    {(dp.sampleColumns || dp.sampleKeys || []).map((col: string) => (
                       <Badge key={col} variant="outline" className="text-[10px] px-1.5 py-0">
                         {col}
                       </Badge>
                     ))}
-                    {dp.columns.length > 5 && (
+                    {(dp.columns?.length ?? 0) > 5 && (
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                        +{dp.columns.length - 5} more
+                        +{dp.columns!.length - 5} more
                       </Badge>
                     )}
                   </div>
@@ -649,28 +652,29 @@ export function PipelineWizard({ open, onOpenChange, onCreated, tables }: Pipeli
               </h3>
               <div className="rounded-md border overflow-auto max-h-48">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 bg-background">
                     <TableRow>
-                      {selectedPath.columns.slice(0, 6).map((col) => (
-                        <TableHead key={col.name} className="text-xs whitespace-nowrap">
+                      {selectedPath.columns.slice(0, 8).map((col) => (
+                        <TableHead key={col.name} className="font-mono text-xs whitespace-nowrap">
                           {col.name}
+                          <span className="text-muted-foreground/50 ml-1 text-[9px] lowercase">{col.type}</span>
                         </TableHead>
                       ))}
-                      {selectedPath.columns.length > 6 && (
-                        <TableHead className="text-xs">...</TableHead>
+                      {selectedPath.columns.length > 8 && (
+                        <TableHead className="text-xs text-muted-foreground">+{selectedPath.columns.length - 8}</TableHead>
                       )}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {selectedPath.previewRows.map((row, i) => (
+                    {(selectedPath.previewRows ?? []).map((row: Record<string, unknown>, i: number) => (
                       <TableRow key={i}>
-                        {selectedPath.columns.slice(0, 6).map((col) => (
-                          <TableCell key={col.name} className="text-xs whitespace-nowrap max-w-[120px] truncate">
-                            {String(row[col.name] ?? '—')}
+                        {selectedPath.columns.slice(0, 8).map((col) => (
+                          <TableCell key={col.name} className="font-mono text-xs whitespace-nowrap max-w-[150px] truncate">
+                            {row[col.name] != null ? String(row[col.name]).slice(0, 50) : <span className="text-muted-foreground/40">—</span>}
                           </TableCell>
                         ))}
-                        {selectedPath.columns.length > 6 && (
-                          <TableCell className="text-xs text-muted-foreground">...</TableCell>
+                        {selectedPath.columns.length > 8 && (
+                          <TableCell className="text-xs text-muted-foreground">…</TableCell>
                         )}
                       </TableRow>
                     ))}
@@ -1153,7 +1157,7 @@ export function PipelineWizard({ open, onOpenChange, onCreated, tables }: Pipeli
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-0">
+      <DialogContent className="sm:max-w-4xl h-[85vh] flex flex-col p-0">
         <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
           <DialogTitle className="sr-only">Smart Pipeline Wizard</DialogTitle>
           <DialogDescription className="sr-only">

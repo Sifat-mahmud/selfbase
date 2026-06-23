@@ -1098,7 +1098,7 @@ export function PipelineView() {
 
         {/* Preview Dialog */}
         <Dialog open={!!previewTarget} onOpenChange={(open) => !open && setPreviewTarget(null)}>
-          <DialogContent className="max-w-5xl">
+          <DialogContent className="sm:max-w-5xl max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-4 w-4 text-emerald-600" />
@@ -1133,9 +1133,9 @@ export function PipelineView() {
                         <TableHeader className="sticky top-0 bg-background">
                           <TableRow>
                             {(previewResult.columns ?? []).map((c) => (
-                              <TableHead key={c.name} className="font-mono text-xs">
+                              <TableHead key={c.name} className="font-mono text-xs whitespace-nowrap" title={`${c.name} (${c.type})`}>
                                 {c.name}
-                                <span className="text-muted-foreground ml-1">({c.type})</span>
+                                <span className="text-muted-foreground/30 ml-0.5 text-[8px] lowercase normal-case">{c.type}</span>
                               </TableHead>
                             ))}
                           </TableRow>
@@ -1154,10 +1154,10 @@ export function PipelineView() {
                             (previewResult.previewRows ?? []).map((row, i) => (
                               <TableRow key={i}>
                                 {(previewResult.columns ?? []).map((c) => (
-                                  <TableCell key={c.name} className="font-mono text-xs">
+                                  <TableCell key={c.name} className="font-mono text-xs whitespace-nowrap max-w-[200px] truncate">
                                     {row[c.name] !== undefined && row[c.name] !== null
                                       ? String(row[c.name]).slice(0, 80)
-                                      : '—'}
+                                      : <span className="text-muted-foreground/40">—</span>}
                                   </TableCell>
                                 ))}
                               </TableRow>
@@ -1199,7 +1199,7 @@ export function PipelineView() {
               <Plus className="mr-1 h-4 w-4" /> New Pipeline (Advanced)
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Create Pipeline Source</DialogTitle>
               <DialogDescription>Configure a new data ingestion pipeline</DialogDescription>
@@ -1480,7 +1480,7 @@ export function PipelineView() {
 
         {/* Edit Pipeline Dialog */}
         <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Edit Pipeline Source</DialogTitle>
               <DialogDescription>Modify pipeline configuration</DialogDescription>

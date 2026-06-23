@@ -565,7 +565,7 @@ export function ScraperView() {
 
         {/* Preview Dialog */}
         <Dialog open={!!previewTarget} onOpenChange={(open) => !open && setPreviewTarget(null)}>
-          <DialogContent className="max-w-3xl">
+          <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Eye className="h-4 w-4 text-emerald-600" />
@@ -593,12 +593,12 @@ export function ScraperView() {
                   </div>
                 )}
                 {previewResult.rows && previewResult.rows.length > 0 && (
-                  <div className="rounded-md border max-h-[50vh] overflow-auto">
+                  <div className="flex-1 rounded-md border max-h-[50vh] overflow-auto">
                     <Table>
                       <TableHeader className="sticky top-0 bg-background">
                         <TableRow>
                           {Object.keys(previewResult.rows[0]).map((k) => (
-                            <TableHead key={k} className="font-mono text-xs">
+                            <TableHead key={k} className="font-mono text-xs whitespace-nowrap">
                               {k}
                             </TableHead>
                           ))}
@@ -608,8 +608,8 @@ export function ScraperView() {
                         {previewResult.rows.map((row, i) => (
                           <TableRow key={i}>
                             {Object.values(row).map((v, j) => (
-                              <TableCell key={j} className="font-mono text-xs">
-                                {v != null ? String(v).slice(0, 80) : '—'}
+                              <TableCell key={j} className="font-mono text-xs whitespace-nowrap max-w-[200px] truncate">
+                                {v != null ? String(v).slice(0, 80) : <span className="text-muted-foreground/40">—</span>}
                               </TableCell>
                             ))}
                           </TableRow>
@@ -646,7 +646,7 @@ export function ScraperView() {
               <Plus className="mr-1 h-4 w-4" /> New Sitemap
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle>Create Sitemap</DialogTitle>
               <DialogDescription>Configure a new web scraper</DialogDescription>

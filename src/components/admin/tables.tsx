@@ -1106,7 +1106,7 @@ export function TablesView() {
                   <Plus className="mr-1 h-4 w-4" /> Add Column
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-md">
+              <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Add Column</DialogTitle>
                   <DialogDescription>Add a new column to {selectedTable.name}</DialogDescription>
@@ -1293,7 +1293,7 @@ export function TablesView() {
             }
           }}
         >
-          <DialogContent className="max-w-5xl">
+          <DialogContent className="sm:max-w-6xl max-h-[90vh] flex flex-col">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <TableIcon className="h-4 w-4 text-emerald-600" />
@@ -1449,7 +1449,7 @@ export function TablesView() {
               </div>
             )}
 
-            <div className="max-h-[60vh] overflow-auto rounded-md border">
+            <div className="flex-1 overflow-auto rounded-md border">
               {dataLoading ? (
                 <div className="space-y-2 p-4">
                   {Array.from({ length: 5 }).map((_, i) => (
@@ -1500,15 +1500,15 @@ export function TablesView() {
                       {selectedTable.columns.map((c) => {
                         const isSorted = sortColumn === c.name
                         return (
-                          <TableHead key={c.id} className="font-mono text-xs">
+                          <TableHead key={c.id} className="font-mono text-xs whitespace-nowrap">
                             <button
                               type="button"
                               onClick={() => toggleSort(c.name)}
                               className="inline-flex items-center gap-1 rounded hover:text-foreground transition-colors -ml-0.5"
                               aria-label={`Sort by ${c.name}`}
+                              title={`${c.name} (${c.type})`}
                             >
                               <span>{c.name}</span>
-                              <span className="text-muted-foreground/70">({c.type})</span>
                               {isSorted ? (
                                 sortDirection === 'asc' ? (
                                   <ArrowUp className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
@@ -1522,8 +1522,8 @@ export function TablesView() {
                           </TableHead>
                         )
                       })}
-                      <TableHead>Version</TableHead>
-                      <TableHead className="w-32 text-right">Actions</TableHead>
+                      <TableHead className="w-16">Ver</TableHead>
+                      <TableHead className="w-20 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1616,34 +1616,26 @@ export function TablesView() {
                           </TableCell>
                           <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
                           {selectedTable.columns.map((c) => (
-                            <TableCell key={c.id} className="font-mono text-xs">
+                            <TableCell key={c.id} className="font-mono text-xs whitespace-nowrap max-w-[180px] truncate" title={isEditing ? undefined : String(parsed[c.name] ?? '')}>
                               {isEditing ? (
                                 renderCellInput(c, editBuffer[c.name], (v) =>
                                   setEditBuffer((prev) => ({ ...prev, [c.name]: v })),
                                 )
                               ) : parsed[c.name] !== undefined && parsed[c.name] !== null ? (
                                 c.type.toUpperCase() === 'BOOLEAN' ? (
-                                  <span
-                                    className={
-                                      parsed[c.name]
-                                        ? 'text-emerald-600 dark:text-emerald-400'
-                                        : 'text-muted-foreground'
-                                    }
-                                  >
-                                    {parsed[c.name] ? 'true' : 'false'}
-                                  </span>
+                                  <Badge variant={parsed[c.name] ? 'default' : 'secondary'} className={`text-[10px] px-1.5 py-0 ${parsed[c.name] ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' : ''}`}>
+                                    {parsed[c.name] ? '✓ true' : '✗ false'}
+                                  </Badge>
                                 ) : (
                                   String(parsed[c.name]).slice(0, 60)
                                 )
                               ) : (
-                                <span className="text-muted-foreground">—</span>
+                                <span className="text-muted-foreground/40">—</span>
                               )}
                             </TableCell>
                           ))}
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs">
-                              v{row.version}
-                            </Badge>
+                          <TableCell className="text-muted-foreground text-[10px] font-mono">
+                            v{row.version}
                           </TableCell>
                           <TableCell className="text-right">
                             {isEditing ? (
@@ -1835,7 +1827,7 @@ export function TablesView() {
 
         {/* Import Dialog */}
         <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-2xl">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Upload className="h-4 w-4 text-emerald-600" /> Import Data
@@ -1995,7 +1987,7 @@ export function TablesView() {
               <Plus className="mr-1 h-4 w-4" /> New Table
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>Create Table</DialogTitle>
               <DialogDescription>Define a new table in your SelfBase schema</DialogDescription>
@@ -2065,8 +2057,10 @@ export function TablesView() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Type</TableHead>
+                        <TableHead className="text-xs">Column Name</TableHead>
+                        <TableHead className="text-xs">Data Type</TableHead>
+                        <TableHead className="text-xs text-center">Nullable</TableHead>
+                        <TableHead className="text-xs text-center">Unique</TableHead>
                         <TableHead className="w-8" />
                       </TableRow>
                     </TableHeader>
@@ -2083,6 +2077,7 @@ export function TablesView() {
                                 )
                               }}
                               className="h-8 font-mono text-xs"
+                              placeholder="column_name"
                             />
                           </TableCell>
                           <TableCell>
@@ -2105,6 +2100,26 @@ export function TablesView() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Checkbox
+                              checked={col.nullable}
+                              onCheckedChange={(v) =>
+                                setNewColumns((prev) =>
+                                  prev.map((c, idx) => (idx === i ? { ...c, nullable: !!v } : c)),
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Checkbox
+                              checked={col.isUnique}
+                              onCheckedChange={(v) =>
+                                setNewColumns((prev) =>
+                                  prev.map((c, idx) => (idx === i ? { ...c, isUnique: !!v } : c)),
+                                )
+                              }
+                            />
                           </TableCell>
                           <TableCell>
                             <Button

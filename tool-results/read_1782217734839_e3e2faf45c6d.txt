@@ -1,0 +1,1220 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useCallback } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import {
+     6→  Globe,
+     7→  Search,
+     8→  CheckCircle2,
+     9→  XCircle,
+    10→  AlertTriangle,
+    11→  Database,
+    12→  Table2,
+    13→  ArrowRight,
+    14→  ArrowLeft,
+    15→  Wand2,
+    16→  Unlink,
+    17→  Clock,
+    18→  Loader2,
+    19→  ChevronDown,
+    20→  ChevronUp,
+    21→  Zap,
+    22→  Eye,
+    23→} from 'lucide-react'
+    24→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+    25→import { Button } from '@/components/ui/button'
+    26→import { Input } from '@/components/ui/input'
+    27→import { Badge } from '@/components/ui/badge'
+    28→import { Label } from '@/components/ui/label'
+    29→import { Separator } from '@/components/ui/separator'
+    30→import {
+    31→  Dialog,
+    32→  DialogContent,
+    33→  DialogHeader,
+    34→  DialogTitle,
+    35→  DialogDescription,
+    36→} from '@/components/ui/dialog'
+    37→import {
+    38→  Select,
+    39→  SelectContent,
+    40→  SelectItem,
+    41→  SelectTrigger,
+    42→  SelectValue,
+    43→} from '@/components/ui/select'
+    44→import {
+    45→  Table,
+    46→  TableBody,
+    47→  TableCell,
+    48→  TableHead,
+    49→  TableHeader,
+    50→  TableRow,
+    51→} from '@/components/ui/table'
+    52→import { useToast } from '@/hooks/use-toast'
+    53→import { apiPost } from '@/lib/api-client'
+    54→
+    55→// ─── Types ───────────────────────────────────────────────────────────────────
+    56→
+    57→export interface PipelineWizardProps {
+    58→  open: boolean
+    59→  onOpenChange: (open: boolean) => void
+    60→  onCreated: () => void
+    61→  tables: Array<{
+    62→    id: string
+    63→    name: string
+    64→    displayName?: string
+    65→    rowCount: number
+    66→    columns: Array<{ name: string; type: string }>
+    67→  }>
+    68→}
+    69→
+    70→interface DataPath {
+    71→  path: string
+    72→  label: string
+    73→  rowCount: number
+    74→  sampleColumns: string[]
+    75→  previewRows: Array<Record<string, unknown>>
+    76→  columns: Array<{ name: string; type: string; sampleValues: unknown[] }>
+    77→}
+    78→
+    79→interface SmartPreviewResult {
+    80→  success: boolean
+    81→  url?: string
+    82→  method?: string
+    83→  statusCode?: number
+    84→  durationMs?: number
+    85→  sourceType?: 'json' | 'html'
+    86→  dataPaths?: DataPath[]
+    87→  error?: string
+    88→}
+    89→
+    90→interface ColumnMapping {
+    91→  src: string
+    92→  target: string
+    93→  type: string
+    94→  transform?: string
+    95→}
+    96→
+    97→// ─── Constants ───────────────────────────────────────────────────────────────
+    98→
+    99→const TYPE_BADGE_COLORS: Record<string, string> = {
+   100→  INTEGER: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200',
+   101→  TEXT: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-200',
+   102→  DECIMAL: 'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-200',
+   103→  BOOLEAN: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-200',
+   104→  TIMESTAMP: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-200',
+   105→  JSON: 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-200',
+   106→}
+   107→
+   108→const TRANSFORMS: Record<string, Record<string, string>> = {
+   109→  TEXT: {
+   110→    INTEGER: 'parseInt',
+   111→    DECIMAL: 'parseFloat',
+   112→    BOOLEAN: 'truthy check',
+   113→    TIMESTAMP: 'Date.parse',
+   114→    JSON: 'JSON.stringify',
+   115→  },
+   116→  INTEGER: { TEXT: 'String()' },
+   117→  DECIMAL: { TEXT: 'String()' },
+   118→  BOOLEAN: { TEXT: 'String()' },
+   119→}
+   120→
+   121→function getTransform(srcType: string, targetType: string): string | undefined {
+   122→  if (srcType === targetType) return undefined
+   123→  return TRANSFORMS[srcType]?.[targetType]
+   124→}
+   125→
+   126→const SCHEDULE_OPTIONS = [
+   127→  { label: 'Every 5 minutes', value: 300, icon: '⚡' },
+   128→  { label: 'Every 15 minutes', value: 900, icon: '🔄' },
+   129→  { label: 'Every hour', value: 3600, icon: '⏰' },
+   130→  { label: 'Every 6 hours', value: 21600, icon: '🕐' },
+   131→  { label: 'Every day', value: 86400, icon: '📅' },
+   132→  { label: 'Manual only', value: 0, icon: '👆' },
+   133→]
+   134→
+   135→// ─── Step indicator ──────────────────────────────────────────────────────────
+   136→
+   137→const STEPS = [
+   138→  { title: 'Data Source', subtitle: 'Paste URL' },
+   139→  { title: 'Choose Data', subtitle: 'Select table' },
+   140→  { title: 'Destination', subtitle: 'Target table' },
+   141→  { title: 'Map Columns', subtitle: 'Align fields' },
+   142→  { title: 'Schedule', subtitle: 'Set & create' },
+   143→]
+   144→
+   145→function StepIndicator({ current }: { current: number }) {
+   146→  return (
+   147→    <div className="flex items-center justify-center gap-1 mb-6">
+   148→      {STEPS.map((step, i) => (
+   149→        <div key={i} className="flex items-center">
+   150→          <div className="flex flex-col items-center">
+   151→            <div
+   152→              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors ${
+   153→                i < current
+   154→                  ? 'bg-emerald-500 text-white'
+   155→                  : i === current
+   156→                    ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500'
+   157→                    : 'bg-muted text-muted-foreground'
+   158→              }`}
+   159→            >
+   160→              {i < current ? <CheckCircle2 className="h-4 w-4" /> : i + 1}
+   161→            </div>
+   162→            <span className="text-[10px] mt-1 text-muted-foreground hidden sm:block">{step.title}</span>
+   163→          </div>
+   164→          {i < STEPS.length - 1 && (
+   165→            <div
+   166→              className={`w-8 sm:w-12 h-0.5 mx-1 transition-colors ${
+   167→                i < current ? 'bg-emerald-500' : 'bg-muted'
+   168→              }`}
+   169→            />
+   170→          )}
+   171→        </div>
+   172→      ))}
+   173→    </div>
+   174→  )
+   175→}
+   176→
+   177→// ─── Main Component ──────────────────────────────────────────────────────────
+   178→
+   179→export function PipelineWizard({ open, onOpenChange, onCreated, tables }: PipelineWizardProps) {
+   180→  const { toast } = useToast()
+   181→
+   182→  // Wizard state
+   183→  const [step, setStep] = useState(0)
+   184→  const [direction, setDirection] = useState(1)
+   185→
+   186→  // Step 1: URL fetch
+   187→  const [url, setUrl] = useState('')
+   188→  const [fetchMethod] = useState('GET')
+   189→  const [fetchLoading, setFetchLoading] = useState(false)
+   190→  const [fetchResult, setFetchResult] = useState<SmartPreviewResult | null>(null)
+   191→
+   192→  // Step 2: Data path selection
+   193→  const [selectedPath, setSelectedPath] = useState<DataPath | null>(null)
+   194→
+   195→  // Step 3: Destination table
+   196→  const [destMode, setDestMode] = useState<'existing' | 'new'>('existing')
+   197→  const [selectedTableId, setSelectedTableId] = useState('')
+   198→  const [newTableName, setNewTableName] = useState('')
+   199→  const [creatingTable, setCreatingTable] = useState(false)
+   200→  const [createdTable, setCreatedTable] = useState<{
+   201→    id: string
+   202→    name: string
+   203→    columns: Array<{ name: string; type: string }>
+   204→  } | null>(null)
+   205→
+   206→  // Step 4: Column mapping
+   207→  const [mappings, setMappings] = useState<ColumnMapping[]>([])
+   208→  const [activeSource, setActiveSource] = useState<string | null>(null)
+   209→
+   210→  // Step 5: Schedule
+   211→  const [fetchInterval, setFetchInterval] = useState(300)
+   212→  const [pipelineName, setPipelineName] = useState('')
+   213→  const [showConfig, setShowConfig] = useState(false)
+   214→  const [creating, setCreating] = useState(false)
+   215→
+   216→  // ─── Reset wizard ────────────────────────────────────────────────────────
+   217→  const resetWizard = useCallback(() => {
+   218→    setStep(0)
+   219→    setDirection(1)
+   220→    setUrl('')
+   221→    setFetchResult(null)
+   222→    setSelectedPath(null)
+   223→    setDestMode('existing')
+   224→    setSelectedTableId('')
+   225→    setNewTableName('')
+   226→    setCreatingTable(false)
+   227→    setCreatedTable(null)
+   228→    setMappings([])
+   229→    setActiveSource(null)
+   230→    setFetchInterval(300)
+   231→    setPipelineName('')
+   232→    setShowConfig(false)
+   233→    setCreating(false)
+   234→  }, [])
+   235→
+   236→  const handleClose = useCallback(
+   237→    (val: boolean) => {
+   238→      onOpenChange(val)
+   239→      if (!val) resetWizard()
+   240→    },
+   241→    [onOpenChange, resetWizard]
+   242→  )
+   243→
+   244→  // ─── Step 1: Fetch data ──────────────────────────────────────────────────
+   245→  const handleFetch = async () => {
+   246→    if (!url.trim()) return
+   247→    setFetchLoading(true)
+   248→    setFetchResult(null)
+   249→    try {
+   250→      const result = await apiPost<SmartPreviewResult>('/api/pipelines/smart-preview', {
+   251→        url: url.trim(),
+   252→        method: fetchMethod,
+   253→      })
+   254→      setFetchResult(result)
+   255→    } catch (err) {
+   256→      setFetchResult({
+   257→        success: false,
+   258→        error: err instanceof Error ? err.message : 'Failed to fetch URL',
+   259→      })
+   260→    } finally {
+   261→      setFetchLoading(false)
+   262→    }
+   263→  }
+   264→
+   265→  // ─── Step 2 → Step 3: When selecting a data path ────────────────────────
+   266→  const handleSelectPath = (path: DataPath) => {
+   267→    setSelectedPath(path)
+   268→    // Auto-generate pipeline name
+   269→    try {
+   270→      const u = new URL(url)
+   271→      const domainPart = u.hostname.replace('www.', '')
+   272→      const pathPart = u.pathname.split('/').filter(Boolean).slice(0, 2).join('_')
+   273→      setPipelineName(`${domainPart}${pathPart ? '_' + pathPart : ''}_pipeline`)
+   274→    } catch {
+   275→      setPipelineName('new_pipeline')
+   276→    }
+   277→  }
+   278→
+   279→  // ─── Step 3: Get target columns ─────────────────────────────────────────
+   280→  const targetColumns = useMemo(() => {
+   281→    if (destMode === 'new' && createdTable) {
+   282→      return createdTable.columns
+   283→    }
+   284→    if (destMode === 'new' && selectedPath) {
+   285→      // Preview: source columns will become target columns
+   286→      return selectedPath.columns.map((c) => ({ name: c.name, type: c.type }))
+   287→    }
+   288→    const tbl = tables.find((t) => t.id === selectedTableId)
+   289→    return tbl?.columns || []
+   290→  }, [destMode, createdTable, selectedPath, tables, selectedTableId])
+   291→
+   292→  const targetTableId = useMemo(() => {
+   293→    if (destMode === 'new' && createdTable) return createdTable.id
+   294→    return selectedTableId
+   295→  }, [destMode, createdTable, selectedTableId])
+   296→
+   297→  // ─── Step 3: Create new table ───────────────────────────────────────────
+   298→  const handleCreateTable = async () => {
+   299→    if (!newTableName.trim() || !selectedPath) return
+   300→    setCreatingTable(true)
+   301→    try {
+   302→      const result = await apiPost<{
+   303→        id: string
+   304→        name: string
+   305→        columns: Array<{ name: string; type: string }>
+   306→      }>('/api/pipelines/auto-create-table', {
+   307→        name: newTableName.trim(),
+   308→        columns: selectedPath.columns.map((c) => ({ name: c.name, type: c.type })),
+   309→      })
+   310→      setCreatedTable(result)
+   311→      toast({ title: 'Table created', description: `"${result.name}" has been created.` })
+   312→    } catch (err) {
+   313→      toast({
+   314→        title: 'Failed to create table',
+   315→        description: err instanceof Error ? err.message : 'Unknown error',
+   316→        variant: 'destructive',
+   317→      })
+   318→    } finally {
+   319→      setCreatingTable(false)
+   320→    }
+   321→  }
+   322→
+   323→  // ─── Step 4: Column mapping ─────────────────────────────────────────────
+   324→  const autoMap = useCallback(() => {
+   325→    if (!selectedPath || targetColumns.length === 0) return
+   326→    const newMappings: ColumnMapping[] = []
+   327→    const srcLower = selectedPath.columns.map((c) => ({
+   328→      ...c,
+   329→      lower: c.name.toLowerCase().replace(/[^a-z0-9]/g, ''),
+   330→    }))
+   331→    const tgtUsed = new Set<string>()
+   332→
+   333→    for (const src of srcLower) {
+   334→      const match = targetColumns.find(
+   335→        (tgt) =>
+   336→          !tgtUsed.has(tgt.name) &&
+   337→          tgt.name.toLowerCase().replace(/[^a-z0-9]/g, '') === src.lower
+   338→      )
+   339→      if (match) {
+   340→        tgtUsed.add(match.name)
+   341→        const transform = getTransform(src.type, match.type)
+   342→        newMappings.push({
+   343→          src: src.name,
+   344→          target: match.name,
+   345→          type: match.type,
+   346→          transform,
+   347→        })
+   348→      }
+   349→    }
+   350→    setMappings(newMappings)
+   351→  }, [selectedPath, targetColumns])
+   352→
+   353→  const unmapAll = useCallback(() => {
+   354→    setMappings([])
+   355→    setActiveSource(null)
+   356→  }, [])
+   357→
+   358→  const handleSourceClick = useCallback(
+   359→    (srcName: string) => {
+   360→      if (activeSource === srcName) {
+   361→        setActiveSource(null)
+   362→        return
+   363→      }
+   364→      // If already mapped, unmap it
+   365→      const existing = mappings.find((m) => m.src === srcName)
+   366→      if (existing) {
+   367→        setMappings((prev) => prev.filter((m) => m.src !== srcName))
+   368→        setActiveSource(null)
+   369→        return
+   370→      }
+   371→      setActiveSource(srcName)
+   372→    },
+   373→    [activeSource, mappings]
+   374→  )
+   375→
+   376→  const handleTargetClick = useCallback(
+   377→    (tgtName: string) => {
+   378→      if (!activeSource) return
+   379→      // Remove any existing mapping to this target
+   380→      const existing = mappings.find((m) => m.target === tgtName)
+   381→      let newMappings = mappings.filter((m) => m.target !== tgtName && m.src !== activeSource)
+   382→
+   383→      const srcCol = selectedPath?.columns.find((c) => c.name === activeSource)
+   384→      const tgtCol = targetColumns.find((c) => c.name === tgtName)
+   385→      if (srcCol && tgtCol) {
+   386→        const transform = getTransform(srcCol.type, tgtCol.type)
+   387→        newMappings = [
+   388→          ...newMappings,
+   389→          { src: srcCol.name, target: tgtCol.name, type: tgtCol.type, transform },
+   390→        ]
+   391→      }
+   392→      setMappings(newMappings)
+   393→      setActiveSource(null)
+   394→    },
+   395→    [activeSource, mappings, selectedPath, targetColumns]
+   396→  )
+   397→
+   398→  // ─── Step 5: Create pipeline ────────────────────────────────────────────
+   399→  const handleCreate = async () => {
+   400→    if (!pipelineName.trim() || !url.trim()) return
+   401→    setCreating(true)
+   402→    try {
+   403→      const payload: Record<string, unknown> = {
+   404→        name: pipelineName.trim(),
+   405→        sourceType: fetchResult?.sourceType === 'html' ? 'scraper' : 'rest',
+   406→        url: url.trim(),
+   407→        method: fetchMethod,
+   408→        fetchInterval,
+   409→        onConflict: 'update',
+   410→        isActive: fetchInterval > 0,
+   411→        columnMappings: JSON.stringify(mappings),
+   412→      }
+   413→
+   414→      if (selectedPath && selectedPath.path !== '__html_table__' && selectedPath.path !== '(root)') {
+   415→        payload.jsonPath = selectedPath.path
+   416→      }
+   417→
+   418→      if (targetTableId) {
+   419→        payload.targetTableId = targetTableId
+   420→      }
+   421→
+   422→      // Auto-detect primary key columns (first mapped column or 'id' if exists)
+   423→      const pkCol = mappings.find(
+   424→        (m) => m.src.toLowerCase() === 'id' || m.target.toLowerCase() === 'id'
+   425→      )
+   426→      if (pkCol) {
+   427→        payload.primaryKeyCols = JSON.stringify([pkCol.target])
+   428→      }
+   429→
+   430→      await apiPost('/api/pipelines', payload)
+   431→      toast({
+   432→        title: 'Pipeline created!',
+   433→        description: `"${pipelineName}" has been created and is now ${fetchInterval > 0 ? 'active' : 'in manual mode'}.`,
+   434→      })
+   435→      handleClose(false)
+   436→      onCreated()
+   437→    } catch (err) {
+   438→      toast({
+   439→        title: 'Failed to create pipeline',
+   440→        description: err instanceof Error ? err.message : 'Unknown error',
+   441→        variant: 'destructive',
+   442→      })
+   443→    } finally {
+   444→      setCreating(false)
+   445→    }
+   446→  }
+   447→
+   448→  // ─── Navigation ─────────────────────────────────────────────────────────
+   449→  const canNext = useMemo(() => {
+   450→    switch (step) {
+   451→      case 0:
+   452→        return fetchResult?.success && (fetchResult.dataPaths?.length ?? 0) > 0
+   453→      case 1:
+   454→        return selectedPath !== null
+   455→      case 2:
+   456→        return (
+   457→          (destMode === 'existing' && selectedTableId !== '') ||
+   458→          (destMode === 'new' && createdTable !== null)
+   459→        )
+   460→      case 3:
+   461→        return true // mappings are optional
+   462→      case 4:
+   463→        return pipelineName.trim() !== '' && url.trim() !== ''
+   464→      default:
+   465→        return false
+   466→    }
+   467→  }, [step, fetchResult, selectedPath, destMode, selectedTableId, createdTable, pipelineName, url])
+   468→
+   469→  const goNext = () => {
+   470→    if (step === 2 && destMode === 'new' && !createdTable) {
+   471→      // Auto-create table before proceeding
+   472→      handleCreateTable()
+   473→      return
+   474→    }
+   475→    if (step === 3 && mappings.length === 0) {
+   476→      autoMap()
+   477→    }
+   478→    setDirection(1)
+   479→    setStep((s) => Math.min(s + 1, 4))
+   480→  }
+   481→
+   482→  const goBack = () => {
+   483→    setDirection(-1)
+   484→    setStep((s) => Math.max(s - 1, 0))
+   485→  }
+   486→
+   487→  // ─── Slide animation variants ───────────────────────────────────────────
+   488→  const slideVariants = {
+   489→    enter: (d: number) => ({ x: d > 0 ? 200 : -200, opacity: 0 }),
+   490→    center: { x: 0, opacity: 1 },
+   491→    exit: (d: number) => ({ x: d > 0 ? -200 : 200, opacity: 0 }),
+   492→  }
+   493→
+   494→  // ─── Step content rendering ─────────────────────────────────────────────
+   495→
+   496→  const renderStep1 = () => (
+   497→    <div className="space-y-4">
+   498→      <div className="text-center space-y-1">
+   499→        <h2 className="text-xl font-bold">Paste Your Data Source URL</h2>
+   500→        <p className="text-sm text-muted-foreground">
+   501→          Enter any API URL, webpage, or data feed — we&apos;ll analyze what&apos;s available
+   502→        </p>
+   503→      </div>
+   504→
+   505→      <div className="flex gap-2">
+   506→        <div className="relative flex-1">
+   507→          <Globe className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+   508→          <Input
+   509→            value={url}
+   510→            onChange={(e) => setUrl(e.target.value)}
+   511→            placeholder="Paste any API URL, webpage, or data feed..."
+   512→            className="pl-10 h-11"
+   513→            onKeyDown={(e) => {
+   514→              if (e.key === 'Enter') handleFetch()
+   515→            }}
+   516→          />
+   517→        </div>
+   518→        <Button
+   519→          onClick={handleFetch}
+   520→          disabled={fetchLoading || !url.trim()}
+   521→          className="h-11 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-6"
+   522→        >
+   523→          {fetchLoading ? (
+   524→            <>
+   525→              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analyzing...
+   526→            </>
+   527→          ) : (
+   528→            <>
+   529→              <Search className="mr-2 h-4 w-4" /> Fetch Data
+   530→            </>
+   531→          )}
+   532→        </Button>
+   533→      </div>
+   534→
+   535→      {fetchResult && fetchResult.success && (
+   536→        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+   537→          <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20">
+   538→            <CardContent className="p-4 flex items-center gap-3">
+   539→              <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+   540→              <div className="flex-1">
+   541→                <p className="font-medium text-emerald-700 dark:text-emerald-400">
+   542→                  Found {fetchResult.dataPaths?.length ?? 0} data table
+   543→                  {(fetchResult.dataPaths?.length ?? 0) !== 1 ? 's' : ''}!
+   544→                </p>
+   545→                <p className="text-xs text-muted-foreground">
+   546→                  Fetched in {fetchResult.durationMs ?? 0}ms
+   547→                </p>
+   548→              </div>
+   549→              <Badge
+   550→                variant="outline"
+   551→                className={
+   552→                  fetchResult.sourceType === 'json'
+   553→                    ? 'bg-amber-500/10 text-amber-700 border-amber-200'
+   554→                    : 'bg-teal-500/10 text-teal-700 border-teal-200'
+   555→                }
+   556→              >
+   557→                {fetchResult.sourceType?.toUpperCase()}
+   558→              </Badge>
+   559→            </CardContent>
+   560→          </Card>
+   561→        </motion.div>
+   562→      )}
+   563→
+   564→      {fetchResult && !fetchResult.success && (
+   565→        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+   566→          <Card className="border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20">
+   567→            <CardContent className="p-4 flex items-center gap-3">
+   568→              <XCircle className="h-5 w-5 text-red-500 shrink-0" />
+   569→              <div className="flex-1">
+   570→                <p className="font-medium text-red-700 dark:text-red-400">
+   571→                  {fetchResult.error || 'Failed to fetch data'}
+   572→                </p>
+   573→              </div>
+   574→              <Button size="sm" variant="outline" onClick={handleFetch}>
+   575→                Retry
+   576→              </Button>
+   577→            </CardContent>
+   578→          </Card>
+   579→        </motion.div>
+   580→      )}
+   581→    </div>
+   582→  )
+   583→
+   584→  const renderStep2 = () => {
+   585→    const dataPaths = fetchResult?.dataPaths || []
+   586→    return (
+   587→      <div className="space-y-4">
+   588→        <div className="text-center space-y-1">
+   589→          <h2 className="text-xl font-bold">Choose Your Data</h2>
+   590→          <p className="text-sm text-muted-foreground">
+   591→            Click on the data table you want to import
+   592→          </p>
+   593→        </div>
+   594→
+   595→        <div className="grid gap-3 sm:grid-cols-2">
+   596→          {dataPaths.map((dp) => (
+   597→            <motion.div
+   598→              key={dp.path}
+   599→              initial={{ opacity: 0, y: 10 }}
+   600→              animate={{ opacity: 1, y: 0 }}
+   601→            >
+   602→              <Card
+   603→                className={`cursor-pointer transition-all hover:shadow-md ${
+   604→                  selectedPath?.path === dp.path
+   605→                    ? 'ring-2 ring-emerald-500 border-emerald-300 dark:border-emerald-700'
+   606→                    : 'hover:border-emerald-200 dark:hover:border-emerald-800'
+   607→                }`}
+   608→                onClick={() => handleSelectPath(dp)}
+   609→              >
+   610→                <CardHeader className="pb-2 pt-4 px-4">
+   611→                  <div className="flex items-start justify-between">
+   612→                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+   613→                      <Table2 className="h-4 w-4 text-emerald-500" />
+   614→                      {dp.label}
+   615→                    </CardTitle>
+   616→                    {selectedPath?.path === dp.path && (
+   617→                      <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+   618→                    )}
+   619→                  </div>
+   620→                </CardHeader>
+   621→                <CardContent className="pb-3 px-4 space-y-2">
+   622→                  <Badge variant="secondary" className="text-xs">
+   623→                    {dp.rowCount} rows
+   624→                  </Badge>
+   625→                  <div className="flex flex-wrap gap-1">
+   626→                    {(dp.sampleColumns ?? []).map((col: string) => (
+   627→                      <Badge key={col} variant="outline" className="text-[10px] px-1.5 py-0">
+   628→                        {col}
+   629→                      </Badge>
+   630→                    ))}
+   631→                    {(dp.columns?.length ?? 0) > 5 && (
+   632→                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+   633→                        +{dp.columns.length - 5} more
+   634→                      </Badge>
+   635→                    )}
+   636→                  </div>
+   637→                </CardContent>
+   638→              </Card>
+   639→            </motion.div>
+   640→          ))}
+   641→        </div>
+   642→
+   643→        {selectedPath && (
+   644→          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
+   645→            <Separator />
+   646→            <div>
+   647→              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+   648→                <Eye className="h-4 w-4 text-muted-foreground" /> Preview (first 5 rows)
+   649→              </h3>
+   650→              <div className="rounded-md border overflow-auto max-h-48">
+   651→                <Table>
+   652→                  <TableHeader className="sticky top-0 bg-background">
+   653→                    <TableRow>
+   654→                      {selectedPath.columns.slice(0, 8).map((col) => (
+   655→                        <TableHead key={col.name} className="font-mono text-xs whitespace-nowrap">
+   656→                          {col.name}
+   657→                          <span className="text-muted-foreground/50 ml-1 text-[9px] lowercase">{col.type}</span>
+   658→                        </TableHead>
+   659→                      ))}
+   660→                      {selectedPath.columns.length > 8 && (
+   661→                        <TableHead className="text-xs text-muted-foreground">+{selectedPath.columns.length - 8}</TableHead>
+   662→                      )}
+   663→                    </TableRow>
+   664→                  </TableHeader>
+   665→                  <TableBody>
+   666→                    {(selectedPath.previewRows ?? []).map((row: Record<string, unknown>, i: number) => (
+   667→                      <TableRow key={i}>
+   668→                        {selectedPath.columns.slice(0, 8).map((col) => (
+   669→                          <TableCell key={col.name} className="font-mono text-xs whitespace-nowrap max-w-[150px] truncate">
+   670→                            {row[col.name] != null ? String(row[col.name]).slice(0, 50) : <span className="text-muted-foreground/40">—</span>}
+   671→                          </TableCell>
+   672→                        ))}
+   673→                        {selectedPath.columns.length > 8 && (
+   674→                          <TableCell className="text-xs text-muted-foreground">…</TableCell>
+   675→                        )}
+   676→                      </TableRow>
+   677→                    ))}
+   678→                  </TableBody>
+   679→                </Table>
+   680→              </div>
+   681→            </div>
+   682→            <div>
+   683→              <h3 className="text-sm font-semibold mb-2">Detected Columns</h3>
+   684→              <div className="flex flex-wrap gap-2">
+   685→                {selectedPath.columns.map((col) => (
+   686→                  <div
+   687→                    key={col.name}
+   688→                    className="flex items-center gap-1.5 rounded-md border px-2 py-1"
+   689→                  >
+   690→                    <span className="text-xs font-medium">{col.name}</span>
+   691→                    <Badge
+   692→                      variant="outline"
+   693→                      className={`text-[10px] px-1 py-0 ${TYPE_BADGE_COLORS[col.type] || ''}`}
+   694→                    >
+   695→                      {col.type}
+   696→                    </Badge>
+   697→                    <span className="text-[10px] text-muted-foreground">
+   698→                      {col.sampleValues
+   699→                        .filter((v) => v !== null && v !== undefined)
+   700→                        .slice(0, 2)
+   701→                        .map((v) => String(v).substring(0, 15))
+   702→                        .join(', ')}
+   703→                    </span>
+   704→                  </div>
+   705→                ))}
+   706→              </div>
+   707→            </div>
+   708→          </motion.div>
+   709→        )}
+   710→      </div>
+   711→    )
+   712→  }
+   713→
+   714→  const renderStep3 = () => (
+   715→    <div className="space-y-4">
+   716→      <div className="text-center space-y-1">
+   717→        <h2 className="text-xl font-bold">Select Destination Table</h2>
+   718→        <p className="text-sm text-muted-foreground">
+   719→          Where should the data be stored?
+   720→        </p>
+   721→      </div>
+   722→
+   723→      <div className="grid gap-4 sm:grid-cols-2">
+   724→        {/* Existing Table */}
+   725→        <Card
+   726→          className={`cursor-pointer transition-all ${
+   727→            destMode === 'existing'
+   728→              ? 'ring-2 ring-emerald-500 border-emerald-300 dark:border-emerald-700'
+   729→              : 'hover:border-emerald-200'
+   730→          }`}
+   731→          onClick={() => setDestMode('existing')}
+   732→        >
+   733→          <CardHeader className="pb-2 pt-4 px-4">
+   734→            <div className="flex items-center justify-between">
+   735→              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+   736→                <Database className="h-4 w-4 text-emerald-500" />
+   737→                Existing Table
+   738→              </CardTitle>
+   739→              {destMode === 'existing' && (
+   740→                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+   741→              )}
+   742→            </div>
+   743→          </CardHeader>
+   744→          <CardContent className="pb-4 px-4">
+   745→            <p className="text-xs text-muted-foreground mb-3">
+   746→              Write data to an existing table in your database
+   747→            </p>
+   748→            {destMode === 'existing' && (
+   749→              <Select value={selectedTableId} onValueChange={setSelectedTableId}>
+   750→                <SelectTrigger>
+   751→                  <SelectValue placeholder="Select a table..." />
+   752→                </SelectTrigger>
+   753→                <SelectContent>
+   754→                  {tables.map((t) => (
+   755→                    <SelectItem key={t.id} value={t.id}>
+   756→                      <span className="font-medium">{t.displayName || t.name}</span>
+   757→                      <span className="ml-2 text-xs text-muted-foreground">
+   758→                        ({t.rowCount.toLocaleString()} rows · {t.columns?.length || 0} cols)
+   759→                      </span>
+   760→                    </SelectItem>
+   761→                  ))}
+   762→                </SelectContent>
+   763→              </Select>
+   764→            )}
+   765→          </CardContent>
+   766→        </Card>
+   767→
+   768→        {/* Create New Table */}
+   769→        <Card
+   770→          className={`cursor-pointer transition-all ${
+   771→            destMode === 'new'
+   772→              ? 'ring-2 ring-emerald-500 border-emerald-300 dark:border-emerald-700'
+   773→              : 'hover:border-emerald-200'
+   774→          }`}
+   775→          onClick={() => {
+   776→            if (!createdTable) setDestMode('new')
+   777→          }}
+   778→        >
+   779→          <CardHeader className="pb-2 pt-4 px-4">
+   780→            <div className="flex items-center justify-between">
+   781→              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+   782→                <Zap className="h-4 w-4 text-teal-500" />
+   783→                Create New Table
+   784→              </CardTitle>
+   785→              {destMode === 'new' && (
+   786→                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+   787→              )}
+   788→            </div>
+   789→          </CardHeader>
+   790→          <CardContent className="pb-4 px-4">
+   791→            <p className="text-xs text-muted-foreground mb-3">
+   792→              Auto-create a table matching your source columns
+   793→            </p>
+   794→            {destMode === 'new' && !createdTable && (
+   795→              <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+   796→                <Input
+   797→                  value={newTableName}
+   798→                  onChange={(e) => setNewTableName(e.target.value)}
+   799→                  placeholder="Table name (e.g., stock_data)"
+   800→                  className="h-9"
+   801→                />
+   802→                <p className="text-[10px] text-muted-foreground">
+   803→                  Columns will be auto-created: {selectedPath?.columns.map((c) => c.name).join(', ')}
+   804→                </p>
+   805→              </div>
+   806→            )}
+   807→            {destMode === 'new' && createdTable && (
+   808→              <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+   809→                <CheckCircle2 className="h-4 w-4" />
+   810→                <span className="font-medium">{createdTable.name}</span>
+   811→                <span className="text-xs text-muted-foreground">
+   812→                  ({createdTable.columns.length} columns)
+   813→                </span>
+   814→              </div>
+   815→            )}
+   816→          </CardContent>
+   817→        </Card>
+   818→      </div>
+   819→
+   820→      {/* Show target columns preview */}
+   821→      {targetColumns.length > 0 && (
+   822→        <div>
+   823→          <h3 className="text-sm font-semibold mb-2">Target Columns</h3>
+   824→          <div className="flex flex-wrap gap-2">
+   825→            {targetColumns.map((col) => (
+   826→              <div
+   827→                key={col.name}
+   828→                className="flex items-center gap-1.5 rounded-md border px-2 py-1"
+   829→              >
+   830→                <span className="text-xs font-medium">{col.name}</span>
+   831→                <Badge
+   832→                  variant="outline"
+   833→                  className={`text-[10px] px-1 py-0 ${TYPE_BADGE_COLORS[col.type] || ''}`}
+   834→                >
+   835→                  {col.type}
+   836→                </Badge>
+   837→              </div>
+   838→            ))}
+   839→          </div>
+   840→        </div>
+   841→      )}
+   842→    </div>
+   843→  )
+   844→
+   845→  const renderStep4 = () => {
+   846→    const sourceCols = selectedPath?.columns || []
+   847→    const mappedSources = new Set(mappings.map((m) => m.src))
+   848→    const mappedTargets = new Set(mappings.map((m) => m.target))
+   849→    const unmappedSourceCount = sourceCols.filter((c) => !mappedSources.has(c.name)).length
+   850→    const unmappedTargetCount = targetColumns.filter((c) => !mappedTargets.has(c.name)).length
+   851→
+   852→    return (
+   853→      <div className="space-y-4">
+   854→        <div className="text-center space-y-1">
+   855→          <h2 className="text-xl font-bold">Map Your Columns</h2>
+   856→          <p className="text-sm text-muted-foreground">
+   857→            Click a source column, then click a target column to map them
+   858→          </p>
+   859→        </div>
+   860→
+   861→        <div className="flex gap-2 justify-center flex-wrap">
+   862→          <Button size="sm" variant="outline" onClick={autoMap}>
+   863→            <Wand2 className="mr-1 h-3.5 w-3.5" /> Auto-Map
+   864→          </Button>
+   865→          <Button size="sm" variant="outline" onClick={unmapAll}>
+   866→            <Unlink className="mr-1 h-3.5 w-3.5" /> Unmap All
+   867→          </Button>
+   868→        </div>
+   869→
+   870→        <div className="grid gap-4 md:grid-cols-2">
+   871→          {/* Source Columns */}
+   872→          <div>
+   873→            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+   874→              <ArrowRight className="h-4 w-4 text-emerald-500" />
+   875→              Source Columns
+   876→              <Badge variant="secondary" className="text-xs">
+   877→                {sourceCols.length}
+   878→              </Badge>
+   879→            </h3>
+   880→            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1 scrollbar-thin">
+   881→              {sourceCols.map((col) => {
+   882→                const mapped = mappings.find((m) => m.src === col.name)
+   883→                const isActive = activeSource === col.name
+   884→                return (
+   885→                  <Card
+   886→                    key={col.name}
+   887→                    className={`cursor-pointer transition-all py-0 ${
+   888→                      isActive
+   889→                        ? 'ring-2 ring-emerald-500 border-emerald-300'
+   890→                        : mapped
+   891→                          ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20'
+   892→                          : 'hover:border-emerald-200'
+   893→                    }`}
+   894→                    onClick={() => handleSourceClick(col.name)}
+   895→                  >
+   896→                    <CardContent className="p-2.5">
+   897→                      <div className="flex items-center justify-between">
+   898→                        <div className="flex items-center gap-2 min-w-0">
+   899→                          <div
+   900→                            className={`w-2 h-2 rounded-full shrink-0 ${
+   901→                              mapped ? 'bg-emerald-500' : 'bg-muted-foreground/30'
+   902→                            }`}
+   903→                          />
+   904→                          <span className="text-xs font-medium truncate">{col.name}</span>
+   905→                          <Badge
+   906→                            variant="outline"
+   907→                            className={`text-[10px] px-1 py-0 shrink-0 ${TYPE_BADGE_COLORS[col.type] || ''}`}
+   908→                          >
+   909→                            {col.type}
+   910→                          </Badge>
+   911→                        </div>
+   912→                        {mapped && (
+   913→                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 shrink-0 ml-1">
+   914→                            → {mapped.target}
+   915→                          </span>
+   916→                        )}
+   917→                      </div>
+   918→                      <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+   919→                        {col.sampleValues
+   920→                          .filter((v) => v !== null && v !== undefined)
+   921→                          .slice(0, 2)
+   922→                          .map((v) => String(v).substring(0, 20))
+   923→                          .join(', ')}
+   924→                      </div>
+   925→                    </CardContent>
+   926→                  </Card>
+   927→                )
+   928→              })}
+   929→            </div>
+   930→          </div>
+   931→
+   932→          {/* Target Columns */}
+   933→          <div>
+   934→            <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+   935→              <Database className="h-4 w-4 text-teal-500" />
+   936→              Target Columns
+   937→              <Badge variant="secondary" className="text-xs">
+   938→                {targetColumns.length}
+   939→              </Badge>
+   940→            </h3>
+   941→            <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1 scrollbar-thin">
+   942→              {targetColumns.map((col) => {
+   943→                const mapped = mappings.find((m) => m.target === col.name)
+   944→                return (
+   945→                  <Card
+   946→                    key={col.name}
+   947→                    className={`cursor-pointer transition-all py-0 ${
+   948→                      activeSource && !mapped
+   949→                        ? 'hover:ring-2 hover:ring-emerald-400 border-dashed'
+   950→                        : mapped
+   951→                          ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20'
+   952→                          : ''
+   953→                    } ${mapped ? 'border-l-4 border-l-emerald-500' : ''}`}
+   954→                    onClick={() => handleTargetClick(col.name)}
+   955→                  >
+   956→                    <CardContent className="p-2.5">
+   957→                      <div className="flex items-center justify-between">
+   958→                        <div className="flex items-center gap-2 min-w-0">
+   959→                          <span className="text-xs font-medium truncate">{col.name}</span>
+   960→                          <Badge
+   961→                            variant="outline"
+   962→                            className={`text-[10px] px-1 py-0 shrink-0 ${TYPE_BADGE_COLORS[col.type] || ''}`}
+   963→                          >
+   964→                            {col.type}
+   965→                          </Badge>
+   966→                        </div>
+   967→                        {mapped && (
+   968→                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 shrink-0 ml-1">
+   969→                            ← {mapped.src}
+   970→                          </span>
+   971→                        )}
+   972→                      </div>
+   973→                      {mapped && mapped.transform && (
+   974→                        <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 flex items-center gap-1">
+   975→                          <Wand2 className="h-3 w-3" />
+   976→                          Auto-transform: {mapped.src}({sourceCols.find((c) => c.name === mapped.src)?.type}) → {col.type}
+   977→                        </div>
+   978→                      )}
+   979→                    </CardContent>
+   980→                  </Card>
+   981→                )
+   982→              })}
+   983→            </div>
+   984→          </div>
+   985→        </div>
+   986→
+   987→        {/* Warnings */}
+   988→        {(unmappedSourceCount > 0 || unmappedTargetCount > 0) && (
+   989→          <div className="flex flex-wrap gap-2">
+   990→            {unmappedSourceCount > 0 && (
+   991→              <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+   992→                <AlertTriangle className="h-3.5 w-3.5" />
+   993→                {unmappedSourceCount} source column{unmappedSourceCount !== 1 ? 's' : ''} not mapped
+   994→              </div>
+   995→            )}
+   996→            {unmappedTargetCount > 0 && (
+   997→              <div className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+   998→                <AlertTriangle className="h-3.5 w-3.5" />
+   999→                {unmappedTargetCount} target column{unmappedTargetCount !== 1 ? 's' : ''} will be NULL
+  1000→              </div>
+  1001→            )}
+  1002→          </div>
+  1003→        )}
+  1004→
+  1005→        {/* Transformation Preview */}
+  1006→        {mappings.filter((m) => m.transform).length > 0 && (
+  1007→          <div>
+  1008→            <h3 className="text-sm font-semibold mb-2">Transformations</h3>
+  1009→            <div className="space-y-1">
+  1010→              {mappings
+  1011→                .filter((m) => m.transform)
+  1012→                .map((m) => {
+  1013→                  const srcType = sourceCols.find((c) => c.name === m.src)?.type || 'TEXT'
+  1014→                  return (
+  1015→                    <div
+  1016→                      key={m.src}
+  1017→                      className="flex items-center gap-2 text-xs rounded-md border px-2 py-1.5"
+  1018→                    >
+  1019→                      <Wand2 className="h-3 w-3 text-amber-500" />
+  1020→                      <span className="font-medium">{m.src}</span>
+  1021→                      <Badge
+  1022→                        variant="outline"
+  1023→                        className={`text-[10px] px-1 py-0 ${TYPE_BADGE_COLORS[srcType] || ''}`}
+  1024→                      >
+  1025→                        {srcType}
+  1026→                      </Badge>
+  1027→                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+  1028→                      <span className="font-medium">{m.target}</span>
+  1029→                      <Badge
+  1030→                        variant="outline"
+  1031→                        className={`text-[10px] px-1 py-0 ${TYPE_BADGE_COLORS[m.type] || ''}`}
+  1032→                      >
+  1033→                        {m.type}
+  1034→                      </Badge>
+  1035→                      <span className="text-muted-foreground">({m.transform})</span>
+  1036→                    </div>
+  1037→                  )
+  1038→                })}
+  1039→            </div>
+  1040→          </div>
+  1041→        )}
+  1042→      </div>
+  1043→    )
+  1044→  }
+  1045→
+  1046→  const renderStep5 = () => (
+  1047→    <div className="space-y-4">
+  1048→      <div className="text-center space-y-1">
+  1049→        <h2 className="text-xl font-bold">Set Schedule &amp; Create</h2>
+  1050→        <p className="text-sm text-muted-foreground">
+  1051→          Choose how often to fetch data and finalize your pipeline
+  1052→        </p>
+  1053→      </div>
+  1054→
+  1055→      {/* Schedule */}
+  1056→      <div>
+  1057→        <Label className="text-sm font-semibold mb-2 block">Fetch Schedule</Label>
+  1058→        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+  1059→          {SCHEDULE_OPTIONS.map((opt) => (
+  1060→            <Card
+  1061→              key={opt.value}
+  1062→              className={`cursor-pointer transition-all py-0 ${
+  1063→                fetchInterval === opt.value
+  1064→                  ? 'ring-2 ring-emerald-500 border-emerald-300 dark:border-emerald-700'
+  1065→                  : 'hover:border-emerald-200'
+  1066→              }`}
+  1067→              onClick={() => setFetchInterval(opt.value)}
+  1068→            >
+  1069→              <CardContent className="p-3 text-center">
+  1070→                <span className="text-lg">{opt.icon}</span>
+  1071→                <p className="text-xs font-medium mt-1">{opt.label}</p>
+  1072→              </CardContent>
+  1073→            </Card>
+  1074→          ))}
+  1075→        </div>
+  1076→      </div>
+  1077→
+  1078→      {/* Pipeline Name */}
+  1079→      <div>
+  1080→        <Label className="text-sm font-semibold mb-2 block">Pipeline Name</Label>
+  1081→        <Input
+  1082→          value={pipelineName}
+  1083→          onChange={(e) => setPipelineName(e.target.value)}
+  1084→          placeholder="My Pipeline"
+  1085→          className="h-10"
+  1086→        />
+  1087→      </div>
+  1088→
+  1089→      {/* Preview Config */}
+  1090→      <div>
+  1091→        <button
+  1092→          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+  1093→          onClick={() => setShowConfig(!showConfig)}
+  1094→        >
+  1095→          {showConfig ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+  1096→          Preview Generated Config
+  1097→        </button>
+  1098→        <AnimatePresence>
+  1099→          {showConfig && (
+  1100→            <motion.div
+  1101→              initial={{ height: 0, opacity: 0 }}
+  1102→              animate={{ height: 'auto', opacity: 1 }}
+  1103→              exit={{ height: 0, opacity: 0 }}
+  1104→              className="overflow-hidden"
+  1105→            >
+  1106→              <pre className="mt-2 text-[11px] bg-muted/50 rounded-md p-3 overflow-auto max-h-48 font-mono">
+  1107→                {JSON.stringify(
+  1108→                  {
+  1109→                    name: pipelineName,
+  1110→                    url,
+  1111→                    method: fetchMethod,
+  1112→                    sourceType: fetchResult?.sourceType === 'html' ? 'scraper' : 'rest',
+  1113→                    jsonPath:
+  1114→                      selectedPath &&
+  1115→                      selectedPath.path !== '__html_table__' &&
+  1116→                      selectedPath.path !== '(root)'
+  1117→                        ? selectedPath.path
+  1118→                        : undefined,
+  1119→                    targetTableId: targetTableId || undefined,
+  1120→                    columnMappings: mappings,
+  1121→                    fetchInterval,
+  1122→                    onConflict: 'update',
+  1123→                    isActive: fetchInterval > 0,
+  1124→                  },
+  1125→                  null,
+  1126→                  2
+  1127→                )}
+  1128→              </pre>
+  1129→            </motion.div>
+  1130→          )}
+  1131→        </AnimatePresence>
+  1132→      </div>
+  1133→
+  1134→      {/* Create Button */}
+  1135→      <Button
+  1136→        onClick={handleCreate}
+  1137→        disabled={creating || !pipelineName.trim()}
+  1138→        className="w-full h-12 text-base bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white"
+  1139→      >
+  1140→        {creating ? (
+  1141→          <>
+  1142→            <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Creating Pipeline...
+  1143→          </>
+  1144→        ) : (
+  1145→          <>
+  1146→            🚀 Create Pipeline
+  1147→          </>
+  1148→        )}
+  1149→      </Button>
+  1150→    </div>
+  1151→  )
+  1152→
+  1153→  const stepRenderers = [renderStep1, renderStep2, renderStep3, renderStep4, renderStep5]
+  1154→
+  1155→  return (
+  1156→    <Dialog open={open} onOpenChange={handleClose}>
+  1157→      <DialogContent className="sm:max-w-4xl h-[85vh] flex flex-col p-0">
+  1158→        <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+  1159→          <DialogTitle className="sr-only">Smart Pipeline Wizard</DialogTitle>
+  1160→          <DialogDescription className="sr-only">
+  1161→            Step-by-step pipeline creation wizard
+  1162→          </DialogDescription>
+  1163→          <StepIndicator current={step} />
+  1164→        </DialogHeader>
+  1165→
+  1166→        <div className="flex-1 overflow-y-auto px-6 scrollbar-thin">
+  1167→          <AnimatePresence mode="wait" custom={direction}>
+  1168→            <motion.div
+  1169→              key={step}
+  1170→              custom={direction}
+  1171→              variants={slideVariants}
+  1172→              initial="enter"
+  1173→              animate="center"
+  1174→              exit="exit"
+  1175→              transition={{ duration: 0.25, ease: 'easeInOut' }}
+  1176→            >
+  1177→              {stepRenderers[step]()}
+  1178→            </motion.div>
+  1179→          </AnimatePresence>
+  1180→        </div>
+  1181→
+  1182→        {/* Navigation Footer */}
+  1183→        <div className="flex items-center justify-between px-6 py-4 border-t shrink-0">
+  1184→          <Button
+  1185→            variant="outline"
+  1186→            onClick={goBack}
+  1187→            disabled={step === 0}
+  1188→          >
+  1189→            <ArrowLeft className="mr-1 h-4 w-4" /> Back
+  1190→          </Button>
+  1191→
+  1192→          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+  1193→            <Clock className="h-3 w-3" />
+  1194→            Step {step + 1} of 5
+  1195→          </div>
+  1196→
+  1197→          {step < 4 ? (
+  1198→            <Button onClick={goNext} disabled={!canNext}>
+  1199→              Next <ArrowRight className="ml-1 h-4 w-4" />
+  1200→            </Button>
+  1201→          ) : (
+  1202→            <Button
+  1203→              onClick={handleCreate}
+  1204→              disabled={creating || !canNext}
+  1205→              className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white"
+  1206→            >
+  1207→              {creating ? (
+  1208→                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+  1209→              ) : (
+  1210→                <Zap className="mr-1 h-4 w-4" />
+  1211→              )}
+  1212→              Create
+  1213→            </Button>
+  1214→          )}
+  1215→        </div>
+  1216→      </DialogContent>
+  1217→    </Dialog>
+  1218→  )
+  1219→}
+  1220→
