@@ -1,13 +1,16 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Terminal, Play, Copy, Plus, Trash2, Send, Clock, Search,
   ChevronDown, ChevronRight, CheckCircle2, XCircle, AlertTriangle,
   Loader2, RotateCcw, FileJson, ArrowDownToLine, Hash, Zap, Activity,
   Gauge, Key, Shield, Smartphone, ArrowRight, Eye, EyeOff, RefreshCw,
-  ExternalLink, Globe, Code2, Lock, Unlock,
+  ExternalLink, Globe, Code2, Lock, Unlock, Database, Table2, Server,
+  FileCode, BarChart3, Cpu, HardDrive, Upload, Download, Columns3,
+  Rows3, Pencil, Trash, List, FolderOpen, Workflow, Bot, MessageSquare,
+  Webhook, Eye as EyeIcon, Save, CheckCheck, Timer,
 } from 'lucide-react'
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -83,6 +86,29 @@ interface ApiKeyInfo {
 // CONSTANTS
 // =====================================================================
 
+const STORAGE_KEY_TOKEN = 'selfbase_playground_token'
+const STORAGE_KEY_TOKEN_INFO = 'selfbase_playground_token_info'
+const STORAGE_KEY_API_KEY = 'selfbase_playground_api_key'
+
+function readFromLocalStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : fallback
+  } catch { return fallback }
+}
+
+function writeToLocalStorage(key: string, value: unknown) {
+  if (typeof window === 'undefined') return
+  try {
+    if (value === null || value === undefined) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, JSON.stringify(value))
+    }
+  } catch { /* ignore */ }
+}
+
 const methodColors: Record<HttpMethod, string> = {
   GET: 'bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-400 dark:border-emerald-900',
   POST: 'bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-900',
@@ -98,9 +124,9 @@ const ENDPOINT_TEMPLATES: EndpointTemplate[] = [
     category: '🔐 Auth API',
     method: 'POST',
     path: '/api/v1/auth/login',
-    description: 'Login with API key to get a short-lived token',
+    description: 'Login with API key → get short-lived token',
     requiresAuth: false,
-    defaultBody: '{\n  // Send your API key in Authorization header\n  // Authorization: Bearer sb_live_your_api_key\n}',
+    defaultBody: '',
     defaultHeaders: [{ key: 'Authorization', value: 'Bearer sb_live_your_api_key_here' }],
   },
   {
@@ -121,58 +147,163 @@ const ENDPOINT_TEMPLATES: EndpointTemplate[] = [
     requiresAuth: true,
     defaultHeaders: [{ key: 'Authorization', value: 'Bearer your_token_here' }],
   },
-  // ====== Data API (for external apps) ======
+
+  // ====== Sync API (Local-First / v1) ======
   {
-    id: 'v1-data-query',
-    category: '📱 Data API',
+    id: 'v1-data-fetch',
+    category: '🔄 Sync API (Local-First)',
     method: 'GET',
-    path: '/api/tables',
-    description: 'List all tables (external app)',
+    path: '/api/v1/data/{table}',
+    description: 'Fetch table data with version info & ETag',
     requiresAuth: true,
-    defaultParams: [{ key: 'limit', value: '50' }],
+    defaultParams: [
+      { key: 'limit', value: '1000' },
+      { key: 'offset', value: '0' },
+      { key: 'since', value: '' },
+    ],
+    defaultHeaders: [{ key: 'If-None-Match', value: '' }],
   },
   {
-    id: 'v1-data-rows',
-    category: '📱 Data API',
+    id: 'v1-version-check',
+    category: '🔄 Sync API (Local-First)',
+    method: 'GET',
+    path: '/api/v1/version/{table}',
+    description: 'HEAD check — returns ETag + row count headers only',
+    requiresAuth: true,
+    defaultHeaders: [{ key: 'If-None-Match', value: '' }],
+  },
+
+  // ====== Data API — Tables ======
+  {
+    id: 'data-tables-list',
+    category: '📊 Data — Tables',
+    method: 'GET',
+    path: '/api/tables',
+    description: 'List all tables',
+    requiresAuth: true,
+    defaultParams: [{ key: 'search', value: '' }],
+  },
+  {
+    id: 'data-tables-get',
+    category: '📊 Data — Tables',
+    method: 'GET',
+    path: '/api/tables/{id}',
+    description: 'Get a single table by ID',
+    requiresAuth: true,
+  },
+  {
+    id: 'data-tables-create',
+    category: '📊 Data — Tables',
+    method: 'POST',
+    path: '/api/tables',
+    description: 'Create a new table with columns',
+    requiresAuth: true,
+    defaultBody: '{\n  "name": "items",\n  "displayName": "Items",\n  "columns": [\n    { "name": "title", "type": "TEXT", "nullable": false },\n    { "name": "qty", "type": "INTEGER" },\n    { "name": "price", "type": "REAL" },\n    { "name": "active", "type": "BOOLEAN" }\n  ]\n}',
+  },
+  {
+    id: 'data-tables-update',
+    category: '📊 Data — Tables',
+    method: 'PUT',
+    path: '/api/tables/{id}',
+    description: 'Update table schema / metadata',
+    requiresAuth: true,
+    defaultBody: '{\n  "displayName": "Updated Name",\n  "columns": [\n    { "name": "title", "type": "TEXT" },\n    { "name": "qty", "type": "INTEGER" },\n    { "name": "tags", "type": "TEXT", "nullable": true }\n  ]\n}',
+  },
+  {
+    id: 'data-tables-delete',
+    category: '📊 Data — Tables',
+    method: 'DELETE',
+    path: '/api/tables/{id}',
+    description: 'Delete a table and all its data',
+    requiresAuth: true,
+  },
+  {
+    id: 'data-tables-columns',
+    category: '📊 Data — Tables',
+    method: 'GET',
+    path: '/api/tables/{id}/columns',
+    description: 'Get table column definitions',
+    requiresAuth: true,
+  },
+  {
+    id: 'data-tables-version',
+    category: '📊 Data — Tables',
+    method: 'GET',
+    path: '/api/tables/{id}/version',
+    description: 'Get table version hash',
+    requiresAuth: true,
+  },
+
+  // ====== Data API — Rows ======
+  {
+    id: 'data-rows-list',
+    category: '📋 Data — Rows',
     method: 'GET',
     path: '/api/tables/{id}/rows',
-    description: 'Query rows from a specific table',
+    description: 'Query rows with pagination & search',
     requiresAuth: true,
     defaultParams: [
       { key: 'page', value: '1' },
       { key: 'pageSize', value: '50' },
       { key: 'search', value: '' },
+      { key: 'sortField', value: '' },
+      { key: 'sortOrder', value: 'desc' },
     ],
   },
   {
-    id: 'v1-data-insert',
-    category: '📱 Data API',
+    id: 'data-rows-create',
+    category: '📋 Data — Rows',
     method: 'POST',
     path: '/api/tables/{id}/rows',
-    description: 'Insert a new row into a table',
+    description: 'Insert a new row',
     requiresAuth: true,
-    defaultBody: '{\n  "data": {\n    "name": "Example",\n    "value": 42\n  }\n}',
+    defaultBody: '{\n  "data": {\n    "title": "New Item",\n    "qty": 10,\n    "price": 9.99,\n    "active": true\n  }\n}',
   },
   {
-    id: 'v1-data-update',
-    category: '📱 Data API',
+    id: 'data-rows-get',
+    category: '📋 Data — Rows',
+    method: 'GET',
+    path: '/api/tables/{id}/rows/{rowId}',
+    description: 'Get a single row by ID',
+    requiresAuth: true,
+  },
+  {
+    id: 'data-rows-update',
+    category: '📋 Data — Rows',
     method: 'PUT',
     path: '/api/tables/{id}/rows/{rowId}',
     description: 'Update an existing row',
     requiresAuth: true,
-    defaultBody: '{\n  "data": {\n    "name": "Updated"\n  }\n}',
+    defaultBody: '{\n  "data": {\n    "title": "Updated Item",\n    "qty": 20\n  }\n}',
   },
   {
-    id: 'v1-data-delete',
-    category: '📱 Data API',
+    id: 'data-rows-delete',
+    category: '📋 Data — Rows',
     method: 'DELETE',
     path: '/api/tables/{id}/rows/{rowId}',
     description: 'Delete a row by ID',
     requiresAuth: true,
   },
-  // ====== Function API ======
+
+  // ====== Functions ======
   {
-    id: 'v1-function-run',
+    id: 'functions-list',
+    category: '⚡ Functions',
+    method: 'GET',
+    path: '/api/functions',
+    description: 'List all serverless functions',
+    requiresAuth: true,
+  },
+  {
+    id: 'functions-get',
+    category: '⚡ Functions',
+    method: 'GET',
+    path: '/api/functions/{id}',
+    description: 'Get function details',
+    requiresAuth: true,
+  },
+  {
+    id: 'functions-run',
     category: '⚡ Functions',
     method: 'POST',
     path: '/api/functions/{id}/run',
@@ -180,54 +311,538 @@ const ENDPOINT_TEMPLATES: EndpointTemplate[] = [
     requiresAuth: true,
     defaultBody: '{\n  "input": {\n    "key": "value"\n  }\n}',
   },
-  // ====== Admin API (requires admin session) ======
   {
-    id: 'admin-tables-list',
-    category: '🔧 Admin API',
+    id: 'functions-runs',
+    category: '⚡ Functions',
     method: 'GET',
-    path: '/api/tables',
-    description: 'List all tables (admin)',
+    path: '/api/functions/runs',
+    description: 'List recent function execution runs',
     requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
   },
   {
-    id: 'admin-tables-create',
-    category: '🔧 Admin API',
+    id: 'functions-create',
+    category: '⚡ Functions',
     method: 'POST',
-    path: '/api/tables',
-    description: 'Create a new table',
+    path: '/api/functions',
+    description: 'Create a new function',
     requiresAuth: true,
-    defaultBody: '{\n  "name": "items",\n  "displayName": "Items",\n  "columns": [\n    { "name": "title", "type": "TEXT", "nullable": false },\n    { "name": "qty", "type": "INTEGER" }\n  ]\n}',
+    defaultBody: '{\n  "name": "myFunction",\n  "description": "A sample function",\n  "code": "export default async function(input) { return { result: input }; }",\n  "runtime": "javascript"\n}',
   },
   {
-    id: 'admin-pipelines-list',
-    category: '🔧 Admin API',
+    id: 'functions-update',
+    category: '⚡ Functions',
+    method: 'PUT',
+    path: '/api/functions/{id}',
+    description: 'Update function code / settings',
+    requiresAuth: true,
+    defaultBody: '{\n  "code": "export default async function(input) { return { updated: true, input }; }",\n  "description": "Updated function"\n}',
+  },
+  {
+    id: 'functions-delete',
+    category: '⚡ Functions',
+    method: 'DELETE',
+    path: '/api/functions/{id}',
+    description: 'Delete a function',
+    requiresAuth: true,
+  },
+
+  // ====== Pipelines ======
+  {
+    id: 'pipelines-list',
+    category: '🔄 Pipelines',
     method: 'GET',
     path: '/api/pipelines',
-    description: 'List all pipelines',
+    description: 'List all data pipelines',
     requiresAuth: true,
   },
   {
-    id: 'admin-pipelines-run',
-    category: '🔧 Admin API',
+    id: 'pipelines-get',
+    category: '🔄 Pipelines',
+    method: 'GET',
+    path: '/api/pipelines/{id}',
+    description: 'Get pipeline details',
+    requiresAuth: true,
+  },
+  {
+    id: 'pipelines-run',
+    category: '🔄 Pipelines',
     method: 'POST',
     path: '/api/pipelines/{id}/run',
-    description: 'Trigger a pipeline run',
+    description: 'Trigger a pipeline execution',
     requiresAuth: true,
   },
   {
-    id: 'admin-functions-list',
-    category: '🔧 Admin API',
+    id: 'pipelines-preview',
+    category: '🔄 Pipelines',
+    method: 'POST',
+    path: '/api/pipelines/{id}/preview',
+    description: 'Preview pipeline output (dry-run)',
+    requiresAuth: true,
+  },
+  {
+    id: 'pipelines-runs',
+    category: '🔄 Pipelines',
     method: 'GET',
-    path: '/api/functions',
-    description: 'List all functions',
+    path: '/api/pipelines/runs',
+    description: 'List recent pipeline runs',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+  {
+    id: 'pipelines-smart-preview',
+    category: '🔄 Pipelines',
+    method: 'POST',
+    path: '/api/pipelines/smart-preview',
+    description: 'AI-powered pipeline preview',
+    requiresAuth: true,
+    defaultBody: '{\n  "source": "url_or_text",\n  "options": {}\n}',
+  },
+  {
+    id: 'pipelines-auto-create',
+    category: '🔄 Pipelines',
+    method: 'POST',
+    path: '/api/pipelines/auto-create-table',
+    description: 'Auto-create table from data schema',
+    requiresAuth: true,
+    defaultBody: '{\n  "tableName": "auto_items",\n  "sampleData": [{ "name": "Item 1", "value": 100 }]\n}',
+  },
+  {
+    id: 'pipelines-create',
+    category: '🔄 Pipelines',
+    method: 'POST',
+    path: '/api/pipelines',
+    description: 'Create a new pipeline',
+    requiresAuth: true,
+    defaultBody: '{\n  "name": "My Pipeline",\n  "source": "url",\n  "config": {}\n}',
+  },
+  {
+    id: 'pipelines-delete',
+    category: '🔄 Pipelines',
+    method: 'DELETE',
+    path: '/api/pipelines/{id}',
+    description: 'Delete a pipeline',
+    requiresAuth: true,
+  },
+
+  // ====== AI API ======
+  {
+    id: 'ai-chat',
+    category: '🤖 AI',
+    method: 'POST',
+    path: '/api/ai/chat',
+    description: 'AI chat completion',
+    requiresAuth: true,
+    defaultBody: '{\n  "messages": [\n    { "role": "user", "content": "Hello, how are you?" }\n  ],\n  "model": "default"\n}',
+  },
+  {
+    id: 'ai-embed',
+    category: '🤖 AI',
+    method: 'POST',
+    path: '/api/ai/embed',
+    description: 'Generate text embeddings',
+    requiresAuth: true,
+    defaultBody: '{\n  "texts": ["Hello world", "Another text"]\n}',
+  },
+  {
+    id: 'ai-rag',
+    category: '🤖 AI',
+    method: 'POST',
+    path: '/api/ai/rag',
+    description: 'RAG query — retrieve + generate',
+    requiresAuth: true,
+    defaultBody: '{\n  "query": "What is SelfBase?",\n  "topK": 5\n}',
+  },
+  {
+    id: 'ai-search',
+    category: '🤖 AI',
+    method: 'POST',
+    path: '/api/ai/search',
+    description: 'AI-powered web search',
+    requiresAuth: true,
+    defaultBody: '{\n  "query": "latest news about AI",\n  "numResults": 5\n}',
+  },
+  {
+    id: 'ai-llm-configs',
+    category: '🤖 AI',
+    method: 'GET',
+    path: '/api/ai/llm-config',
+    description: 'List LLM configurations',
     requiresAuth: true,
   },
   {
-    id: 'admin-monitoring',
-    category: '🔧 Admin API',
+    id: 'ai-calls',
+    category: '🤖 AI',
+    method: 'GET',
+    path: '/api/ai/calls',
+    description: 'List recent AI API call logs',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+
+  // ====== Storage ======
+  {
+    id: 'storage-list',
+    category: '💾 Storage',
+    method: 'GET',
+    path: '/api/storage',
+    description: 'List stored files',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '50' }],
+  },
+  {
+    id: 'storage-get',
+    category: '💾 Storage',
+    method: 'GET',
+    path: '/api/storage/{id}',
+    description: 'Get file metadata by ID',
+    requiresAuth: true,
+  },
+  {
+    id: 'storage-upload-url',
+    category: '💾 Storage',
+    method: 'POST',
+    path: '/api/storage/upload-url',
+    description: 'Get a presigned upload URL',
+    requiresAuth: true,
+    defaultBody: '{\n  "fileName": "photo.jpg",\n  "contentType": "image/jpeg",\n  "sizeBytes": 102400\n}',
+  },
+  {
+    id: 'storage-delete',
+    category: '💾 Storage',
+    method: 'DELETE',
+    path: '/api/storage/{id}',
+    description: 'Delete a stored file',
+    requiresAuth: true,
+  },
+
+  // ====== Scrapers ======
+  {
+    id: 'scrapers-list',
+    category: '🌐 Scrapers',
+    method: 'GET',
+    path: '/api/scrapers',
+    description: 'List all scrapers',
+    requiresAuth: true,
+  },
+  {
+    id: 'scrapers-get',
+    category: '🌐 Scrapers',
+    method: 'GET',
+    path: '/api/scrapers/{id}',
+    description: 'Get scraper details',
+    requiresAuth: true,
+  },
+  {
+    id: 'scrapers-run',
+    category: '🌐 Scrapers',
+    method: 'POST',
+    path: '/api/scrapers/{id}/run',
+    description: 'Trigger a scraper run',
+    requiresAuth: true,
+  },
+  {
+    id: 'scrapers-preview',
+    category: '🌐 Scrapers',
+    method: 'POST',
+    path: '/api/scrapers/{id}/preview',
+    description: 'Preview scraper output',
+    requiresAuth: true,
+  },
+  {
+    id: 'scrapers-runs',
+    category: '🌐 Scrapers',
+    method: 'GET',
+    path: '/api/scrapers/runs',
+    description: 'List recent scraper runs',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+  {
+    id: 'scrapers-create',
+    category: '🌐 Scrapers',
+    method: 'POST',
+    path: '/api/scrapers',
+    description: 'Create a new scraper',
+    requiresAuth: true,
+    defaultBody: '{\n  "name": "My Scraper",\n  "url": "https://example.com",\n  "config": {}\n}',
+  },
+  {
+    id: 'scrapers-delete',
+    category: '🌐 Scrapers',
+    method: 'DELETE',
+    path: '/api/scrapers/{id}',
+    description: 'Delete a scraper',
+    requiresAuth: true,
+  },
+
+  // ====== Monitoring ======
+  {
+    id: 'monitoring-load',
+    category: '📈 Monitoring',
     method: 'GET',
     path: '/api/monitoring/load',
     description: 'Server load snapshot',
+    requiresAuth: true,
+  },
+  {
+    id: 'monitoring-metrics',
+    category: '📈 Monitoring',
+    method: 'GET',
+    path: '/api/monitoring/metrics',
+    description: 'System metrics overview',
+    requiresAuth: true,
+  },
+  {
+    id: 'monitoring-uptime',
+    category: '📈 Monitoring',
+    method: 'GET',
+    path: '/api/monitoring/uptime',
+    description: 'Uptime statistics',
+    requiresAuth: true,
+  },
+  {
+    id: 'monitoring-alerts',
+    category: '📈 Monitoring',
+    method: 'GET',
+    path: '/api/monitoring/alerts',
+    description: 'List monitoring alerts',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+  {
+    id: 'monitoring-alert-events',
+    category: '📈 Monitoring',
+    method: 'GET',
+    path: '/api/monitoring/alert-events',
+    description: 'List alert event history',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+  {
+    id: 'monitoring-heartbeat',
+    category: '📈 Monitoring',
+    method: 'POST',
+    path: '/api/monitoring/heartbeat',
+    description: 'Send a heartbeat ping',
+    requiresAuth: true,
+  },
+
+  // ====== Queue ======
+  {
+    id: 'queue-list',
+    category: '📨 Queue',
+    method: 'GET',
+    path: '/api/queue',
+    description: 'List pending queue items',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+  {
+    id: 'queue-get',
+    category: '📨 Queue',
+    method: 'GET',
+    path: '/api/queue/{id}',
+    description: 'Get a queue item by ID',
+    requiresAuth: true,
+  },
+  {
+    id: 'queue-drain',
+    category: '📨 Queue',
+    method: 'POST',
+    path: '/api/queue/drain',
+    description: 'Process all pending queue items',
+    requiresAuth: true,
+  },
+
+  // ====== Logs ======
+  {
+    id: 'logs-list',
+    category: '📝 Logs',
+    method: 'GET',
+    path: '/api/logs',
+    description: 'View system logs',
+    requiresAuth: true,
+    defaultParams: [
+      { key: 'limit', value: '50' },
+      { key: 'level', value: '' },
+      { key: 'source', value: '' },
+    ],
+  },
+  {
+    id: 'logs-source-errors',
+    category: '📝 Logs',
+    method: 'GET',
+    path: '/api/logs/source-errors',
+    description: 'View data source error logs',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+  {
+    id: 'logs-function-errors',
+    category: '📝 Logs',
+    method: 'GET',
+    path: '/api/logs/function-errors',
+    description: 'View function execution error logs',
+    requiresAuth: true,
+    defaultParams: [{ key: 'limit', value: '20' }],
+  },
+
+  // ====== Import/Export ======
+  {
+    id: 'import-tables',
+    category: '📦 Import / Export',
+    method: 'POST',
+    path: '/api/import/tables',
+    description: 'Import table definitions',
+    requiresAuth: true,
+    defaultBody: '{\n  "data": []\n}',
+  },
+  {
+    id: 'import-functions',
+    category: '📦 Import / Export',
+    method: 'POST',
+    path: '/api/import/functions',
+    description: 'Import function definitions',
+    requiresAuth: true,
+    defaultBody: '{\n  "data": []\n}',
+  },
+  {
+    id: 'import-pipelines',
+    category: '📦 Import / Export',
+    method: 'POST',
+    path: '/api/import/pipelines',
+    description: 'Import pipeline definitions',
+    requiresAuth: true,
+    defaultBody: '{\n  "data": []\n}',
+  },
+  {
+    id: 'import-scrapers',
+    category: '📦 Import / Export',
+    method: 'POST',
+    path: '/api/import/scrapers',
+    description: 'Import scraper definitions',
+    requiresAuth: true,
+    defaultBody: '{\n  "data": []\n}',
+  },
+  {
+    id: 'export-tables',
+    category: '📦 Import / Export',
+    method: 'GET',
+    path: '/api/export/tables',
+    description: 'Export all table definitions',
+    requiresAuth: true,
+  },
+  {
+    id: 'export-functions',
+    category: '📦 Import / Export',
+    method: 'GET',
+    path: '/api/export/functions',
+    description: 'Export all function definitions',
+    requiresAuth: true,
+  },
+  {
+    id: 'export-pipelines',
+    category: '📦 Import / Export',
+    method: 'GET',
+    path: '/api/export/pipelines',
+    description: 'Export all pipeline definitions',
+    requiresAuth: true,
+  },
+  {
+    id: 'export-scrapers',
+    category: '📦 Import / Export',
+    method: 'GET',
+    path: '/api/export/scrapers',
+    description: 'Export all scraper definitions',
+    requiresAuth: true,
+  },
+
+  // ====== Config ======
+  {
+    id: 'config-get',
+    category: '⚙️ Config',
+    method: 'GET',
+    path: '/api/config',
+    description: 'Get all system configuration',
+    requiresAuth: true,
+  },
+  {
+    id: 'config-get-key',
+    category: '⚙️ Config',
+    method: 'GET',
+    path: '/api/config/{key}',
+    description: 'Get a specific config value',
+    requiresAuth: true,
+  },
+
+  // ====== API Key Management ======
+  {
+    id: 'apikeys-list',
+    category: '🔑 API Keys',
+    method: 'GET',
+    path: '/api/api-keys',
+    description: 'List all API keys',
+    requiresAuth: true,
+  },
+  {
+    id: 'apikeys-create',
+    category: '🔑 API Keys',
+    method: 'POST',
+    path: '/api/api-keys',
+    description: 'Create a new API key',
+    requiresAuth: true,
+    defaultBody: '{\n  "name": "My App",\n  "permissions": "read,write"\n}',
+  },
+  {
+    id: 'apikeys-revoke',
+    category: '🔑 API Keys',
+    method: 'DELETE',
+    path: '/api/api-keys/{id}',
+    description: 'Revoke an API key',
+    requiresAuth: true,
+  },
+
+  // ====== Auth Admin ======
+  {
+    id: 'auth-users',
+    category: '👤 Auth / Users',
+    method: 'GET',
+    path: '/api/auth/users',
+    description: 'List all users',
+    requiresAuth: true,
+  },
+  {
+    id: 'auth-user-get',
+    category: '👤 Auth / Users',
+    method: 'GET',
+    path: '/api/auth/users/{id}',
+    description: 'Get user details',
+    requiresAuth: true,
+  },
+  {
+    id: 'auth-sessions',
+    category: '👤 Auth / Users',
+    method: 'GET',
+    path: '/api/auth/sessions',
+    description: 'List active sessions',
+    requiresAuth: true,
+  },
+  {
+    id: 'auth-change-password',
+    category: '👤 Auth / Users',
+    method: 'POST',
+    path: '/api/auth/change-password',
+    description: 'Change user password',
+    requiresAuth: true,
+    defaultBody: '{\n  "currentPassword": "old",\n  "newPassword": "newSecurePassword123"\n}',
+  },
+  {
+    id: 'auth-admin-apikeys',
+    category: '👤 Auth / Users',
+    method: 'GET',
+    path: '/api/auth/api-keys',
+    description: 'List auth API keys (admin view)',
     requiresAuth: true,
   },
 ]
@@ -297,7 +912,11 @@ function KvEditor({ rows, onChange, keyPlaceholder = 'key', valuePlaceholder = '
 // AUTH FLOW SECTION
 // =====================================================================
 
-function AuthFlowSection({ onTokenObtained }: { onTokenObtained: (token: string) => void }) {
+function AuthFlowSection({ onTokenObtained, initialToken, initialTokenInfo }: {
+  onTokenObtained: (token: string) => void
+  initialToken: string | null
+  initialTokenInfo: { expiresAt: string; permissions: string[]; app: { name: string } } | null
+}) {
   const { toast } = useToast()
   const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([])
   const [creating, setCreating] = useState(false)
@@ -305,10 +924,10 @@ function AuthFlowSection({ onTokenObtained }: { onTokenObtained: (token: string)
   const [newKeyPerms, setNewKeyPerms] = useState('read,write')
   const [createdKey, setCreatedKey] = useState<string | null>(null)
   const [showCreatedKey, setShowCreatedKey] = useState(false)
-  const [activeToken, setActiveToken] = useState<string | null>(null)
-  const [tokenInfo, setTokenInfo] = useState<{ expiresAt: string; permissions: string[]; app: { name: string } } | null>(null)
+  const [activeToken, setActiveToken] = useState<string | null>(initialToken)
+  const [tokenInfo, setTokenInfo] = useState<{ expiresAt: string; permissions: string[]; app: { name: string } } | null>(initialTokenInfo)
   const [loginLoading, setLoginLoading] = useState(false)
-  const [selectedApiKey, setSelectedApiKey] = useState<string>('')
+  const [selectedApiKey, setSelectedApiKey] = useState<string>(readFromLocalStorage<string>(STORAGE_KEY_API_KEY, ''))
 
   useEffect(() => { loadApiKeys() }, [])
 
@@ -366,11 +985,15 @@ function AuthFlowSection({ onTokenObtained }: { onTokenObtained: (token: string)
       const data = await res.json()
       if (res.ok && data.token) {
         setActiveToken(data.token)
-        setTokenInfo({
+        const info = {
           expiresAt: data.expiresAt,
           permissions: data.permissions,
           app: data.app,
-        })
+        }
+        setTokenInfo(info)
+        writeToLocalStorage(STORAGE_KEY_TOKEN, data.token)
+        writeToLocalStorage(STORAGE_KEY_TOKEN_INFO, info)
+        writeToLocalStorage(STORAGE_KEY_API_KEY, selectedApiKey)
         onTokenObtained(data.token)
         toast({ title: 'Token obtained!', description: `Valid for ${Math.round(data.expiresIn / 60)} minutes` })
       } else {
@@ -397,6 +1020,8 @@ function AuthFlowSection({ onTokenObtained }: { onTokenObtained: (token: string)
         toast({ title: 'Token invalid', description: data.error, variant: 'destructive' })
         setActiveToken(null)
         setTokenInfo(null)
+        writeToLocalStorage(STORAGE_KEY_TOKEN, null)
+        writeToLocalStorage(STORAGE_KEY_TOKEN_INFO, null)
       }
     } catch {
       toast({ title: 'Validation failed', variant: 'destructive' })
@@ -412,6 +1037,8 @@ function AuthFlowSection({ onTokenObtained }: { onTokenObtained: (token: string)
       })
       setActiveToken(null)
       setTokenInfo(null)
+      writeToLocalStorage(STORAGE_KEY_TOKEN, null)
+      writeToLocalStorage(STORAGE_KEY_TOKEN_INFO, null)
       toast({ title: 'Token revoked' })
     } catch { /* ignore */ }
   }
@@ -715,8 +1342,30 @@ export function PlaygroundView() {
   const [search, setSearch] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
 
-  // Auth token for playground requests
+  // Auth token for playground requests — persisted in localStorage
   const [authToken, setAuthToken] = useState<string | null>(null)
+  const [tokenInfo, setTokenInfo] = useState<{ expiresAt: string; permissions: string[]; app: { name: string } } | null>(null)
+  const [hydrated, setHydrated] = useState(false)
+
+  // Hydrate from localStorage on mount
+  useEffect(() => {
+    const storedToken = readFromLocalStorage<string | null>(STORAGE_KEY_TOKEN, null)
+    const storedInfo = readFromLocalStorage<{ expiresAt: string; permissions: string[]; app: { name: string } } | null>(STORAGE_KEY_TOKEN_INFO, null)
+    if (storedToken) {
+      setAuthToken(storedToken)
+      setTokenInfo(storedInfo)
+      // Auto-switch to API tester tab if already authenticated
+      setActivePlaygroundTab('api')
+    }
+    setHydrated(true)
+  }, [])
+
+  const clearAuthToken = useCallback(() => {
+    setAuthToken(null)
+    setTokenInfo(null)
+    writeToLocalStorage(STORAGE_KEY_TOKEN, null)
+    writeToLocalStorage(STORAGE_KEY_TOKEN_INFO, null)
+  }, [])
 
   const filteredTemplates = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -818,13 +1467,21 @@ export function PlaygroundView() {
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Terminal className="h-6 w-6 text-emerald-600" />
             API Playground
+            <Badge variant="outline" className="text-[10px] font-mono">{ENDPOINT_TEMPLATES.length} endpoints</Badge>
           </h1>
           <p className="text-sm text-muted-foreground">Test API endpoints and manage authentication for external apps</p>
         </div>
         {authToken && (
-          <Badge className="gap-1.5 bg-emerald-100 text-emerald-700 border-emerald-200 w-fit">
-            <Lock className="h-3 w-3" /> Authenticated
-          </Badge>
+          <div className="flex items-center gap-2">
+            {tokenInfo && (
+              <span className="text-xs text-muted-foreground">
+                {tokenInfo.app.name} · Expires {new Date(tokenInfo.expiresAt).toLocaleTimeString()}
+              </span>
+            )}
+            <Badge className="gap-1.5 bg-emerald-100 text-emerald-700 border-emerald-200 w-fit">
+              <CheckCircle2 className="h-3 w-3" /> Authenticated
+            </Badge>
+          </div>
         )}
       </div>
 
@@ -842,11 +1499,15 @@ export function PlaygroundView() {
         </TabsList>
 
         <TabsContent value="auth" className="mt-4">
-          <AuthFlowSection onTokenObtained={token => { setAuthToken(token); setActivePlaygroundTab('api') }} />
+          <AuthFlowSection
+            onTokenObtained={token => { setAuthToken(token); setActivePlaygroundTab('api') }}
+            initialToken={authToken}
+            initialTokenInfo={tokenInfo}
+          />
         </TabsContent>
 
         <TabsContent value="api" className="mt-4">
-          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
             {/* Endpoint Library */}
             <Card className="lg:max-h-[calc(100vh-220px)] flex flex-col">
               <CardHeader className="pb-2 shrink-0">
@@ -858,15 +1519,21 @@ export function PlaygroundView() {
               <CardContent className="flex-1 overflow-y-auto p-2 pt-0 space-y-1">
                 {groupedTemplates.map(([category, templates]) => (
                   <div key={category}>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5">{category}</p>
+                    <div className="flex items-center justify-between px-2 py-1.5">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{category}</p>
+                      <Badge variant="secondary" className="text-[8px] h-4 px-1.5 font-mono">{templates.length}</Badge>
+                    </div>
                     {templates.map(t => (
                       <button
                         key={t.id}
-                        className={`w-full text-left rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors flex items-center gap-2 ${selectedTemplate?.id === t.id ? 'bg-accent' : ''}`}
+                        className={`w-full text-left rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors flex items-center gap-2 group ${selectedTemplate?.id === t.id ? 'bg-accent ring-1 ring-primary/20' : ''}`}
                         onClick={() => loadTemplate(t)}
                       >
                         <MethodBadge method={t.method} className="shrink-0 text-[8px] px-1.5" />
-                        <span className="truncate flex-1">{t.description}</span>
+                        <div className="flex-1 min-w-0">
+                          <span className="truncate block">{t.description}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground/70 truncate block">{t.path}</span>
+                        </div>
                         {t.requiresAuth && <Lock className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
                       </button>
                     ))}
@@ -906,9 +1573,9 @@ export function PlaygroundView() {
                 <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/20">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                   <span className="text-xs text-emerald-700 dark:text-emerald-400">
-                    Using authenticated token · <button className="underline" onClick={() => { navigator.clipboard.writeText(authToken); toast({ title: 'Token copied' }) }}>Copy token</button>
+                    Authenticated{tokenInfo ? ` as ${tokenInfo.app.name} · Expires ${new Date(tokenInfo.expiresAt).toLocaleTimeString()}` : ''} · <button className="underline" onClick={() => { navigator.clipboard.writeText(authToken); toast({ title: 'Token copied' }) }}>Copy token</button>
                   </span>
-                  <Button size="sm" variant="ghost" className="ml-auto text-xs h-6" onClick={() => setAuthToken(null)}>Clear</Button>
+                  <Button size="sm" variant="ghost" className="ml-auto text-xs h-6" onClick={clearAuthToken}>Clear</Button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/20">

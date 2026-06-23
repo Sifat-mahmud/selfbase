@@ -1,0 +1,969 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useCallback, useEffect } from 'react'
+     4→import { motion, AnimatePresence } from 'framer-motion'
+     5→import {
+     6→  Terminal, Play, Copy, Plus, Trash2, Send, Clock, Search,
+     7→  ChevronDown, ChevronRight, CheckCircle2, XCircle, AlertTriangle,
+     8→  Loader2, RotateCcw, FileJson, ArrowDownToLine, Hash, Zap, Activity,
+     9→  Gauge, Key, Shield, Smartphone, ArrowRight, Eye, EyeOff, RefreshCw,
+    10→  ExternalLink, Globe, Code2, Lock, Unlock,
+    11→} from 'lucide-react'
+    12→import {
+    13→  Card, CardContent, CardDescription, CardHeader, CardTitle,
+    14→} from '@/components/ui/card'
+    15→import { Button } from '@/components/ui/button'
+    16→import { Input } from '@/components/ui/input'
+    17→import { Textarea } from '@/components/ui/textarea'
+    18→import { Badge } from '@/components/ui/badge'
+    19→import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+    20→import {
+    21→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    22→} from '@/components/ui/select'
+    23→import {
+    24→  Collapsible, CollapsibleContent, CollapsibleTrigger,
+    25→} from '@/components/ui/collapsible'
+    26→import { Separator } from '@/components/ui/separator'
+    27→import { useToast } from '@/hooks/use-toast'
+    28→import { apiGet, apiPost, apiDelete } from '@/lib/api-client'
+    29→
+    30→// =====================================================================
+    31→// TYPES
+    32→// =====================================================================
+    33→
+    34→type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+    35→
+    36→interface EndpointTemplate {
+    37→  id: string
+    38→  category: string
+    39→  method: HttpMethod
+    40→  path: string
+    41→  description: string
+    42→  requiresAuth: boolean
+    43→  defaultBody?: string
+    44→  defaultParams?: Array<{ key: string; value: string }>
+    45→  defaultHeaders?: Array<{ key: string; value: string }>
+    46→}
+    47→
+    48→interface KeyValueRow {
+    49→  id: string
+    50→  key: string
+    51→  value: string
+    52→}
+    53→
+    54→interface ResponseData {
+    55→  status: number
+    56→  statusText: string
+    57→  headers: Record<string, string>
+    58→  body: string
+    59→  durationMs: number
+    60→  sizeBytes: number
+    61→  ok: boolean
+    62→}
+    63→
+    64→interface HistoryEntry {
+    65→  status: number
+    66→  durationMs: number
+    67→  timestamp: number
+    68→  ok: boolean
+    69→}
+    70→
+    71→interface ApiKeyInfo {
+    72→  id: string
+    73→  name: string
+    74→  prefix: string
+    75→  permissions: string
+    76→  isActive: boolean
+    77→  lastUsedAt: string | null
+    78→  expiresAt: string | null
+    79→  createdAt: string
+    80→}
+    81→
+    82→// =====================================================================
+    83→// CONSTANTS
+    84→// =====================================================================
+    85→
+    86→const methodColors: Record<HttpMethod, string> = {
+    87→  GET: 'bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-400 dark:border-emerald-900',
+    88→  POST: 'bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-900',
+    89→  PUT: 'bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-400 dark:border-amber-900',
+    90→  DELETE: 'bg-red-500/10 text-red-700 border-red-200 dark:text-red-400 dark:border-red-900',
+    91→  PATCH: 'bg-purple-500/10 text-purple-700 border-purple-200 dark:text-purple-400 dark:border-purple-900',
+    92→}
+    93→
+    94→const ENDPOINT_TEMPLATES: EndpointTemplate[] = [
+    95→  // ====== Auth API (for external apps) ======
+    96→  {
+    97→    id: 'v1-auth-login',
+    98→    category: '🔐 Auth API',
+    99→    method: 'POST',
+   100→    path: '/api/v1/auth/login',
+   101→    description: 'Login with API key to get a short-lived token',
+   102→    requiresAuth: false,
+   103→    defaultBody: '{\n  // Send your API key in Authorization header\n  // Authorization: Bearer sb_live_your_api_key\n}',
+   104→    defaultHeaders: [{ key: 'Authorization', value: 'Bearer sb_live_your_api_key_here' }],
+   105→  },
+   106→  {
+   107→    id: 'v1-auth-validate',
+   108→    category: '🔐 Auth API',
+   109→    method: 'POST',
+   110→    path: '/api/v1/auth/validate',
+   111→    description: 'Validate if your token is still active',
+   112→    requiresAuth: true,
+   113→    defaultHeaders: [{ key: 'Authorization', value: 'Bearer your_token_here' }],
+   114→  },
+   115→  {
+   116→    id: 'v1-auth-logout',
+   117→    category: '🔐 Auth API',
+   118→    method: 'POST',
+   119→    path: '/api/v1/auth/logout',
+   120→    description: 'Revoke an active token',
+   121→    requiresAuth: true,
+   122→    defaultHeaders: [{ key: 'Authorization', value: 'Bearer your_token_here' }],
+   123→  },
+   124→  // ====== Data API (for external apps) ======
+   125→  {
+   126→    id: 'v1-data-query',
+   127→    category: '📱 Data API',
+   128→    method: 'GET',
+   129→    path: '/api/tables',
+   130→    description: 'List all tables (external app)',
+   131→    requiresAuth: true,
+   132→    defaultParams: [{ key: 'limit', value: '50' }],
+   133→  },
+   134→  {
+   135→    id: 'v1-data-rows',
+   136→    category: '📱 Data API',
+   137→    method: 'GET',
+   138→    path: '/api/tables/{id}/rows',
+   139→    description: 'Query rows from a specific table',
+   140→    requiresAuth: true,
+   141→    defaultParams: [
+   142→      { key: 'page', value: '1' },
+   143→      { key: 'pageSize', value: '50' },
+   144→      { key: 'search', value: '' },
+   145→    ],
+   146→  },
+   147→  {
+   148→    id: 'v1-data-insert',
+   149→    category: '📱 Data API',
+   150→    method: 'POST',
+   151→    path: '/api/tables/{id}/rows',
+   152→    description: 'Insert a new row into a table',
+   153→    requiresAuth: true,
+   154→    defaultBody: '{\n  "data": {\n    "name": "Example",\n    "value": 42\n  }\n}',
+   155→  },
+   156→  {
+   157→    id: 'v1-data-update',
+   158→    category: '📱 Data API',
+   159→    method: 'PUT',
+   160→    path: '/api/tables/{id}/rows/{rowId}',
+   161→    description: 'Update an existing row',
+   162→    requiresAuth: true,
+   163→    defaultBody: '{\n  "data": {\n    "name": "Updated"\n  }\n}',
+   164→  },
+   165→  {
+   166→    id: 'v1-data-delete',
+   167→    category: '📱 Data API',
+   168→    method: 'DELETE',
+   169→    path: '/api/tables/{id}/rows/{rowId}',
+   170→    description: 'Delete a row by ID',
+   171→    requiresAuth: true,
+   172→  },
+   173→  // ====== Function API ======
+   174→  {
+   175→    id: 'v1-function-run',
+   176→    category: '⚡ Functions',
+   177→    method: 'POST',
+   178→    path: '/api/functions/{id}/run',
+   179→    description: 'Invoke a serverless function',
+   180→    requiresAuth: true,
+   181→    defaultBody: '{\n  "input": {\n    "key": "value"\n  }\n}',
+   182→  },
+   183→  // ====== Admin API (requires admin session) ======
+   184→  {
+   185→    id: 'admin-tables-list',
+   186→    category: '🔧 Admin API',
+   187→    method: 'GET',
+   188→    path: '/api/tables',
+   189→    description: 'List all tables (admin)',
+   190→    requiresAuth: true,
+   191→  },
+   192→  {
+   193→    id: 'admin-tables-create',
+   194→    category: '🔧 Admin API',
+   195→    method: 'POST',
+   196→    path: '/api/tables',
+   197→    description: 'Create a new table',
+   198→    requiresAuth: true,
+   199→    defaultBody: '{\n  "name": "items",\n  "displayName": "Items",\n  "columns": [\n    { "name": "title", "type": "TEXT", "nullable": false },\n    { "name": "qty", "type": "INTEGER" }\n  ]\n}',
+   200→  },
+   201→  {
+   202→    id: 'admin-pipelines-list',
+   203→    category: '🔧 Admin API',
+   204→    method: 'GET',
+   205→    path: '/api/pipelines',
+   206→    description: 'List all pipelines',
+   207→    requiresAuth: true,
+   208→  },
+   209→  {
+   210→    id: 'admin-pipelines-run',
+   211→    category: '🔧 Admin API',
+   212→    method: 'POST',
+   213→    path: '/api/pipelines/{id}/run',
+   214→    description: 'Trigger a pipeline run',
+   215→    requiresAuth: true,
+   216→  },
+   217→  {
+   218→    id: 'admin-functions-list',
+   219→    category: '🔧 Admin API',
+   220→    method: 'GET',
+   221→    path: '/api/functions',
+   222→    description: 'List all functions',
+   223→    requiresAuth: true,
+   224→  },
+   225→  {
+   226→    id: 'admin-monitoring',
+   227→    category: '🔧 Admin API',
+   228→    method: 'GET',
+   229→    path: '/api/monitoring/load',
+   230→    description: 'Server load snapshot',
+   231→    requiresAuth: true,
+   232→  },
+   233→]
+   234→
+   235→let _rowIdCounter = 0
+   236→function newRowId() { _rowIdCounter += 1; return `row-${Date.now()}-${_rowIdCounter}` }
+   237→
+   238→function toKv(arr: Array<{ key: string; value: string }> | undefined): KeyValueRow[] {
+   239→  if (!arr || arr.length === 0) return [{ id: newRowId(), key: '', value: '' }]
+   240→  return arr.map(r => ({ id: newRowId(), key: r.key, value: r.value }))
+   241→}
+   242→
+   243→// =====================================================================
+   244→// SUB-COMPONENTS
+   245→// =====================================================================
+   246→
+   247→function MethodBadge({ method, className }: { method: HttpMethod; className?: string }) {
+   248→  return (
+   249→    <span className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-[10px] font-bold tracking-wide ${methodColors[method]} ${className ?? ''}`}>
+   250→      {method}
+   251→    </span>
+   252→  )
+   253→}
+   254→
+   255→function StatusBadge({ status }: { status: number }) {
+   256→  const firstDigit = String(status).charAt(0)
+   257→  const colorMap: Record<string, string> = {
+   258→    '2': 'bg-emerald-500/10 text-emerald-700 border-emerald-200 dark:text-emerald-400 dark:border-emerald-900',
+   259→    '3': 'bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-900',
+   260→    '4': 'bg-amber-500/10 text-amber-700 border-amber-200 dark:text-amber-400 dark:border-amber-900',
+   261→    '5': 'bg-red-500/10 text-red-700 border-red-200 dark:text-red-400 dark:border-red-900',
+   262→  }
+   263→  const cls = colorMap[firstDigit] ?? 'bg-muted text-muted-foreground border-border'
+   264→  return <span className={`inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-bold ${cls}`}>{status}</span>
+   265→}
+   266→
+   267→function formatBytes(n: number) { return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1024 * 1024)).toFixed(2)} MB` }
+   268→function formatDuration(ms: number) { return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s` }
+   269→
+   270→// =====================================================================
+   271→// KEY-VALUE EDITOR
+   272→// =====================================================================
+   273→
+   274→function KvEditor({ rows, onChange, keyPlaceholder = 'key', valuePlaceholder = 'value' }: {
+   275→  rows: KeyValueRow[]; onChange: (rows: KeyValueRow[]) => void; keyPlaceholder?: string; valuePlaceholder?: string
+   276→}) {
+   277→  const updateRow = (id: string, field: 'key' | 'value', val: string) => onChange(rows.map(r => r.id === id ? { ...r, [field]: val } : r))
+   278→  const removeRow = (id: string) => onChange(rows.filter(r => r.id !== id))
+   279→  const addRow = () => onChange([...rows, { id: newRowId(), key: '', value: '' }])
+   280→
+   281→  return (
+   282→    <div className="space-y-2">
+   283→      {rows.map(row => (
+   284→        <div key={row.id} className="flex items-center gap-2">
+   285→          <Input value={row.key} onChange={e => updateRow(row.id, 'key', e.target.value)} placeholder={keyPlaceholder} className="h-8 font-mono text-xs flex-1" />
+   286→          <span className="text-muted-foreground text-xs">:</span>
+   287→          <Input value={row.value} onChange={e => updateRow(row.id, 'value', e.target.value)} placeholder={valuePlaceholder} className="h-8 font-mono text-xs flex-1" />
+   288→          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeRow(row.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+   289→        </div>
+   290→      ))}
+   291→      <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={addRow}><Plus className="h-3 w-3" />Add row</Button>
+   292→    </div>
+   293→  )
+   294→}
+   295→
+   296→// =====================================================================
+   297→// AUTH FLOW SECTION
+   298→// =====================================================================
+   299→
+   300→function AuthFlowSection({ onTokenObtained }: { onTokenObtained: (token: string) => void }) {
+   301→  const { toast } = useToast()
+   302→  const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([])
+   303→  const [creating, setCreating] = useState(false)
+   304→  const [newKeyName, setNewKeyName] = useState('')
+   305→  const [newKeyPerms, setNewKeyPerms] = useState('read,write')
+   306→  const [createdKey, setCreatedKey] = useState<string | null>(null)
+   307→  const [showCreatedKey, setShowCreatedKey] = useState(false)
+   308→  const [activeToken, setActiveToken] = useState<string | null>(null)
+   309→  const [tokenInfo, setTokenInfo] = useState<{ expiresAt: string; permissions: string[]; app: { name: string } } | null>(null)
+   310→  const [loginLoading, setLoginLoading] = useState(false)
+   311→  const [selectedApiKey, setSelectedApiKey] = useState<string>('')
+   312→
+   313→  useEffect(() => { loadApiKeys() }, [])
+   314→
+   315→  async function loadApiKeys() {
+   316→    try {
+   317→      const data = await apiGet<{ data: ApiKeyInfo[] }>('/api/api-keys')
+   318→      const list = Array.isArray(data) ? data : (data as any)?.data ?? []
+   319→      setApiKeys(list)
+   320→    } catch { /* ignore */ }
+   321→  }
+   322→
+   323→  async function createApiKey() {
+   324→    if (!newKeyName.trim()) return
+   325→    setCreating(true)
+   326→    try {
+   327→      const result = await apiPost<{ success: boolean; apiKey: { key: string } }>('/api/api-keys', {
+   328→        name: newKeyName.trim(),
+   329→        permissions: newKeyPerms,
+   330→      })
+   331→      if ((result as any).apiKey?.key) {
+   332→        setCreatedKey((result as any).apiKey.key)
+   333→        setShowCreatedKey(true)
+   334→        setNewKeyName('')
+   335→        await loadApiKeys()
+   336→        toast({ title: 'API Key created', description: 'Copy the key now — it won\'t be shown again!' })
+   337→      }
+   338→    } catch (err) {
+   339→      toast({ title: 'Failed to create key', variant: 'destructive' })
+   340→    } finally {
+   341→      setCreating(false)
+   342→    }
+   343→  }
+   344→
+   345→  async function revokeKey(id: string) {
+   346→    try {
+   347→      await apiDelete(`/api/api-keys/${id}`)
+   348→      await loadApiKeys()
+   349→      toast({ title: 'API Key revoked' })
+   350→    } catch {
+   351→      toast({ title: 'Failed to revoke key', variant: 'destructive' })
+   352→    }
+   353→  }
+   354→
+   355→  async function loginWithApiKey() {
+   356→    if (!selectedApiKey) {
+   357→      toast({ title: 'Select an API key first', variant: 'destructive' })
+   358→      return
+   359→    }
+   360→    setLoginLoading(true)
+   361→    try {
+   362→      const res = await fetch('/api/v1/auth/login', {
+   363→        method: 'POST',
+   364→        headers: { Authorization: `Bearer ${selectedApiKey}` },
+   365→      })
+   366→      const data = await res.json()
+   367→      if (res.ok && data.token) {
+   368→        setActiveToken(data.token)
+   369→        setTokenInfo({
+   370→          expiresAt: data.expiresAt,
+   371→          permissions: data.permissions,
+   372→          app: data.app,
+   373→        })
+   374→        onTokenObtained(data.token)
+   375→        toast({ title: 'Token obtained!', description: `Valid for ${Math.round(data.expiresIn / 60)} minutes` })
+   376→      } else {
+   377→        toast({ title: 'Login failed', description: data.error || 'Invalid API key', variant: 'destructive' })
+   378→      }
+   379→    } catch {
+   380→      toast({ title: 'Login failed', variant: 'destructive' })
+   381→    } finally {
+   382→      setLoginLoading(false)
+   383→    }
+   384→  }
+   385→
+   386→  async function validateToken() {
+   387→    if (!activeToken) return
+   388→    try {
+   389→      const res = await fetch('/api/v1/auth/validate', {
+   390→        method: 'POST',
+   391→        headers: { Authorization: `Bearer ${activeToken}` },
+   392→      })
+   393→      const data = await res.json()
+   394→      if (data.valid) {
+   395→        toast({ title: 'Token is valid', description: `Expires: ${new Date(data.expiresAt).toLocaleTimeString()}` })
+   396→      } else {
+   397→        toast({ title: 'Token invalid', description: data.error, variant: 'destructive' })
+   398→        setActiveToken(null)
+   399→        setTokenInfo(null)
+   400→      }
+   401→    } catch {
+   402→      toast({ title: 'Validation failed', variant: 'destructive' })
+   403→    }
+   404→  }
+   405→
+   406→  async function logoutToken() {
+   407→    if (!activeToken) return
+   408→    try {
+   409→      await fetch('/api/v1/auth/logout', {
+   410→        method: 'POST',
+   411→        headers: { Authorization: `Bearer ${activeToken}` },
+   412→      })
+   413→      setActiveToken(null)
+   414→      setTokenInfo(null)
+   415→      toast({ title: 'Token revoked' })
+   416→    } catch { /* ignore */ }
+   417→  }
+   418→
+   419→  return (
+   420→    <div className="space-y-4">
+   421→      {/* Auth Flow Diagram */}
+   422→      <Card className="border-2 border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-50/50 via-teal-50/30 to-background dark:from-emerald-950/20 dark:via-teal-950/10 dark:to-background">
+   423→        <CardHeader className="pb-3">
+   424→          <CardTitle className="text-base flex items-center gap-2">
+   425→            <Shield className="h-5 w-5 text-emerald-600" />
+   426→            API Authentication Flow
+   427→          </CardTitle>
+   428→          <CardDescription>
+   429→            How external apps (iOS, Android, web) authenticate with SelfBase
+   430→          </CardDescription>
+   431→        </CardHeader>
+   432→        <CardContent>
+   433→          {/* Visual Flow Diagram */}
+   434→          <div className="flex flex-col md:flex-row items-stretch gap-3">
+   435→            {/* Step 1 */}
+   436→            <div className="flex-1 rounded-lg border bg-background p-3 space-y-2">
+   437→              <div className="flex items-center gap-2">
+   438→                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-xs font-bold">1</div>
+   439→                <span className="text-sm font-semibold">Generate API Key</span>
+   440→              </div>
+   441→              <div className="flex items-center gap-2">
+   442→                <Smartphone className="h-4 w-4 text-muted-foreground" />
+   443→                <p className="text-xs text-muted-foreground">Create a key for your app in the dashboard below</p>
+   444→              </div>
+   445→              <div className="rounded bg-muted p-2">
+   446→                <code className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400">
+   447→                  sb_live_a1b2c3d4e5f6...
+   448→                </code>
+   449→              </div>
+   450→            </div>
+   451→
+   452→            <div className="flex items-center justify-center">
+   453→              <ArrowRight className="h-5 w-5 text-emerald-400 hidden md:block" />
+   454→              <ChevronDown className="h-5 w-5 text-emerald-400 md:hidden" />
+   455→            </div>
+   456→
+   457→            {/* Step 2 */}
+   458→            <div className="flex-1 rounded-lg border bg-background p-3 space-y-2">
+   459→              <div className="flex items-center gap-2">
+   460→                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-500 text-white text-xs font-bold">2</div>
+   461→                <span className="text-sm font-semibold">Login with API Key</span>
+   462→              </div>
+   463→              <div className="flex items-center gap-2">
+   464→                <Code2 className="h-4 w-4 text-muted-foreground" />
+   465→                <p className="text-xs text-muted-foreground">App calls <code className="text-[10px]">/api/v1/auth/login</code></p>
+   466→              </div>
+   467→              <div className="rounded bg-muted p-2">
+   468→                <code className="text-[10px] font-mono">POST /api/v1/auth/login<br/>Auth: Bearer sb_live_...</code>
+   469→              </div>
+   470→            </div>
+   471→
+   472→            <div className="flex items-center justify-center">
+   473→              <ArrowRight className="h-5 w-5 text-teal-400 hidden md:block" />
+   474→              <ChevronDown className="h-5 w-5 text-teal-400 md:hidden" />
+   475→            </div>
+   476→
+   477→            {/* Step 3 */}
+   478→            <div className="flex-1 rounded-lg border bg-background p-3 space-y-2">
+   479→              <div className="flex items-center gap-2">
+   480→                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500 text-white text-xs font-bold">3</div>
+   481→                <span className="text-sm font-semibold">Use Token for API Calls</span>
+   482→              </div>
+   483→              <div className="flex items-center gap-2">
+   484→                <Globe className="h-4 w-4 text-muted-foreground" />
+   485→                <p className="text-xs text-muted-foreground">Include token in all subsequent requests</p>
+   486→              </div>
+   487→              <div className="rounded bg-muted p-2">
+   488→                <code className="text-[10px] font-mono">GET /api/tables<br/>Auth: Bearer &lt;token&gt;</code>
+   489→              </div>
+   490→            </div>
+   491→          </div>
+   492→
+   493→          {/* Token lifecycle info */}
+   494→          <div className="mt-4 flex flex-wrap gap-3">
+   495→            <div className="flex items-center gap-1.5 text-xs">
+   496→              <Clock className="h-3.5 w-3.5 text-amber-500" />
+   497→              <span>Token valid for <strong>1 hour</strong> (configurable in Settings)</span>
+   498→            </div>
+   499→            <div className="flex items-center gap-1.5 text-xs">
+   500→              <RefreshCw className="h-3.5 w-3.5 text-teal-500" />
+   501→              <span>Re-login when token expires</span>
+   502→            </div>
+   503→            <div className="flex items-center gap-1.5 text-xs">
+   504→              <Lock className="h-3.5 w-3.5 text-emerald-500" />
+   505→              <span>API keys never expire (unless revoked)</span>
+   506→            </div>
+   507→          </div>
+   508→        </CardContent>
+   509→      </Card>
+   510→
+   511→      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+   512→        {/* API Key Management */}
+   513→        <Card>
+   514→          <CardHeader className="pb-3">
+   515→            <CardTitle className="text-base flex items-center gap-2">
+   516→              <Key className="h-4 w-4 text-emerald-600" />
+   517→              API Keys
+   518→            </CardTitle>
+   519→            <CardDescription>Manage keys for your external applications</CardDescription>
+   520→          </CardHeader>
+   521→          <CardContent className="space-y-4">
+   522→            {/* Create new key */}
+   523→            <div className="flex gap-2">
+   524→              <Input
+   525→                placeholder="App name (e.g. My iOS App)"
+   526→                value={newKeyName}
+   527→                onChange={e => setNewKeyName(e.target.value)}
+   528→                className="h-8 text-sm"
+   529→                onKeyDown={e => e.key === 'Enter' && createApiKey()}
+   530→              />
+   531→              <Select value={newKeyPerms} onValueChange={setNewKeyPerms}>
+   532→                <SelectTrigger className="h-8 w-36 text-xs">
+   533→                  <SelectValue />
+   534→                </SelectTrigger>
+   535→                <SelectContent>
+   536→                  <SelectItem value="read">Read only</SelectItem>
+   537→                  <SelectItem value="read,write">Read & Write</SelectItem>
+   538→                  <SelectItem value="read,write,admin">Full Access</SelectItem>
+   539→                </SelectContent>
+   540→              </Select>
+   541→              <Button size="sm" onClick={createApiKey} disabled={creating || !newKeyName.trim()} className="gap-1">
+   542→                {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+   543→                Create
+   544→              </Button>
+   545→            </div>
+   546→
+   547→            {/* Show created key */}
+   548→            {showCreatedKey && createdKey && (
+   549→              <div className="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-950/30 space-y-2">
+   550→                <div className="flex items-center gap-2">
+   551→                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   552→                  <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">API Key Created — Copy Now!</span>
+   553→                </div>
+   554→                <div className="flex items-center gap-2">
+   555→                  <code className="flex-1 rounded bg-white dark:bg-gray-900 p-2 text-xs font-mono break-all select-all border">
+   556→                    {createdKey}
+   557→                  </code>
+   558→                  <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(createdKey); toast({ title: 'Copied!' }) }}>
+   559→                    <Copy className="h-3.5 w-3.5" />
+   560→                  </Button>
+   561→                </div>
+   562→                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+   563→                  <AlertTriangle className="h-3 w-3" />
+   564→                  This key will not be shown again. Store it securely.
+   565→                </p>
+   566→                <Button size="sm" variant="ghost" onClick={() => { setShowCreatedKey(false); setCreatedKey(null) }}>Dismiss</Button>
+   567→              </div>
+   568→            )}
+   569→
+   570→            {/* Existing keys list */}
+   571→            <div className="space-y-2 max-h-48 overflow-y-auto">
+   572→              {apiKeys.length === 0 && (
+   573→                <p className="text-xs text-muted-foreground py-2">No API keys yet. Create one above to get started.</p>
+   574→              )}
+   575→              {apiKeys.map(key => (
+   576→                <div key={key.id} className="flex items-center justify-between rounded-lg border p-2.5">
+   577→                  <div className="flex-1 min-w-0">
+   578→                    <div className="flex items-center gap-2">
+   579→                      <span className="text-sm font-medium truncate">{key.name}</span>
+   580→                      <Badge variant="outline" className="text-[10px]">{key.prefix}...</Badge>
+   581→                      {key.isActive ? (
+   582→                        <Badge className="text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200">Active</Badge>
+   583→                      ) : (
+   584→                        <Badge variant="secondary" className="text-[10px]">Revoked</Badge>
+   585→                      )}
+   586→                    </div>
+   587→                    <p className="text-xs text-muted-foreground mt-0.5">
+   588→                      Permissions: {key.permissions} · Created {new Date(key.createdAt).toLocaleDateString()}
+   589→                    </p>
+   590→                  </div>
+   591→                  <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 shrink-0" onClick={() => revokeKey(key.id)}>
+   592→                    <Trash2 className="h-3.5 w-3.5" />
+   593→                  </Button>
+   594→                </div>
+   595→              ))}
+   596→            </div>
+   597→          </CardContent>
+   598→        </Card>
+   599→
+   600→        {/* Quick Login Test */}
+   601→        <Card>
+   602→          <CardHeader className="pb-3">
+   603→            <CardTitle className="text-base flex items-center gap-2">
+   604→              <Zap className="h-4 w-4 text-amber-500" />
+   605→              Quick Auth Test
+   606→            </CardTitle>
+   607→            <CardDescription>Test the full authentication flow right here</CardDescription>
+   608→          </CardHeader>
+   609→          <CardContent className="space-y-4">
+   610→            {/* Step 1: Enter API Key */}
+   611→            <div className="space-y-2">
+   612→              <label className="text-xs font-medium flex items-center gap-1">
+   613→                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white text-[8px] font-bold">1</span>
+   614→                Enter your API Key
+   615→              </label>
+   616→              <div className="flex gap-2">
+   617→                <Input
+   618→                  placeholder="sb_live_xxxxxxxxxxxxxxxx"
+   619→                  value={selectedApiKey}
+   620→                  onChange={e => setSelectedApiKey(e.target.value)}
+   621→                  className="h-8 text-xs font-mono"
+   622→                />
+   623→                <Button size="sm" onClick={loginWithApiKey} disabled={loginLoading || !selectedApiKey} className="gap-1">
+   624→                  {loginLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+   625→                  Login
+   626→                </Button>
+   627→              </div>
+   628→            </div>
+   629→
+   630→            {/* Step 2: Token Result */}
+   631→            {activeToken && tokenInfo ? (
+   632→              <div className="space-y-3">
+   633→                <div className="rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700 dark:bg-emerald-950/30 space-y-2">
+   634→                  <div className="flex items-center gap-2">
+   635→                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   636→                    <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Authenticated!</span>
+   637→                  </div>
+   638→                  <div className="space-y-1 text-xs">
+   639→                    <p><strong>App:</strong> {tokenInfo.app.name}</p>
+   640→                    <p><strong>Permissions:</strong> {tokenInfo.permissions.join(', ')}</p>
+   641→                    <p><strong>Expires:</strong> {new Date(tokenInfo.expiresAt).toLocaleTimeString()}</p>
+   642→                  </div>
+   643→                  <div className="flex items-center gap-2">
+   644→                    <code className="flex-1 rounded bg-white dark:bg-gray-900 p-1.5 text-[10px] font-mono break-all select-all border">
+   645→                      {activeToken}
+   646→                    </code>
+   647→                    <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(activeToken); toast({ title: 'Token copied!' }) }}>
+   648→                      <Copy className="h-3 w-3" />
+   649→                    </Button>
+   650→                  </div>
+   651→                </div>
+   652→                <div className="flex gap-2">
+   653→                  <Button size="sm" variant="outline" onClick={validateToken} className="gap-1">
+   654→                    <RefreshCw className="h-3 w-3" /> Validate
+   655→                  </Button>
+   656→                  <Button size="sm" variant="outline" onClick={logoutToken} className="gap-1 text-red-600 hover:text-red-700">
+   657→                    <Unlock className="h-3 w-3" /> Revoke Token
+   658→                  </Button>
+   659→                </div>
+   660→              </div>
+   661→            ) : (
+   662→              <div className="rounded-lg border-2 border-dashed border-muted-foreground/25 p-6 text-center">
+   663→                <Lock className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
+   664→                <p className="text-xs text-muted-foreground">Enter an API key and click Login to get a token</p>
+   665→              </div>
+   666→            )}
+   667→
+   668→            {/* Code snippet */}
+   669→            <div className="space-y-2">
+   670→              <label className="text-xs font-medium">Copy this code for your app:</label>
+   671→              <div className="rounded-lg bg-gray-950 p-3 text-xs font-mono text-gray-300 overflow-x-auto">
+   672→                <pre>{`// Swift (iOS)
+   673→let url = URL(string: "${window.location.origin}/api/v1/auth/login")!
+   674→var request = URLRequest(url: url)
+   675→request.httpMethod = "POST"
+   676→request.setValue("Bearer ${selectedApiKey || 'sb_live_your_key'}", forHTTPHeaderField: "Authorization")
+   677→let (data, _) = try await URLSession.shared.data(for: request)
+   678→// Parse token from response JSON
+   679→
+   680→// Kotlin (Android)
+   681→val client = OkHttpClient()
+   682→val request = Request.Builder()
+   683→  .url("${window.location.origin}/api/v1/auth/login")
+   684→  .post("".toRequestBody())
+   685→  .addHeader("Authorization", "Bearer ${selectedApiKey || 'sb_live_your_key'}")
+   686→  .build()
+   687→val response = client.newCall(request).execute()`}</pre>
+   688→              </div>
+   689→            </div>
+   690→          </CardContent>
+   691→        </Card>
+   692→      </div>
+   693→    </div>
+   694→  )
+   695→}
+   696→
+   697→// =====================================================================
+   698→// MAIN PLAYGROUND COMPONENT
+   699→// =====================================================================
+   700→
+   701→export function PlaygroundView() {
+   702→  const { toast } = useToast()
+   703→  const [activePlaygroundTab, setActivePlaygroundTab] = useState<'auth' | 'api'>('auth')
+   704→
+   705→  const [selectedTemplate, setSelectedTemplate] = useState<EndpointTemplate | null>(null)
+   706→  const [method, setMethod] = useState<HttpMethod>('GET')
+   707→  const [url, setUrl] = useState('')
+   708→  const [params, setParams] = useState<KeyValueRow[]>(toKv([]))
+   709→  const [headers, setHeaders] = useState<KeyValueRow[]>(toKv([]))
+   710→  const [body, setBody] = useState('')
+   711→  const [activeTab, setActiveTab] = useState<'params' | 'headers' | 'body'>('params')
+   712→  const [response, setResponse] = useState<ResponseData | null>(null)
+   713→  const [loading, setLoading] = useState(false)
+   714→  const [error, setError] = useState<string | null>(null)
+   715→  const [search, setSearch] = useState('')
+   716→  const [history, setHistory] = useState<HistoryEntry[]>([])
+   717→
+   718→  // Auth token for playground requests
+   719→  const [authToken, setAuthToken] = useState<string | null>(null)
+   720→
+   721→  const filteredTemplates = useMemo(() => {
+   722→    const q = search.trim().toLowerCase()
+   723→    if (!q) return ENDPOINT_TEMPLATES
+   724→    return ENDPOINT_TEMPLATES.filter(t =>
+   725→      t.path.toLowerCase().includes(q) || t.description.toLowerCase().includes(q) ||
+   726→      t.category.toLowerCase().includes(q) || t.method.toLowerCase().includes(q)
+   727→    )
+   728→  }, [search])
+   729→
+   730→  const groupedTemplates = useMemo(() => {
+   731→    const map = new Map<string, EndpointTemplate[]>()
+   732→    filteredTemplates.forEach(t => {
+   733→      if (!map.has(t.category)) map.set(t.category, [])
+   734→      map.get(t.category)!.push(t)
+   735→    })
+   736→    return Array.from(map.entries())
+   737→  }, [filteredTemplates])
+   738→
+   739→  const loadTemplate = useCallback((template: EndpointTemplate) => {
+   740→    setSelectedTemplate(template)
+   741→    setMethod(template.method)
+   742→    setUrl(template.path)
+   743→    setParams(toKv(template.defaultParams))
+   744→    // Auto-inject auth token into headers if template requires auth
+   745→    const defaultHeaders = toKv(template.defaultHeaders)
+   746→    if (template.requiresAuth && authToken) {
+   747→      const hasAuth = defaultHeaders.some(h => h.key.toLowerCase() === 'authorization')
+   748→      if (!hasAuth) {
+   749→        defaultHeaders.push({ id: newRowId(), key: 'Authorization', value: `Bearer ${authToken}` })
+   750→      } else {
+   751→        defaultHeaders.forEach(h => {
+   752→          if (h.key.toLowerCase() === 'authorization' && h.value.includes('your_token')) {
+   753→            h.value = `Bearer ${authToken}`
+   754→          }
+   755→        })
+   756→      }
+   757→    }
+   758→    setHeaders(defaultHeaders)
+   759→    setBody(template.defaultBody ?? '')
+   760→    setResponse(null)
+   761→    setError(null)
+   762→    setActiveTab(template.method === 'GET' || template.method === 'DELETE' ? 'params' : 'body')
+   763→  }, [authToken])
+   764→
+   765→  const sendRequest = useCallback(async () => {
+   766→    if (!url) { toast({ title: 'URL is required', variant: 'destructive' }); return }
+   767→    setLoading(true); setError(null); setResponse(null)
+   768→    const startTime = performance.now()
+   769→    try {
+   770→      const urlObj = new URL(url, window.location.origin)
+   771→      params.forEach(p => { if (p.key.trim()) urlObj.searchParams.set(p.key, p.value) })
+   772→
+   773→      const headerObj: Record<string, string> = {}
+   774→      headers.forEach(h => { if (h.key.trim()) headerObj[h.key] = h.value })
+   775→      const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+   776→      if (!headerObj['Content-Type'] && hasBody) headerObj['Content-Type'] = 'application/json'
+   777→
+   778→      const res = await fetch(urlObj.toString(), {
+   779→        method, headers: headerObj, body: hasBody && body ? body : undefined,
+   780→      })
+   781→
+   782→      const responseText = await res.text()
+   783→      const durationMs = Math.round(performance.now() - startTime)
+   784→      const responseHeaders: Record<string, string> = {}
+   785→      res.headers.forEach((v, k) => { responseHeaders[k] = v })
+   786→
+   787→      let responseBody = responseText
+   788→      try { responseBody = JSON.stringify(JSON.parse(responseText), null, 2) } catch { /* keep raw */ }
+   789→
+   790→      const sizeBytes = new Blob([responseText]).size
+   791→      setResponse({ status: res.status, statusText: res.statusText, headers: responseHeaders, body: responseBody, durationMs, sizeBytes, ok: res.ok })
+   792→      setHistory(prev => [...prev, { status: res.status, durationMs, timestamp: Date.now(), ok: res.ok }].slice(-20))
+   793→      toast({ title: res.ok ? 'Request completed' : 'Request returned non-OK', description: `${res.status} · ${formatDuration(durationMs)} · ${formatBytes(sizeBytes)}`, variant: res.ok ? 'default' : 'destructive' })
+   794→    } catch (e) {
+   795→      const msg = e instanceof Error ? e.message : 'Request failed'
+   796→      setError(msg)
+   797→      setHistory(prev => [...prev, { status: 0, durationMs: Math.round(performance.now() - startTime), timestamp: Date.now(), ok: false }].slice(-20))
+   798→      toast({ title: 'Request failed', description: msg, variant: 'destructive' })
+   799→    } finally { setLoading(false) }
+   800→  }, [url, params, headers, body, method, toast])
+   801→
+   802→  const copyAsCurl = useCallback(() => {
+   803→    if (!url) return
+   804→    let cmd = `curl -X ${method} '${url}'`
+   805→    headers.forEach(h => { if (h.key.trim()) cmd += ` \\\n  -H '${h.key}: ${h.value}'` })
+   806→    if ((method === 'POST' || method === 'PUT' || method === 'PATCH') && body.trim()) cmd += ` \\\n  -d '${body.replace(/'/g, "'\\''")}'`
+   807→    navigator.clipboard.writeText(cmd)
+   808→    toast({ title: 'Copied as cURL' })
+   809→  }, [url, method, headers, body, toast])
+   810→
+   811→  const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH'
+   812→
+   813→  return (
+   814→    <div className="space-y-6">
+   815→      {/* Header */}
+   816→      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+   817→        <div>
+   818→          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+   819→            <Terminal className="h-6 w-6 text-emerald-600" />
+   820→            API Playground
+   821→          </h1>
+   822→          <p className="text-sm text-muted-foreground">Test API endpoints and manage authentication for external apps</p>
+   823→        </div>
+   824→        {authToken && (
+   825→          <Badge className="gap-1.5 bg-emerald-100 text-emerald-700 border-emerald-200 w-fit">
+   826→            <Lock className="h-3 w-3" /> Authenticated
+   827→          </Badge>
+   828→        )}
+   829→      </div>
+   830→
+   831→      {/* Main Tabs */}
+   832→      <Tabs value={activePlaygroundTab} onValueChange={v => setActivePlaygroundTab(v as 'auth' | 'api')}>
+   833→        <TabsList className="grid w-full grid-cols-2 max-w-md">
+   834→          <TabsTrigger value="auth" className="gap-1.5">
+   835→            <Shield className="h-3.5 w-3.5" />
+   836→            Authentication
+   837→          </TabsTrigger>
+   838→          <TabsTrigger value="api" className="gap-1.5">
+   839→            <Terminal className="h-3.5 w-3.5" />
+   840→            API Tester
+   841→          </TabsTrigger>
+   842→        </TabsList>
+   843→
+   844→        <TabsContent value="auth" className="mt-4">
+   845→          <AuthFlowSection onTokenObtained={token => { setAuthToken(token); setActivePlaygroundTab('api') }} />
+   846→        </TabsContent>
+   847→
+   848→        <TabsContent value="api" className="mt-4">
+   849→          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+   850→            {/* Endpoint Library */}
+   851→            <Card className="lg:max-h-[calc(100vh-220px)] flex flex-col">
+   852→              <CardHeader className="pb-2 shrink-0">
+   853→                <div className="relative">
+   854→                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+   855→                  <Input placeholder="Search endpoints..." value={search} onChange={e => setSearch(e.target.value)} className="h-8 pl-8 text-xs" />
+   856→                </div>
+   857→              </CardHeader>
+   858→              <CardContent className="flex-1 overflow-y-auto p-2 pt-0 space-y-1">
+   859→                {groupedTemplates.map(([category, templates]) => (
+   860→                  <div key={category}>
+   861→                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5">{category}</p>
+   862→                    {templates.map(t => (
+   863→                      <button
+   864→                        key={t.id}
+   865→                        className={`w-full text-left rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors flex items-center gap-2 ${selectedTemplate?.id === t.id ? 'bg-accent' : ''}`}
+   866→                        onClick={() => loadTemplate(t)}
+   867→                      >
+   868→                        <MethodBadge method={t.method} className="shrink-0 text-[8px] px-1.5" />
+   869→                        <span className="truncate flex-1">{t.description}</span>
+   870→                        {t.requiresAuth && <Lock className="h-2.5 w-2.5 text-amber-500 shrink-0" />}
+   871→                      </button>
+   872→                    ))}
+   873→                  </div>
+   874→                ))}
+   875→              </CardContent>
+   876→            </Card>
+   877→
+   878→            {/* Request Builder */}
+   879→            <div className="space-y-4">
+   880→              {/* URL Bar */}
+   881→              <div className="flex gap-2">
+   882→                <Select value={method} onValueChange={v => setMethod(v as HttpMethod)}>
+   883→                  <SelectTrigger className={`h-10 w-24 font-mono text-sm font-bold ${methodColors[method]}`}>
+   884→                    <SelectValue />
+   885→                  </SelectTrigger>
+   886→                  <SelectContent>
+   887→                    {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(m => (
+   888→                      <SelectItem key={m} value={m}>{m}</SelectItem>
+   889→                    ))}
+   890→                  </SelectContent>
+   891→                </Select>
+   892→                <Input
+   893→                  value={url}
+   894→                  onChange={e => setUrl(e.target.value)}
+   895→                  placeholder="/api/..."
+   896→                  className="h-10 font-mono text-sm flex-1"
+   897→                />
+   898→                <Button onClick={sendRequest} disabled={loading} className="gap-1.5">
+   899→                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+   900→                  Send
+   901→                </Button>
+   902→              </div>
+   903→
+   904→              {/* Auth banner */}
+   905→              {authToken ? (
+   906→                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-950/20">
+   907→                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+   908→                  <span className="text-xs text-emerald-700 dark:text-emerald-400">
+   909→                    Using authenticated token · <button className="underline" onClick={() => { navigator.clipboard.writeText(authToken); toast({ title: 'Token copied' }) }}>Copy token</button>
+   910→                  </span>
+   911→                  <Button size="sm" variant="ghost" className="ml-auto text-xs h-6" onClick={() => setAuthToken(null)}>Clear</Button>
+   912→                </div>
+   913→              ) : (
+   914→                <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-950/20">
+   915→                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+   916→                  <span className="text-xs text-amber-700 dark:text-amber-400">
+   917→                    No auth token set — go to <button className="underline font-medium" onClick={() => setActivePlaygroundTab('auth')}>Authentication tab</button> to login first
+   918→                  </span>
+   919→                </div>
+   920→              )}
+   921→
+   922→              {/* Tabs: Params / Headers / Body */}
+   923→              <Tabs value={activeTab} onValueChange={v => setActiveTab(v as any)}>
+   924→                <TabsList className="h-8">
+   925→                  <TabsTrigger value="params" className="text-xs h-6">Params</TabsTrigger>
+   926→                  <TabsTrigger value="headers" className="text-xs h-6">Headers</TabsTrigger>
+   927→                  {hasBody && <TabsTrigger value="body" className="text-xs h-6">Body</TabsTrigger>}
+   928→                </TabsList>
+   929→                <TabsContent value="params"><KvEditor rows={params} onChange={setParams} keyPlaceholder="param" valuePlaceholder="value" /></TabsContent>
+   930→                <TabsContent value="headers"><KvEditor rows={headers} onChange={setHeaders} keyPlaceholder="Header" valuePlaceholder="Value" /></TabsContent>
+   931→                {hasBody && <TabsContent value="body"><Textarea value={body} onChange={e => setBody(e.target.value)} className="font-mono text-xs min-h-[120px]" placeholder="JSON body..." /></TabsContent>}
+   932→              </Tabs>
+   933→
+   934→              {/* Response */}
+   935→              {(response || error) && (
+   936→                <Card>
+   937→                  <CardHeader className="pb-2">
+   938→                    <div className="flex items-center justify-between">
+   939→                      <div className="flex items-center gap-2">
+   940→                        <CardTitle className="text-sm">Response</CardTitle>
+   941→                        {response && <StatusBadge status={response.status} />}
+   942→                      </div>
+   943→                      {response && (
+   944→                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+   945→                          <span>{formatDuration(response.durationMs)}</span>
+   946→                          <span>{formatBytes(response.sizeBytes)}</span>
+   947→                          <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => { navigator.clipboard.writeText(response.body); toast({ title: 'Copied' }) }}><Copy className="h-3 w-3" /></Button>
+   948→                          <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={copyAsCurl}>cURL</Button>
+   949→                        </div>
+   950→                      )}
+   951→                    </div>
+   952→                  </CardHeader>
+   953→                  <CardContent>
+   954→                    {error ? (
+   955→                      <div className="rounded bg-red-50 dark:bg-red-950/20 p-3 text-sm text-red-700 dark:text-red-400">{error}</div>
+   956→                    ) : response && (
+   957→                      <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words">{response.body}</pre>
+   958→                    )}
+   959→                  </CardContent>
+   960→                </Card>
+   961→              )}
+   962→            </div>
+   963→          </div>
+   964→        </TabsContent>
+   965→      </Tabs>
+   966→    </div>
+   967→  )
+   968→}
+   969→
