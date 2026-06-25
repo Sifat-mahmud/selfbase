@@ -1,5 +1,68 @@
 # SelfBase Worklog
 
+## Session R30 - Deployment Fix: output:standalone + Config Cleanup
+
+---
+Task ID: 1
+Agent: Main
+Task: Debug and fix Z.ai platform deployment failure ("Sorry, there was a problem deploying the code")
+
+Work Log:
+- Identified ROOT CAUSE: `output: "standalone"` was missing from `next.config.ts`
+  - The Z.ai build script (`.zscripts/build.sh`) copies `.next/standalone/` to build output
+  - The start script (`.zscripts/start.sh`) runs `next-service-dist/server.js`
+  - Without `output: "standalone"`, no `server.js` is generated → deployment fails
+- Added `output: "standalone"` back to `next.config.ts` (was previously removed during git issues)
+- Added `experimental.optimizePackageImports` for lucide-react, recharts, framer-motion
+- Fixed `.env` DATABASE_URL path (tested both relative and absolute)
+- Updated `.gitignore`:
+  - Changed `.env*` to keep `.env` but ignore `.env.local` etc (deployment needs .env)
+  - Added `db/*.db-shm` and `db/*.db-wal` (SQLite runtime files)
+  - Added `tool-results/` directory
+- Removed `db/custom.db-shm` and `db/custom.db-wal` from git tracking (runtime-only files)
+- Verified standalone build produces `.next/standalone/server.js` and all required files
+- Verified Prisma client is included in standalone output
+- Verified dev server works with all changes
+- Verified full app functionality via agent-browser (login, dashboard, all data)
+- Pushed 2 commits to GitHub:
+  1. "Fix deployment: add output:standalone, fix .env path, clean gitignore"
+  2. "Fix DATABASE_URL to use relative path for better deployment compatibility"
+
+Stage Summary:
+- ✅ **CRITICAL FIX**: `output: "standalone"` restored in next.config.ts — this was the root cause
+- ✅ Standalone build verified: `.next/standalone/server.js` exists with all dependencies
+- ✅ Dev server running and fully functional
+- ✅ All APIs working (auth, tables, monitoring, etc.)
+- ✅ Pushed to GitHub (https://github.com/Sifat-mahmud/selfbase.git)
+
+### Deployment Architecture:
+```
+GitHub push → Z.ai platform clones repo → .zscripts/build.sh runs:
+  1. bun install
+  2. bun run build (next build with output:standalone)
+  3. Copies .next/standalone/ → next-service-dist/
+  4. Copies .next/static/ → next-service-dist/.next/static
+  5. Copies public/ → next-service-dist/public
+  6. Copies db/custom.db → db/
+  7. Runs db:push on build database
+  8. Builds mini-services
+  9. Packages as tar.gz
+
+.zscripts/start.sh runs:
+  1. Starts next-service-dist/server.js (standalone Next.js)
+  2. Starts mini-services (realtime, scheduler)
+  3. Starts Caddy reverse proxy
+```
+
+### Priority Recommendations for Next Phase:
+1. Monitor deployment on Z.ai platform to confirm fix works
+2. Add `allowedDevOrigins` config for cross-origin preview
+3. Make mini-services optional (graceful degradation when not running)
+4. Add health check endpoint that verifies all services are connected
+5. Add deployment status indicator in the admin dashboard
+
+---
+
 ## Session R25 - API Authentication System for External Apps
 
 ---
