@@ -1,660 +1,549 @@
 <p align="center">
-  <img src="public/readme-hero.png" alt="SelfBase - Self-hosted Backend-as-a-Service" width="100%" />
+  <img src="public/hero-banner.png" alt="SelfBase" width="100%" />
 </p>
 
-<h1 align="center">SelfBase</h1>
+<h1 align="center">SelfBase — AI-Native Backend-as-a-Service</h1>
 
 <p align="center">
-  <strong>Self-hosted Backend-as-a-Service</strong> — Your own Supabase, in your own infrastructure.
+  <strong>Self-hosted · Local-First · Realtime · AI-Powered</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Next.js-16-black?logo=next.js" alt="Next.js 16" />
-  <img src="https://img.shields.io/badge/TypeScript-5-blue?logo=typescript" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/SQLite-Prisma-00354B?logo=sqlite" alt="SQLite + Prisma" />
-  <img src="https://img.shields.io/badge/Realtime-Socket.IO-010101?logo=socket.io" alt="Socket.IO" />
-  <img src="https://img.shields.io/badge/License-Private-red" alt="Private" />
+  <a href="https://selfbase.space-z.ai/">
+    <img src="https://img.shields.io/badge/Live-Demo-emerald?style=for-the-badge&logo=globe&logoColor=white" alt="Live Demo" />
+  </a>
+  <img src="https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=next.js&logoColor=white" alt="Next.js 16" />
+  <img src="https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Prisma-SQLite-teal?style=for-the-badge&logo=prisma&logoColor=white" alt="Prisma" />
 </p>
 
 ---
 
-## 🎯 What is SelfBase?
+## 🚀 Live Demo
 
-SelfBase is an **all-in-one, self-hosted backend platform** that gives you everything you need to build and run applications — without relying on third-party cloud services. Think of it as **your own Supabase/Firebase that runs entirely on your server**.
+**👉 [https://selfbase.space-z.ai/](https://selfbase.space-z.ai/)**
 
-### Who is it for?
-
-| Role | Why SelfBase? |
-|------|--------------|
-| **Mobile Developers** | Get a complete backend API for your iOS/Android app in minutes — auth, database, realtime, storage, and AI — all from one self-hosted service |
-| **Web Developers** | Full REST API with 80+ endpoints, real-time subscriptions, and serverless functions — no cloud vendor lock-in |
-| **Startups** | Ship faster with built-in auth, database, pipelines, AI, and monitoring — deploy on any VPS for $5/month |
-| **Enterprises** | Keep all data on-premises, self-managed, with row-level security and audit logging |
-| **Tinkerers** | A powerful playground to experiment with AI, web scraping, and data pipelines |
+Login with `admin@selfbase.dev` / `admin123` (demo instance)
 
 ---
 
-## ✨ Feature Overview
+## 📋 What is SelfBase?
 
+SelfBase is a **self-hosted, local-first Backend-as-a-Service** platform that gives you everything you need to build and run modern applications — databases, APIs, web scrapers, data pipelines, serverless functions, and AI integration — all from a single dashboard.
+
+No cloud lock-in. No vendor dependency. Your data stays on your machine.
+
+<p align="center">
+  <img src="public/architecture.png" alt="Architecture" width="80%" />
+</p>
+
+---
+
+## ✨ Key Features
+
+### 🗄️ Dynamic Tables
+Create database tables with typed columns directly from the UI. Toggle realtime to push changes to all connected clients instantly via WebSocket.
+
+| Feature | Details |
+|---------|---------|
+| Column Types | TEXT, INTEGER, DECIMAL, BOOLEAN, TIMESTAMP, JSON |
+| Realtime Sync | WebSocket push with version tracking |
+| Row-Level Security | Configurable per-table |
+| Vector Embeddings | Auto-embed text columns for AI/RAG |
+| REST API | Auto-generated CRUD endpoints |
+
+### 🌐 Multi-Level Web Scraper
+Scrape any website with a visual step-by-step script builder powered by **Playwright** headless browser.
+
+| Step Type | What It Does |
+|-----------|-------------|
+| `navigate` | Go to a URL |
+| `click` | Click a button/link |
+| `type` | Type into input fields |
+| `wait` | Wait for element/content |
+| `scroll` | Scroll the page |
+| `extract` | Extract data (table or single points) |
+| `paginate` | Auto-click next page |
+
+- **Column Mapping** — Map scraped fields directly to table columns
+- **Conflict Resolution** — `insert`, `upsert`, or `update` modes
+- **Run History** — View past scrape results and durations
+
+### 🔗 Pipeline Studio
+Ingest data from REST APIs, RSS feeds, or web scrapers on a schedule.
+
+- **Source Types**: REST API, RSS Feed, Web Scraper
+- **Scheduling**: Cron expressions or fixed intervals
+- **Column Mapping**: Map source fields → table columns
+- **Conflict Modes**: update, insert, upsert, skip, truncate
+- **Smart Preview**: See data before committing
+- **Auto Table Creation**: Create target table from pipeline schema
+
+### ⚡ Serverless Functions
+Write JavaScript functions that run in a sandboxed environment.
+
+```javascript
+function handler(input, env) {
+  // input: request body (JSON)
+  // env: environment variables
+  return { message: "Hello " + input.name };
+}
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      SelfBase v0.2.0                         │
-│              Self-hosted Backend-as-a-Service                │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  🗄️  Database          📡  Realtime         🤖  AI Engine   │
-│  ─────────────       ──────────────       ──────────────    │
-│  Dynamic tables      WebSocket push        LLM Chat         │
-│  Schema builder      Live subscriptions    Embeddings        │
-│  Row CRUD            Version tracking      RAG queries       │
-│  Version tracking    Auto-refresh UI       Vector search     │
-│  Import/Export       Presence indicators   Multi-provider    │
-│                                                              │
-│  ⚡  Functions        🌐  Scrapers         📊  Monitoring   │
-│  ─────────────       ──────────────       ──────────────    │
-│  Serverless JS/TS    Web page scraping     System metrics    │
-│  HTTP/schedule       Pagination handling   Heartbeat track   │
-│  Event triggers      Stealth mode          Alert rules       │
-│  Inline editor       Auto schema           Uptime stats      │
-│                                                              │
-│  🔄  Pipelines        🔐  Auth             💾  Storage      │
-│  ─────────────       ──────────────       ──────────────    │
-│  REST/RSS/WS         API Keys (sb_live_)   File buckets     │
-│  Auto-scheduling     App Tokens (1hr)      Presigned URLs   │
-│  Smart preview       Row-level security    Metadata         │
-│  Column mapping      Session management    Public/private    │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+
+- **Trigger Types**: HTTP, Schedule (cron), Event (on data change)
+- **Invoke via API**: `POST /api/v1/functions/{name}/invoke`
+- **Environment Variables**: Securely store secrets
+- **Run History**: Track every execution with duration and output
+
+### 🤖 AI Bridge
+SelfBase doesn't generate scripts — it's a **backend service**. Share config formats with any AI (Gemini, ChatGPT, Claude), and import their generated JSON configs back.
+
+1. **Copy** the config format documentation
+2. **Paste** into your AI chat
+3. AI **generates** JSON configs for tables, scrapers, pipelines, functions
+4. **Import** the JSON into SelfBase — auto-detects type and creates the resource
+
+### 🔐 Authentication & API Keys
+- **Admin Login** with session tokens
+- **API Keys** (`sb_live_*`) for external apps
+- **App Tokens** — short-lived tokens for mobile/web apps
+- **Password Reset** flow with force-change support
+
+### 📊 Realtime Monitoring
+- System health dashboard (CPU, RAM, disk, connections)
+- CPU & RAM trend charts
+- Load score history
+- Service status overview
+- Alert configuration
+
+### 📁 File Storage
+Upload and manage files with bucket organization.
+
+### 🔄 Data Transfer
+Import/export data in JSON format for tables, pipelines, scrapers, and functions.
 
 ---
 
 ## 🏗️ Architecture
 
-<p align="center">
-  <img src="public/readme-database.png" alt="SelfBase Architecture" width="80%" />
-</p>
-
 ```
-                          ┌─────────────────┐
-                          │  Your Apps      │
-                          │  (iOS/Android/  │
-                          │   Web/Desktop)  │
-                          └────────┬────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │ REST API     │ WebSocket     │ Auth
-                    │ (80+ routes) │ (Socket.IO)  │ (API Keys)
-                    └──────────────┼──────────────┘
-                                   │
-                          ┌────────▼────────┐
-                          │   SelfBase       │
-                          │   (Next.js 16)   │
-                          │                  │
-                          │  ┌────────────┐ │
-                          │  │  Admin UI  │ │
-                          │  │  Dashboard │ │
-                          │  └────────────┘ │
-                          │                  │
-                          │  ┌────────────┐ │
-                          │  │  API Layer │ │
-                          │  │  /api/*    │ │
-                          │  └────────────┘ │
-                          │                  │
-                          │  ┌────────────┐ │
-                          │  │  Database  │ │
-                          │  │  (SQLite)  │ │
-                          │  └────────────┘ │
-                          └──────────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-            ┌───────▼──────┐ ┌───▼──────┐ ┌────▼───────┐
-            │  Pipeline     │ │ Realtime │ │  AI        │
-            │  Scheduler    │ │ Service  │ │  (LLM/Emb) │
-            │  (port 3004)  │ │(port 3003)│ │            │
-            └──────────────┘ └──────────┘ └────────────┘
-```
-
-### Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Framework** | Next.js 16 (App Router) + React 19 |
-| **Language** | TypeScript 5 (strict mode) |
-| **Database** | SQLite via Prisma ORM |
-| **UI** | shadcn/ui + Tailwind CSS 4 + Framer Motion |
-| **Realtime** | Socket.IO (dedicated microservice) |
-| **Auth** | NextAuth.js + API Keys + App Tokens |
-| **AI** | z-ai-web-dev-sdk (OpenAI/Anthropic/Ollama) |
-| **State** | Zustand + TanStack Query |
-| **Scheduler** | Custom cron-based pipeline scheduler |
-
----
-
-## 📡 Realtime Database
-
-<p align="center">
-  <img src="public/readme-realtime.png" alt="SelfBase Realtime" width="80%" />
-</p>
-
-Any table can be turned into a **realtime database** with a single toggle:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Table: cse_stocks                                          │
-│                                                              │
-│  Features                                                    │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │  🟢 Realtime    ⬜ Embeddings    ⬜ Row-Level Security ││
-│  │  (toggle ON)                                             ││
-│  └─────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────┘
-```
-
-### How It Works
-
-```
-1. Toggle ON  →  PUT /api/tables/{id} { enableRealtime: true }
-
-2. Row CRUD   →  API route → emitRealtimeEvent() → Socket.IO service
-
-3. Subscribe  →  socket.emit('subscribe', { tableId: '...' })
-
-4. Receive    →  socket.on('data-changed', (data) => { ... })
-                  socket.on('update-available', (data) => { ... })
-```
-
-### Event Flow
-
-| Action | Event | Payload |
-|--------|-------|---------|
-| **Insert** row | `data-changed` | `{ eventType: "insert", row: {...}, rowId }` |
-| **Update** row | `data-changed` | `{ eventType: "update", row: {...}, version++ }` |
-| **Delete** row | `data-changed` | `{ eventType: "delete", rowId }` |
-| **Any** change | `update-available` | `{ versionHash, rowCount }` |
-
-### Version Tracking
-
-Every row has a `version` field that increments on update. Every table has a `versionHash` that changes on any mutation. This enables **local-first sync**:
-
-```
-Client: "I have versionHash abc123"
-Server: "Current is def456 — here's the diff since your version"
-        OR
-Server: "304 Not Modified" (ETag match)
+┌─────────────────────────────────────────────────────────┐
+│                    Next.js 16 App Router                 │
+│              (Turbopack · TypeScript · Tailwind)         │
+├──────────┬──────────┬──────────┬──────────┬─────────────┤
+│ Dashboard │  Tables  │ Scraper  │ Pipeline │  Functions   │
+│  Monitor  │ Realtime │ Playwright│  REST   │  Serverless  │
+├──────────┴──────────┴──────────┴──────────┴─────────────┤
+│                    Prisma ORM + SQLite                   │
+├─────────────────────────────────────────────────────────┤
+│                   Microservices Layer                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│  │  Realtime    │  │  Pipeline   │  │   Scraper   │     │
+│  │  Socket.IO   │  │  Scheduler  │  │  Playwright │     │
+│  │  Port 3003   │  │  Port 3004  │  │  Port 3005  │     │
+│  └─────────────┘  └─────────────┘  └─────────────┘     │
+├─────────────────────────────────────────────────────────┤
+│              API Gateway (Caddy)                         │
+│         Port 3000 → Routes to microservices             │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔐 Authentication & API Access
+## 🖼️ Screenshots
 
-SelfBase supports **three authentication methods** for different use cases:
+### Dashboard — System Overview
+![Dashboard](https://via.placeholder.com/800x450/1a1a2e/16c79a?text=Dashboard+with+Charts+%26+Stats)
 
-### 1. Admin Session (Browser)
-```
-Browser → Login → Session Cookie → All Admin APIs
-```
+### Tables — Data Management
+![Tables](https://via.placeholder.com/800x450/1a1a2e/16c79a?text=Dynamic+Tables+with+Realtime)
 
-### 2. API Key → App Token (Mobile/External Apps)
-```
-┌──────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  1. Generate │────▶│  2. Login with   │────▶│  3. Use Token   │
-│  API Key     │     │  API Key         │     │  for API Calls  │
-│  sb_live_... │     │  POST /v1/auth/  │     │  Bearer token   │
-│              │     │  login           │     │  (valid 1 hr)   │
-└──────────────┘     └──────────────────┘     └─────────────────┘
-```
+### Web Scraper — Step Builder
+![Scraper](https://via.placeholder.com/800x450/1a1a2e/16c79a?text=Multi-Level+Scraper+Builder)
 
-```javascript
-// Step 1: Login with API key
-const res = await fetch('/api/v1/auth/login', {
-  method: 'POST',
-  headers: { Authorization: 'Bearer sb_live_your_api_key' }
-})
-const { token } = await res.json()
+### Pipeline Studio
+![Pipeline](https://via.placeholder.com/800x450/1a1a2e/16c79a?text=Pipeline+Configuration)
 
-// Step 2: Use the token for all subsequent requests
-const data = await fetch('/api/tables/my_table/rows', {
-  headers: { Authorization: `Bearer ${token}` }
-})
-```
+### Serverless Functions
+![Functions](https://via.placeholder.com/800x450/1a1a2e/16c79a?text=Function+Editor+%26+Runner)
 
-### 3. API Key Permissions
-
-| Permission | Access |
-|-----------|--------|
-| `read` | GET endpoints only |
-| `read,write` | GET + POST + PUT + DELETE |
-| `read,write,admin` | Full access including schema changes |
-
----
-
-## 📱 API Playground
-
-SelfBase includes a **built-in API playground** with 85+ documented endpoints across 18 categories:
-
-| Category | Endpoints | Description |
-|----------|-----------|-------------|
-| 🔐 Auth API | 3 | Login, validate, logout |
-| 📡 Realtime | 5 | Subscribe, health, emit, toggle, sync |
-| 🔄 Sync API | 2 | Local-first data fetch with ETag |
-| 📊 Data — Tables | 7 | Full CRUD + columns + version |
-| 📋 Data — Rows | 5 | CRUD with pagination & search |
-| ⚡ Functions | 7 | Serverless function management |
-| 🔄 Pipelines | 9 | Pipeline CRUD + run + preview |
-| 🤖 AI | 6 | Chat, embed, RAG, search |
-| 💾 Storage | 4 | File management |
-| 🌐 Scrapers | 7 | Web scraping management |
-| 📈 Monitoring | 6 | System health & alerts |
-| 📨 Queue | 3 | Priority queue management |
-| 📝 Logs | 3 | System & error logs |
-| 📦 Import/Export | 8 | Data transfer |
-| ⚙️ Config | 2 | System configuration |
-| 🔑 API Keys | 3 | Key management |
-| 👤 Auth/Users | 5 | User & session management |
-
-### Playground Features
-- 🔍 Search across all endpoints
-- 📋 One-click cURL copy
-- 🎯 Auto-inject auth token
-- 📝 Pre-filled request bodies
-- ⚡ Live response viewer with timing
-
----
-
-## 🗄️ Database Management
-
-### Dynamic Schema
-
-Create tables with any column types — no migrations needed:
-
-```
-┌─────────────────────────────────────────────────────┐
-│  Create Table                                        │
-│                                                      │
-│  Table Name: [ products        ]                    │
-│  Description: [ Product catalog  ]                  │
-│                                                      │
-│  ┌──────────────┬──────────┬───────┬────────┐      │
-│  │ Column Name  │ Type     │ Null? │ Unique │      │
-│  ├──────────────┼──────────┼───────┼────────┤      │
-│  │ id           │ INTEGER  │  ☐    │   ☑    │      │
-│  │ name         │ TEXT     │  ☐    │   ☐    │      │
-│  │ price        │ DECIMAL  │  ☑    │   ☐    │      │
-│  │ in_stock     │ BOOLEAN  │  ☑    │   ☐    │      │
-│  │ tags         │ JSON     │  ☑    │   ☐    │      │
-│  └──────────────┴──────────┴───────┴────────┘      │
-│                                                      │
-│  [+ Add Column]                     [Create Table]    │
-└─────────────────────────────────────────────────────┘
-```
-
-### Supported Column Types
-
-| Type | Description | Example |
-|------|------------|---------|
-| `TEXT` | String values | `"Hello World"` |
-| `INTEGER` | Whole numbers | `42` |
-| `DECIMAL` | Floating point | `9.99` |
-| `BOOLEAN` | True/false | `true` |
-| `TIMESTAMP` | Date/time | `"2025-01-01T00:00:00Z"` |
-| `JSON` | Nested objects | `{"key": "value"}` |
-
-### View Data Dialog
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  📊 products — Rows  50 rows  🟢 RT                            │
-│                                                                  │
-│  🔍 Search...                    [Export ▾] [+ Add Row]        │
-│  🟢 Live — listening for changes on products                    │
-│                                                                  │
-│  ┌───┬──────┬─────────┬───────┬──────────┬─────┬────────┐    │
-│  │ ☐ │ #    │ name    │ price │ in_stock │ Ver │ Actions│    │
-│  ├───┼──────┼─────────┼───────┼──────────┼─────┼────────┤    │
-│  │ ☐ │ 1    │ Widget  │ 9.99  │ ✓ true   │ v1  │ ✏️ 🗑️  │    │
-│  │ ☐ │ 2    │ Gadget  │ 24.99 │ ✗ false  │ v3  │ ✏️ 🗑️  │    │
-│  │ ☐ │ 3    │ Thingy  │ 5.99  │ ✓ true   │ v1  │ ✏️ 🗑️  │    │
-│  └───┴──────┴─────────┴───────┴──────────┴─────┴────────┘    │
-│                                                                  │
-│  Showing 1-50 of 50 rows           Page 1 of 1                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## ⚡ Serverless Functions
-
-Write and deploy JavaScript/TypeScript functions that run on your server:
-
-```javascript
-// Example: Send notification on new order
-export default async function(input) {
-  const { orderId, customerEmail, total } = input
-  
-  // Query the database
-  const order = await db.sbRow.findFirst({
-    where: { id: orderId }
-  })
-  
-  // Process the order
-  await sendEmail(customerEmail, `Order confirmed: $${total}`)
-  
-  return { success: true, orderId }
-}
-```
-
-### Trigger Types
-
-| Trigger | When | Use Case |
-|---------|------|---------|
-| `http` | HTTP request | REST endpoints, webhooks |
-| `schedule` | Cron schedule | Periodic cleanup, reports |
-| `event` | Database event | Real-time reactions |
-
----
-
-## 🤖 AI Integration
-
-SelfBase includes a full AI engine with multiple capabilities:
-
-```
-┌─────────────────────────────────────────────────┐
-│                 AI Engine                        │
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
-│  │  💬 Chat │  │  📊 Embed│  │  🔍 RAG      │  │
-│  │          │  │          │  │              │  │
-│  │ Multi-   │  │ Text →   │  │ Retrieve +  │  │
-│  │ turn     │  │ Vectors  │  │ Generate    │  │
-│  │ convers- │  │ for      │  │ answers     │  │
-│  │ ations   │  │ search   │  │ from data   │  │
-│  └──────────┘  └──────────┘  └──────────────┘  │
-│                                                  │
-│  Providers: OpenAI · Anthropic · Ollama · Custom │
-└─────────────────────────────────────────────────┘
-```
-
-### LLM Chat
-```bash
-curl -X POST /api/ai/chat \
-  -H "Authorization: Bearer <token>" \
-  -d '{"messages": [{"role": "user", "content": "Explain this data"}]}'
-```
-
-### Embeddings & Vector Search
-```bash
-# Generate embeddings
-curl -X POST /api/ai/embed \
-  -d '{"texts": ["Hello world", "Another text"]}'
-
-# Search with RAG
-curl -X POST /api/ai/rag \
-  -d '{"query": "What patterns exist in sales data?", "topK": 5}'
-```
-
----
-
-## 🔄 Data Pipelines
-
-Automate data ingestion from external sources:
-
-```
-┌────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Source     │───▶│  Pipeline    │───▶│  Your Table  │
-│             │    │  (Transform) │    │              │
-│ • REST API  │    │ • Map cols   │    │ • Auto-      │
-│ • RSS Feed  │    │ • Filter     │    │   created    │
-│ • WebSocket │    │ • Validate   │    │ • Versioned  │
-│ • Web Page  │    │ • Schedule   │    │ • Realtime   │
-└────────────┘    └──────────────┘    └──────────────┘
-```
-
-### Pipeline Features
-- **Auto-scheduling** with cron expressions
-- **Smart Preview** — dry-run before committing
-- **Column mapping** — map source fields to target columns
-- **Conflict resolution** — skip, upsert, or replace
-- **Error tracking** — detailed error logs per source
-- **Pipeline Wizard** — step-by-step creation
-
----
-
-## 📊 Monitoring & Observability
-
-SelfBase monitors itself with built-in dashboards:
-
-```
-┌──────────────────────────────────────────────┐
-│  System Health                               │
-│                                               │
-│  CPU ████████░░░░░░  42%                     │
-│  RAM ██████░░░░░░░░  28%                     │
-│  Disk ████░░░░░░░░░  15%                     │
-│  Connections: 12 active                       │
-│  Requests/s: 342                              │
-│  Uptime: 99.97%                               │
-│                                               │
-│  🟢 All systems operational                  │
-└──────────────────────────────────────────────┘
-```
-
-### Alert System
-Configure alerts that trigger on thresholds:
-- **CPU** usage > 80%
-- **Error rate** > 5%
-- **Latency** > 500ms
-- **Disk** usage > 90%
-
-Alerts can notify via **webhooks** or **email**.
+### AI Bridge
+![AI Bridge](https://via.placeholder.com/800x450/1a1a2e/16c79a?text=AI+Bridge+Config+Formats)
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- [Bun](https://bun.sh/) runtime
-- Node.js 18+
+- **Node.js** 18+ or **Bun**
+- **npm** or **bun** package manager
 
-### Installation
+### 1. Clone & Install
 
 ```bash
-# Clone the repository
-git clone <repo-url> selfbase
+git clone https://github.com/Sifat-mahmud/selfbase.git
 cd selfbase
-
-# Install dependencies
 bun install
+```
 
-# Initialize the database
+### 2. Setup Database
+
+```bash
 bun run db:push
+```
 
-# Start the development server
+### 3. Start Development Server
+
+```bash
 bun run dev
 ```
 
-The app will be available at `http://localhost:3000`.
+Open [http://localhost:3000](http://localhost:3000) — Default login: `admin@selfbase.dev` / `admin123`
 
-### First-Time Setup
-
-1. Open `http://localhost:3000`
-2. Create your admin account
-3. Start building!
-
-### Mini-Services
-
-SelfBase uses microservices for background tasks:
+### 4. Start Microservices
 
 ```bash
-# Start the realtime WebSocket service (port 3003)
-cd mini-services/realtime-service && bun run dev
+# Realtime service (Socket.IO) — Port 3003
+cd mini-services/realtime-service && bun install && bun --hot index.ts
 
-# Start the pipeline scheduler (port 3004)
-cd mini-services/pipeline-scheduler && bun run dev
+# Pipeline scheduler — Port 3004
+cd mini-services/pipeline-scheduler && bun install && bun --hot index.ts
+
+# Web scraper (Playwright) — Port 3005
+cd mini-services/scraper-service && bun install && bun --hot index.ts
 ```
 
 ---
 
-## 📂 Project Structure
+## 📡 API Reference
+
+### External App API (v1)
+
+All v1 endpoints require an **App Token** (obtain via API key login).
+
+#### Auth
+```
+POST /api/v1/auth/login      # Login with API key → get app token
+POST /api/v1/auth/validate    # Check if token is valid
+POST /api/v1/auth/logout      # Revoke app token
+```
+
+#### Data
+```
+GET    /api/v1/data/{table}          # Query table rows
+POST   /api/v1/data/{table}          # Insert row
+GET    /api/v1/version/{table}       # Get table version hash
+```
+
+#### Functions
+```
+POST /api/v1/functions/{name}/invoke  # Execute function by name
+```
+
+### Admin API
+
+Admin endpoints require a **session token** (from dashboard login).
+
+```
+# Tables
+GET/POST    /api/tables
+GET/PUT/DELETE /api/tables/{id}
+GET/POST    /api/tables/{id}/rows
+GET/PUT/DELETE /api/tables/{id}/rows/{rowId}
+POST        /api/tables/{id}/columns
+
+# Pipelines
+GET/POST    /api/pipelines
+GET/PUT/DELETE /api/pipelines/{id}
+POST        /api/pipelines/{id}/run
+POST        /api/pipelines/{id}/preview
+POST        /api/pipelines/smart-preview
+POST        /api/pipelines/auto-create-table
+
+# Scrapers
+GET/POST    /api/scrapers
+GET/PUT/DELETE /api/scrapers/{id}
+POST        /api/scrapers/{id}/run
+POST        /api/scrapers/{id}/preview
+POST        /api/scrapers/generate-script
+
+# Functions
+GET/POST    /api/functions
+GET/PUT/DELETE /api/functions/{id}
+POST        /api/functions/{id}/run
+GET         /api/functions/runs
+
+# Import (AI Bridge)
+POST        /api/import              # Auto-detect type & create resource
+
+# AI
+GET/POST    /api/ai/llm-config
+POST        /api/ai/chat
+POST        /api/ai/embed
+POST        /api/ai/rag
+POST        /api/ai/search
+
+# Monitoring
+GET         /api/monitoring/heartbeat
+GET         /api/monitoring/uptime
+GET         /api/monitoring/metrics
+GET         /api/monitoring/load
+GET/POST    /api/monitoring/alerts
+
+# Storage
+GET/POST    /api/storage
+DELETE      /api/storage/{id}
+```
+
+---
+
+## 🤖 AI Bridge — How It Works
+
+SelfBase is a **backend service**, not a script generator. The AI Bridge lets you use any external AI to generate configs:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Copy the   │────▶│  Paste in   │────▶│  AI creates │────▶│  Import to  │
+│  Config Docs │     │  AI Chat    │     │  JSON files │     │  SelfBase   │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### Supported Config Types
+
+<details>
+<summary>📊 Table Schema</summary>
+
+```json
+{
+  "name": "my_table",
+  "displayName": "My Table",
+  "columns": [
+    { "name": "id", "type": "TEXT", "isPrimaryKey": true, "nullable": false },
+    { "name": "title", "type": "TEXT", "nullable": false },
+    { "name": "price", "type": "DECIMAL", "nullable": true },
+    { "name": "created_at", "type": "TIMESTAMP", "defaultValue": "CURRENT_TIMESTAMP" }
+  ],
+  "enableRealtime": false
+}
+```
+</details>
+
+<details>
+<summary>🌐 Web Scraper</summary>
+
+```json
+{
+  "name": "My Scraper",
+  "startUrl": "https://example.com",
+  "scraperScript": {
+    "steps": [
+      { "type": "navigate", "url": "https://example.com" },
+      { "type": "click", "selector": "button.menu" },
+      { "type": "extract", "name": "data", "repeat": ".item", "fields": [
+        { "name": "title", "selector": ".title", "type": "text" }
+      ]}
+    ]
+  },
+  "columnMapping": { "title": "title_column" },
+  "conflictMode": "upsert",
+  "conflictKey": "title"
+}
+```
+</details>
+
+<details>
+<summary>🔗 Pipeline Config</summary>
+
+```json
+{
+  "name": "My Pipeline",
+  "sourceType": "rest",
+  "url": "https://api.example.com/data",
+  "fetchInterval": 300,
+  "onConflict": "upsert",
+  "primaryKeyCols": ["id"],
+  "columnMappings": [
+    { "src": "api_field", "target": "table_column", "type": "TEXT" }
+  ]
+}
+```
+</details>
+
+<details>
+<summary>⚡ Function Script</summary>
+
+```json
+{
+  "name": "my_function",
+  "code": "function handler(input, env) { return { ok: true }; }",
+  "triggerType": "http",
+  "timeoutMs": 30000
+}
+```
+</details>
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | Next.js 16 (App Router, Turbopack) |
+| **Language** | TypeScript 5 |
+| **Styling** | Tailwind CSS 4 + shadcn/ui |
+| **Database** | Prisma ORM + SQLite |
+| **State** | Zustand + TanStack Query |
+| **Animations** | Framer Motion |
+| **Realtime** | Socket.IO |
+| **Scraping** | Playwright (headless Chromium) |
+| **Scheduling** | Custom cron-based scheduler |
+| **AI** | z-ai-web-dev-sdk (LLM, VLM, Embeddings) |
+| **Auth** | Session tokens + API keys + App tokens |
+
+---
+
+## 📁 Project Structure
 
 ```
 selfbase/
-├── prisma/
-│   └── schema.prisma          # Database schema (20 models)
 ├── src/
 │   ├── app/
-│   │   ├── api/               # 80+ API route handlers
-│   │   │   ├── v1/            # Public API (auth, data, sync)
-│   │   │   ├── tables/        # Table & row CRUD
-│   │   │   ├── functions/     # Serverless functions
-│   │   │   ├── pipelines/     # Data pipelines
-│   │   │   ├── scrapers/      # Web scrapers
-│   │   │   ├── ai/            # AI endpoints
-│   │   │   ├── storage/       # File storage
-│   │   │   ├── monitoring/    # System health
-│   │   │   ├── auth/          # User management
-│   │   │   ├── realtime/      # Realtime proxy
-│   │   │   └── ...
-│   │   └── page.tsx           # Main app entry
+│   │   ├── page.tsx              # Main admin dashboard
+│   │   ├── layout.tsx            # Root layout
+│   │   ├── proxy.ts              # Next.js 16 proxy (auth middleware)
+│   │   └── api/
+│   │       ├── tables/           # Table CRUD + rows
+│   │       ├── pipelines/        # Pipeline CRUD + runs
+│   │       ├── scrapers/         # Scraper CRUD + runs
+│   │       ├── functions/        # Function CRUD + execution
+│   │       ├── ai/               # LLM, embeddings, RAG
+│   │       ├── import/           # AI Bridge import
+│   │       ├── auth/             # Login, sessions, users
+│   │       ├── v1/               # External API (apps)
+│   │       ├── monitoring/       # Heartbeat, alerts
+│   │       └── storage/          # File management
 │   ├── components/
-│   │   ├── admin/             # 18 admin UI components
-│   │   └── ui/                # shadcn/ui primitives
-│   ├── hooks/
-│   │   └── use-realtime.ts    # WebSocket hook
-│   └── lib/
-│       ├── db.ts              # Prisma client
-│       ├── api-client.ts      # Frontend API helper
-│       ├── api-utils.ts       # Backend API utilities
-│       ├── app-auth.ts        # App token validation
-│       ├── realtime-emit.ts   # Server-side event emitter
-│       └── system-config.ts   # Configuration helpers
+│   │   ├── admin/               # Dashboard views
+│   │   ├── auth/                 # Login pages
+│   │   ├── ui/                   # shadcn/ui components (48+)
+│   │   └── theme-*.tsx          # Dark/light mode
+│   ├── hooks/                    # useRealtime, useToast, useMobile
+│   ├── lib/                      # DB, auth, API clients
+│   └── stores/                   # Zustand state
 ├── mini-services/
-│   ├── realtime-service/      # Socket.IO server (port 3003)
-│   └── pipeline-scheduler/    # Cron pipeline runner (port 3004)
-├── db/
-│   └── selfbase.db            # SQLite database file
-└── public/                    # Static assets
+│   ├── realtime-service/         # Socket.IO (port 3003)
+│   ├── pipeline-scheduler/      # Cron scheduler (port 3004)
+│   └── scraper-service/         # Playwright (port 3005)
+├── prisma/
+│   └── schema.prisma            # 20+ models
+└── public/                       # Static assets
 ```
 
 ---
 
-## 🔌 API Quick Reference
+## 🔌 Microservices
 
-### External App Authentication
+| Service | Port | Purpose |
+|---------|------|---------|
+| **Realtime** | 3003 | Socket.IO WebSocket server for live data push |
+| **Pipeline Scheduler** | 3004 | Cron-based pipeline execution |
+| **Scraper** | 3005 | Playwright headless browser scraping |
 
-```bash
-# 1. Login with API key → get short-lived token
-curl -X POST /api/v1/auth/login \
-  -H "Authorization: Bearer sb_live_xxxxxxxx"
+All microservices are standalone Bun projects with hot-reload.
 
-# Response: { "token": "...", "expiresAt": "...", "permissions": [...] }
+---
 
-# 2. Use token for all subsequent requests
-curl /api/tables/my_table/rows \
-  -H "Authorization: Bearer <token>"
+## 🧩 Database Schema
 
-# 3. Check if token is still valid
-curl -X POST /api/v1/auth/validate \
-  -H "Authorization: Bearer <token>"
+SelfBase uses **20+ Prisma models** covering:
 
-# 4. Revoke token
-curl -X POST /api/v1/auth/logout \
-  -H "Authorization: Bearer <token>"
-```
+- **Auth**: User, Session, ApiKey, AppToken, OAuthProvider
+- **Data**: SbTable, SbColumn, SbRow, SbSubscription
+- **Pipeline**: PipelineSource, PipelineRun, SourceError
+- **Scraper**: ScraperSitemap, ScrapeRun
+- **Functions**: SbFunction, FunctionRun
+- **Monitoring**: Heartbeat, TableCall, AlertConfig, AlertEvent
+- **AI**: Embedding, LlmConfig, LlmCall, RagSession
+- **Storage**: StorageFile
+- **System**: SystemConfig, DeferredRequest
 
-### Data Operations
+---
 
-```bash
-# List tables
-GET /api/tables
+## 🧪 Example: Full Stack in 5 Minutes
 
-# Create table
-POST /api/tables
-{ "name": "products", "columns": [{"name": "title", "type": "TEXT"}] }
+### 1. Create a Table
+Go to **Tables** → Click **New Table** → Define columns like `name`, `price`, `stock`
 
-# Insert row
-POST /api/tables/{id}/rows
-{ "data": { "title": "Widget", "price": 9.99 } }
+### 2. Setup a Scraper
+Go to **Web Scraper** → Create a multi-step script:
+- Navigate to the product page
+- Click on the category menu
+- Extract product data
+- Map fields to table columns
 
-# Query rows
-GET /api/tables/{id}/rows?page=1&pageSize=50&search=widget
+### 3. Create a Pipeline
+Go to **Pipeline Studio** → Connect an API or scraper → Set schedule → Map columns
 
-# Update row
-PUT /api/tables/{id}/rows/{rowId}
-{ "data": { "price": 12.99 } }
-
-# Delete row
-DELETE /api/tables/{id}/rows/{rowId}
-```
-
-### Realtime Connection
-
+### 4. Write a Function
+Go to **Functions** → Create a function:
 ```javascript
-import { io } from 'socket.io-client'
-
-const socket = io('/?XTransformPort=3003')
-
-// Subscribe to a table
-socket.emit('subscribe', { tableId: 'your-table-id' })
-
-// Listen for changes
-socket.on('data-changed', (data) => {
-  console.log(data.eventType, data.row)  // insert/update/delete
-})
-
-// Listen for version changes
-socket.on('update-available', (data) => {
-  console.log('New version:', data.versionHash)
-})
+function handler(input, env) {
+  // Check if price dropped below threshold
+  if (input.price < input.threshold) {
+    return { alert: true, message: `Price dropped to ${input.price}` };
+  }
+  return { alert: false };
+}
 ```
 
-### Local-First Sync
-
+### 5. Connect from Your App
 ```bash
-# Fetch data with version tracking
-GET /api/v1/data/products
-Headers: If-None-Match: "abc123"
+# Get an app token
+curl -X POST /api/v1/auth/login \
+  -H "Authorization: Bearer sb_live_YOUR_API_KEY"
 
-# 200 → New data available (with ETag)
-# 304 → Not modified (no data transferred)
+# Query data
+curl /api/v1/data/products \
+  -H "Authorization: Bearer YOUR_APP_TOKEN"
 
-# Incremental sync
-GET /api/v1/data/products?since=2025-01-01T00:00:00Z
+# Invoke a function
+curl -X POST /api/v1/functions/check_price/invoke \
+  -H "Authorization: Bearer YOUR_APP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"price": 29.99, "threshold": 30}'
 ```
 
 ---
 
-## 🗺️ Roadmap
+## 📝 Scripts
 
-| Status | Feature | Description |
-|--------|---------|-------------|
-| ✅ | Dynamic Tables | Create/modify tables at runtime |
-| ✅ | API Authentication | API Keys + App Tokens for external apps |
-| ✅ | Realtime Database | WebSocket subscriptions per table |
-| ✅ | Serverless Functions | JS/TS functions with HTTP/schedule/event triggers |
-| ✅ | Data Pipelines | REST/RSS/WS/Scraper sources with auto-scheduling |
-| ✅ | Web Scrapers | Paginated scraping with stealth mode |
-| ✅ | AI Engine | Multi-provider LLM, embeddings, RAG |
-| ✅ | File Storage | Buckets, presigned URLs, metadata |
-| ✅ | Monitoring | Metrics, heartbeat, alert rules |
-| ✅ | API Playground | 85+ documented endpoints with live testing |
-| 🔜 | Auth on WebSocket | Token validation on Socket.IO connect |
-| 🔜 | Reconnect Catchup | Missed-change sync after reconnection |
-| 🔜 | Conflict Resolution | UI for concurrent edit conflicts |
-| 🔜 | Rate Limiting | Per-API-key request throttling |
-| 🔜 | Multi-Tenant | Team/organization isolation |
-| 🔜 | GraphQL API | Alternative query interface |
-| 🔜 | Edge Functions | Deno-based edge runtime |
+| Command | Description |
+|---------|-------------|
+| `bun run dev` | Start Next.js dev server (port 3000) |
+| `bun run build` | Production build |
+| `bun run lint` | ESLint check |
+| `bun run db:push` | Push Prisma schema to SQLite |
+| `bun run db:generate` | Generate Prisma client |
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
 ## 📄 License
 
-Private — All rights reserved.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
 <p align="center">
-  Built with ❤️ using Next.js, Prisma, and Socket.IO
+  Built with ❤️ using Next.js, Prisma, Playwright & Socket.IO<br/>
+  <strong><a href="https://selfbase.space-z.ai/">Try SelfBase Live →</a></strong>
 </p>
