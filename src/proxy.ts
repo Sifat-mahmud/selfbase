@@ -7,9 +7,6 @@ const PUBLIC_ROUTES = [
   '/api/v1/auth/login',
 ]
 
-// Routes that are accessible with any valid auth (admin session OR app token)
-const AUTH_REQUIRED_ROUTES_PREFIX = '/api/'
-
 // Routes only for admin sessions (not app tokens)
 const ADMIN_ONLY_ROUTES = [
   '/api/auth/',
@@ -23,7 +20,7 @@ const ADMIN_ONLY_ROUTES = [
   '/api/auth/logout',
 ]
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Only process /api/* routes
@@ -51,7 +48,6 @@ export async function middleware(request: NextRequest) {
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     // For self-hosted platform, pass through but mark as unauthenticated
-    // The route handlers themselves check auth when needed
     const requestHeaders = new Headers(request.headers)
     requestHeaders.set('x-auth-method', 'none')
     return NextResponse.next({ request: { headers: requestHeaders } })
@@ -67,12 +63,10 @@ export async function middleware(request: NextRequest) {
     if (pathname === '/api/v1/auth/login') {
       requestHeaders.set('x-auth-method', 'api-key')
     } else {
-      // API keys can't be used directly - must login first
       requestHeaders.set('x-auth-method', 'none')
     }
   } else {
     // Either admin session token or app token - pass through
-    // Route handlers will validate using auth-utils or app-auth
     requestHeaders.set('x-auth-method', 'bearer-token')
   }
 
