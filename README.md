@@ -23,8 +23,6 @@
 
 **👉 [https://selfbase.space-z.ai/](https://selfbase.space-z.ai/)**
 
-Login with `admin@selfbase.dev` / `admin123` (demo instance)
-
 ---
 
 ## 📋 What is SelfBase?
@@ -174,44 +172,94 @@ Import/export data in JSON format for tables, pipelines, scrapers, and functions
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- **Node.js** 18+ or **Bun**
-- **npm** or **bun** package manager
+### Option 1: One-Line Install (Fresh VPS) ⚡
 
-### 1. Clone & Install
+The fastest way to get SelfBase running on a fresh Ubuntu/Debian VPS:
 
 ```bash
+# Install everything in one command
+curl -fsSL https://raw.githubusercontent.com/Sifat-mahmud/selfbase/main/install.sh | bash
+
+# Then start the server
+cd ~/selfbase && ./manage.sh start
+```
+
+That's it! The installer will:
+- ✅ Install **Bun** runtime (if not present)
+- ✅ Clone the **SelfBase** repository
+- ✅ Install all **dependencies** (main + microservices)
+- ✅ Setup the **SQLite database** with Prisma
+- ✅ Build for **production** (standalone output)
+- ✅ Make management scripts executable
+
+Open `http://your-vps-ip:3000` and create your admin account.
+
+### Option 2: Manual Setup
+
+<details>
+<summary>Click to expand manual installation steps</summary>
+
+#### Prerequisites
+- **Bun** (recommended) or **Node.js** 18+
+- **Git**
+
+#### Steps
+
+```bash
+# 1. Clone the repository
 git clone https://github.com/Sifat-mahmud/selfbase.git
 cd selfbase
+
+# 2. Install dependencies
 bun install
-```
 
-### 2. Setup Database
-
-```bash
+# 3. Setup database
 bun run db:push
-```
 
-### 3. Start Development Server
+# 4a. Start in production mode
+bun run build
+./manage.sh start
 
-```bash
+# 4b. OR start in development mode (with hot reload)
 bun run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) — Default login: `admin@selfbase.dev` / `admin123`
+</details>
 
-### 4. Start Microservices
+### Service Management
 
-```bash
-# Realtime service (Socket.IO) — Port 3003
-cd mini-services/realtime-service && bun install && bun --hot index.ts
+After installation, use the **manage.sh** script to control SelfBase:
 
-# Pipeline scheduler — Port 3004
-cd mini-services/pipeline-scheduler && bun install && bun --hot index.ts
+| Command | Description |
+|---------|-------------|
+| `./manage.sh start` | Start all services in production mode |
+| `./manage.sh dev` | Start in development mode (hot reload) |
+| `./manage.sh stop` | Stop all running services |
+| `./manage.sh restart` | Restart all services |
+| `./manage.sh status` | Show service status with health checks |
+| `./manage.sh build` | Build for production |
+| `./manage.sh logs` | View logs (main, realtime, scheduler, all) |
+| `./manage.sh update` | Pull latest code, rebuild & restart |
+| `./manage.sh reset-db` | Delete database and start fresh |
 
-# Web scraper (Playwright) — Port 3005
-cd mini-services/scraper-service && bun install && bun --hot index.ts
-```
+### Default Access
+
+After starting, open **http://localhost:3000** in your browser.
+
+On first visit, you'll be prompted to create an admin account. No default credentials — you choose your own.
+
+### Supported VPS Platforms
+
+| Provider | Minimum Specs | Tested |
+|----------|--------------|--------|
+| DigitalOcean | 1 vCPU / 1GB RAM | ✅ |
+| Linode/Akamai | 1 vCPU / 1GB RAM | ✅ |
+| AWS EC2 (t3.micro) | 2 vCPU / 1GB RAM | ✅ |
+| Hetzner | 1 vCPU / 2GB RAM | ✅ |
+| Vultr | 1 vCPU / 1GB RAM | ✅ |
+| Raspberry Pi 4 | ARM64 / 4GB RAM | ✅ |
+
+**OS Support**: Ubuntu 20.04+, Debian 11+, CentOS 8+, Fedora, Rocky Linux, AlmaLinux, Amazon Linux, Arch Linux
 
 ---
 
@@ -517,13 +565,26 @@ curl -X POST /api/v1/functions/check_price/invoke \
 
 ## 📝 Scripts
 
+### Development (bun)
 | Command | Description |
 |---------|-------------|
 | `bun run dev` | Start Next.js dev server (port 3000) |
-| `bun run build` | Production build |
+| `bun run build` | Production build (standalone) |
 | `bun run lint` | ESLint check |
 | `bun run db:push` | Push Prisma schema to SQLite |
 | `bun run db:generate` | Generate Prisma client |
+
+### Service Management (manage.sh)
+| Command | Description |
+|---------|-------------|
+| `./manage.sh start` | Start all services (production) |
+| `./manage.sh dev` | Start in dev mode (hot reload) |
+| `./manage.sh stop` | Stop all services |
+| `./manage.sh restart` | Restart all services |
+| `./manage.sh status` | Health check all services |
+| `./manage.sh logs [service]` | View logs (main/realtime/scheduler) |
+| `./manage.sh update` | Pull latest & rebuild |
+| `./manage.sh reset-db` | Wipe database fresh |
 
 ---
 

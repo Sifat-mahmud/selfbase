@@ -59,5 +59,9 @@ server.log
 # Skills directory
 /skills/
 
+# Service manager runtime files
+.pids/
+.logs/
+
 # Tool results
 tool-results/
