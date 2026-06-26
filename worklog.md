@@ -1,5 +1,35 @@
 # SelfBase Worklog
 
+## Session R31 - VPS Installation Scripts
+
+---
+Task ID: 1
+Agent: Main
+Task: Add installation scripts so anyone can run 2-3 commands on a fresh VPS and get SelfBase running
+
+Work Log:
+- Created `install.sh` — one-line automated VPS installer
+- Created `manage.sh` — 9 service management commands (start/stop/restart/status/dev/build/logs/update/reset-db)
+- Fixed DATABASE_URL for standalone production mode (absolute path since CWD changes)
+- Updated README with one-line install, service management, VPS platforms
+- Tested all commands: start, stop, status, logs, restart, help
+- Verified production mode end-to-end via agent-browser
+- Pushed to GitHub
+
+Stage Summary:
+- ✅ `install.sh` — `curl -fsSL ... | bash` installs everything
+- ✅ `manage.sh` — `./manage.sh start` runs the production server
+- ✅ Production mode verified working with correct DB path
+- ✅ README updated with installation instructions
+- ✅ Pushed to GitHub (commit 7a1b7c0)
+
+### Installation Flow:
+```
+Fresh VPS → curl install.sh | bash → cd ~/selfbase → ./manage.sh start
+```
+
+---
+
 ## Session R30 - Deployment Fix: output:standalone + Config Cleanup
 
 ---
