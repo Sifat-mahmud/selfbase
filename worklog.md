@@ -1,5 +1,118 @@
 # SelfBase Worklog
 
+## Session R32 — v1.1: Full v1 API + TaskFlow Demo App
+
+---
+Task ID: 1
+Agent: Main
+Task: Test all features, generate configs via AI, build demo GUI using SelfBase as backend, enhance features for app backend requirements
+
+Work Log:
+- **v1 API Enhancements** (delegated to subagent Task 2-a):
+  - POST /api/v1/data/{table} — insert rows from external apps
+  - PUT /api/v1/data/{table}/{rowId} — update rows (merge semantics)
+  - DELETE /api/v1/data/{table}/{rowId} — delete rows
+  - GET /api/v1/data/{table}/{rowId} — fetch single row
+  - POST /api/v1/functions/{name}/invoke — invoke functions by name
+  - GET /api/v1/functions — list available functions (no code exposed)
+  - GET /api/v1/tables — list available tables (for app discovery)
+  - All endpoints enforce app token auth + permission checks
+  - Realtime events fired on insert/update/delete
+
+- **AI Bridge Test** (delegated to subagent Task 2-b):
+  - Used z-ai-web-dev-sdk LLM to generate table/function/pipeline configs
+  - Successfully imported all configs via /api/import/* endpoints
+  - Tested imported resources: row insert, function run, pipeline preview
+  - Found issues: pipeline auto-runs on import (should default to inactive), function sandbox lacks DB access
+
+- **TaskFlow Demo App** (public/demo/index.html):
+  - Complete task manager app using SelfBase as backend
+  - Dark theme with emerald accents, responsive design
+  - Kanban board (To Do / In Progress / Done) with drag-free cards
+  - Stats dashboard (total, completion rate, in progress, overdue)
+  - Team member sidebar with filtering
+  - Task create/edit/delete modal with priority, assignee, due date, tags
+  - API Key → App Token authentication flow
+  - CRUD via /api/v1/data/demo_tasks
+  - Function invocation via /api/v1/functions/demo_stats/invoke
+  - Realtime via Socket.IO (with 30s polling fallback)
+  - LocalStorage persistence for API key and token
+
+- **Demo Setup API** (/api/demo/setup):
+  - POST: One-click bootstrap — creates demo_tasks + demo_users tables, demo_stats function, API key
+  - Seeds 5 sample tasks and 3 team members
+  - GET: Returns readiness status
+  - Idempotent — can be called multiple times safely
+
+- **Dashboard Integration**:
+  - Added "TaskFlow — Live Demo App" card to admin dashboard
+  - Shows backend connection details (tables, function, auth, realtime)
+  - "Open Demo" button opens /demo/index.html in new tab
+  - Emerald gradient styling with hover effects
+
+- **Testing**:
+  - Verified v1 API full CRUD cycle (create → read → update → delete)
+  - Verified function invocation returns correct stats
+  - Verified demo app loads, displays data, creates/edits tasks
+  - Completion rate correctly updates (17% → 29% after marking task done)
+  - Lint passes clean
+
+Stage Summary:
+- ✅ v1 API now supports full CRUD — external apps can use SelfBase as a complete backend
+- ✅ AI Bridge verified end-to-end (LLM → JSON → import → working resources)
+- ✅ TaskFlow demo app proves SelfBase works as an app backend
+- ✅ Demo accessible from admin dashboard
+- ✅ Pushed to GitHub (develop + main branches)
+
+### v1 API Endpoint Summary:
+```
+Authentication:
+  POST /api/v1/auth/login        — API key → app token
+  POST /api/v1/auth/validate     — check token
+  POST /api/v1/auth/logout       — revoke token
+
+Data (CRUD):
+  GET    /api/v1/data/{table}          — list rows (ETag/version)
+  POST   /api/v1/data/{table}          — insert row
+  GET    /api/v1/data/{table}/{rowId}  — get single row
+  PUT    /api/v1/data/{table}/{rowId}  — update row (merge)
+  DELETE /api/v1/data/{table}/{rowId}  — delete row
+
+Version Check:
+  HEAD   /api/v1/version/{table}       — get ETag only
+
+Discovery:
+  GET    /api/v1/tables                — list tables
+  GET    /api/v1/functions             — list functions
+
+Functions:
+  POST   /api/v1/functions/{name}/invoke — run function by name
+```
+
+### Demo App Architecture:
+```
+User opens /demo → Setup (admin login → POST /api/demo/setup → API key)
+                         ↓
+              POST /api/v1/auth/login (API key → app token)
+                         ↓
+              GET /api/v1/data/demo_tasks → render board
+              GET /api/v1/data/demo_users → render team
+              POST /api/v1/functions/demo_stats/invoke → render stats
+                         ↓
+              CRUD operations → PUT/POST/DELETE /api/v1/data/demo_tasks
+              Realtime → Socket.IO subscribe to table changes
+```
+
+### Priority Recommendations for Next Phase:
+1. Fix pipeline import to default isActive: false (prevent auto-run before review)
+2. Add DB/API access to function sandbox (so functions can query data)
+3. Add valueMap/transform support to pipeline column mappings
+4. Add rate limiting per API key
+5. Add API usage analytics per key
+6. Make realtime work in production (Socket.IO CDN loading issue in headless)
+
+---
+
 ## Session R25 - API Authentication System for External Apps
 
 ---
