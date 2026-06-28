@@ -28,6 +28,8 @@ import {
   Sparkles,
   Layers,
   CircleDot,
+  ExternalLink,
+  Rocket,
 } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -1138,6 +1140,11 @@ function DashboardContent({
         <QuickActionsCard />
         <ApiReferenceCard />
       </motion.div>
+
+      {/* ====================== DEMO APP ====================== */}
+      <motion.div variants={itemVariants}>
+        <DemoAppCard />
+      </motion.div>
     </motion.div>
   )
 }
@@ -2013,6 +2020,60 @@ function QuickActionsCard() {
               </div>
             </motion.button>
           ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// =====================================================================
+// DEMO APP CARD — TaskFlow demo powered by SelfBase
+// =====================================================================
+
+function DemoAppCard() {
+  return (
+    <Card className="group relative overflow-hidden border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-card to-card transition-shadow duration-300 hover:shadow-lg hover:shadow-emerald-500/10">
+      <div className="absolute inset-x-0 top-0 h-[2px] origin-left scale-x-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 transition-transform duration-300 ease-out group-hover:scale-x-100" />
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <span className="rounded-md bg-emerald-500/10 p-1 text-emerald-600">
+            <Rocket className="h-4 w-4" />
+          </span>
+          TaskFlow — Live Demo App
+          <Badge variant="secondary" className="ml-1 bg-emerald-500/10 text-emerald-600">Powered by SelfBase</Badge>
+        </CardTitle>
+        <CardDescription>
+          A complete task manager app using SelfBase as its backend — tables, functions, auth & realtime
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-4">
+            <div>
+              <span className="text-muted-foreground">Tables</span>
+              <p className="font-mono text-xs text-emerald-600">demo_tasks, demo_users</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Function</span>
+              <p className="font-mono text-xs text-emerald-600">demo_stats</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Auth</span>
+              <p className="font-mono text-xs text-emerald-600">API Key → Token</p>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Realtime</span>
+              <p className="font-mono text-xs text-emerald-600">Socket.IO</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <a href="/demo/index.html" target="_blank" rel="noopener noreferrer">
+              <Button className="gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700">
+                <ExternalLink className="h-4 w-4" />
+                Open Demo
+              </Button>
+            </a>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -305,3 +305,201 @@ Stage Summary:
 - ✅ Covers all features: Database, Realtime, Auth, Functions, AI, Pipelines, Scrapers, Storage, Monitoring
 - ✅ Includes quick-start guide and API reference
 - ✅ ASCII art diagrams for architecture, data flow, and UI mockups
+
+---
+
+## Session R30 - v1 API Write Endpoints & Function Invocation
+
+---
+Task ID: 2-a
+Agent: full-stack-developer
+Task: Add write-side endpoints (insert/update/delete rows), function invocation, and table/function discovery to the v1 API namespace so external apps can use SelfBase as a real backend.
+
+Work Log:
+- Read existing v1 patterns: `/api/v1/data/[table]/route.ts` (GET), `/api/v1/auth/login/route.ts`, `/lib/app-auth.ts`, `/lib/api-utils.ts`, `/lib/realtime-emit.ts`, `/api/functions/[id]/run/route.ts`, `/api/tables/[id]/rows/[rowId]/route.ts` for consistency
+- Added `POST /api/v1/data/[table]` (insert row) to the existing `src/app/api/v1/data/[table]/route.ts`:
+  - Validates app token via `validateAppToken`, requires `write` or `admin` permission
+  - Finds table by `[table]` name param
+  - Body itself is the row data — stored as `data: JSON.stringify(body)`
+  - Increments `table.rowCount`, refreshes `table.versionHash` (sha256 hex truncated to 16 chars)
+  - Emits `insert` realtime event via `emitRealtimeEvent`
+  - Returns 201 with the created row on success; 400 if body is not a JSON object
+- Created NEW file `src/app/api/v1/data/[table]/[rowId]/route.ts` with three handlers:
+  - `GET` — fetch a single row by ID (any permission)
+  - `PUT` — update a row; merges body into existing data (supports partial updates), increments `row.version`, refreshes table version hash, emits `update` realtime event (requires `write`/`admin`)
+  - `DELETE` — delete the row, decrement `table.rowCount` (clamped to 0), refresh version hash, emit `delete` realtime event (requires `write`/`admin`)
+- Created NEW file `src/app/api/v1/functions/[name]/invoke/route.ts` (POST):
+  - Validates app token (any permission)
+  - Finds function by `[name]` param (unique field on `SbFunction`)
+  - Refuses inactive functions with 400
+  - Creates a `FunctionRun` with `triggeredBy: 'app'`, `status: 'running'`
+  - Executes the function code in the same sandboxed `new Function(...)` pattern as the admin route (handler / module.exports / .handler / .default fallback, env vars injection, configurable timeout)
+  - Updates the run record with status (success/timeout/failed), output, error, durationMs, completedAt
+  - Returns runId, functionName, status, output, durationMs
+- Created NEW file `src/app/api/v1/functions/route.ts` (GET):
+  - Validates app token (any permission)
+  - Returns metadata-only list of active functions (id, name, description, triggerType, updatedAt) — never the code/env vars
+  - Supports app discovery use case
+- Created NEW file `src/app/api/v1/tables/route.ts` (GET):
+  - Validates app token (any permission)
+  - Returns tables with `id, name, displayName, description, rowCount, enableRealtime, updatedAt, columns[]`
+  - System tables hidden by default; `?includeSystem=true` to include them
+  - `?search=` filter matches `name` or `displayName` (contains, case-insensitive via Prisma)
+  - Sensitive fields (RLS rules, schema JSON, priority, embedding config) are NOT exposed
+- All endpoints verified via curl:
+  1. Login as admin → create API key (`read,write,admin`) → login at `/api/v1/auth/login` → get app token
+  2. Also created a read-only API key (`read`) to verify permission enforcement
+- Test results (all passed):
+  - `GET /api/v1/tables` → 200, lists 5 tables with columns (products, tasks, analytics, metrics, cse_stocks)
+  - `GET /api/v1/functions` → 200, lists 3 active functions (assign_task, hello, notify_overdue_tasks) — no code exposed
+  - `POST /api/v1/data/products` with `{"title":"Widget 2a","price":19.99,"inStock":true}` → 201, returns created row with version=1
+  - `GET /api/v1/data/products/{id}` → 200, returns single row
+  - `PUT /api/v1/data/products/{id}` with `{"price":24.99,"tags":["new","featured"]}` → 200, data merged (title kept), version=2
+  - `DELETE /api/v1/data/products/{id}` → 200, `{deleted:true, id}`; subsequent GET → 404
+  - `POST /api/v1/functions/hello/invoke` with `{"name":"World"}` → 200, output `{message:"Hello World"}`, durationMs=19
+  - `POST /api/v1/functions/assign_task/invoke` with `{"taskId":"t123","userId":"u456"}` → 200, output confirms assignment, durationMs=15
+  - Verified in `/api/functions/runs` that both invocations recorded `triggeredBy: "app"` (distinct from older `triggeredBy: "http"` runs from the admin route)
+  - Negative tests: missing auth → 401; bad token → 401; non-existent table → 404; non-existent function → 404; non-existent row → 404; non-object body on POST/PUT → 400
+  - Permission tests with read-only key: list tables/functions allowed; POST/PUT/DELETE all return 403 with "Insufficient permissions" message
+  - `GET /api/v1/data/products` (existing GET) still works — POST was added without breaking it
+- `bun run lint` clean
+- Dev server log shows no errors; all v1 routes returning proper HTTP status codes (200/201/400/401/403/404)
+
+Stage Summary:
+- ✅ SelfBase is now a usable app backend — external apps can read AND write data, plus invoke serverless functions, all through the v1 API namespace
+- ✅ Endpoints added:
+  - `POST   /api/v1/data/{table}`              — insert a row (write/admin)
+  - `GET    /api/v1/data/{table}/{rowId}`      — fetch one row (any perm)
+  - `PUT    /api/v1/data/{table}/{rowId}`      — update a row (write/admin)
+  - `DELETE /api/v1/data/{table}/{rowId}`      — delete a row (write/admin)
+  - `POST   /api/v1/functions/{name}/invoke`   — run a function by name (any perm)
+  - `GET    /api/v1/functions`                 — list active functions, metadata only (any perm)
+  - `GET    /api/v1/tables`                    — list tables with columns (any perm)
+- ✅ Auth: all new routes validate app token via `validateAppToken`; write routes require `write` or `admin` permission
+- ✅ Realtime events emitted on insert/update/delete (only fires if table has `enableRealtime: true`)
+- ✅ Version hash + row count kept in sync on every mutation
+- ✅ FunctionRun records properly tagged `triggeredBy: "app"` to distinguish from admin/scheduler invocations
+- ✅ Discovery endpoints hide sensitive data (function code/env vars, table RLS rules/schema JSON)
+- ✅ Lint clean, dev server stable, no errors in log
+
+### Example curl commands (for the next agent / docs):
+```bash
+# 1. Admin login (session token)
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@selfbase.dev","password":"admin123"}'
+# → {"success":true,"token":"<SESSION>","user":{...}}
+
+# 2. Create API key (admin session token)
+curl -X POST http://localhost:3000/api/api-keys \
+  -H "Authorization: Bearer <SESSION>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My App","permissions":"read,write,admin"}'
+# → {"success":true,"apiKey":{"key":"sb_live_xxx",...}}
+
+# 3. Exchange API key for app token
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Authorization: Bearer sb_live_xxx"
+# → {"success":true,"token":"<APP_TOKEN>","expiresIn":3600,...}
+
+# 4. List tables
+curl http://localhost:3000/api/v1/tables -H "Authorization: Bearer <APP_TOKEN>"
+
+# 5. Insert a row
+curl -X POST http://localhost:3000/api/v1/data/products \
+  -H "Authorization: Bearer <APP_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Widget","price":19.99,"inStock":true}'
+# → 201 {"success":true,"data":{"id":"...","data":{...},"version":1,...}}
+
+# 6. Update the row (partial merge)
+curl -X PUT http://localhost:3000/api/v1/data/products/<rowId> \
+  -H "Authorization: Bearer <APP_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"price":24.99}'
+# → 200, version=2
+
+# 7. Delete the row
+curl -X DELETE http://localhost:3000/api/v1/data/products/<rowId> \
+  -H "Authorization: Bearer <APP_TOKEN>"
+# → 200 {"success":true,"data":{"deleted":true,"id":"..."}}
+
+# 8. List functions (metadata only)
+curl http://localhost:3000/api/v1/functions -H "Authorization: Bearer <APP_TOKEN>"
+
+# 9. Invoke a function by name
+curl -X POST http://localhost:3000/api/v1/functions/hello/invoke \
+  -H "Authorization: Bearer <APP_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"World"}'
+# → 200 {"success":true,"data":{"runId":"...","status":"success","output":{...}}}
+```
+
+### Notes / minor decisions:
+- For POST/PUT the request body IS the row data directly (not wrapped in `{data: ...}`) — simpler SDK ergonomics for external mobile apps.
+- PUT does a merge (PATCH-like) instead of a full replacement, matching the existing admin route at `/api/tables/[id]/rows/[rowId]`. This makes partial updates work cleanly from mobile clients on flaky networks.
+- `triggeredBy: 'app'` is used for v1 function invocations (vs `'http'` for the admin route) so admins can attribute runs to external apps vs internal triggers in the Functions → Runs dashboard.
+- The existing GET handler at `/api/v1/data/[table]` was left untouched (it has no app-token check — that's a pre-existing decision; the task explicitly said not to modify existing routes, only add to them).
+
+### Priority Recommendations for Next Phase:
+1. Add rate limiting per API key (per-route and global)
+2. Add per-key usage analytics (request count, latency, error rate) — FunctionRun/SbRow mutations could feed a TableCall-style aggregation
+3. Add `PATCH /api/v1/data/{table}/{rowId}` as an alias for PUT (semantic clarity for mobile SDKs)
+4. Add bulk endpoints: `POST /api/v1/data/{table}/batch` (insert array), `DELETE /api/v1/data/{table}/batch?ids=...`
+5. Add query filtering on `GET /api/v1/data/{table}` (e.g. `?filter={"price":{"$gt":10}}`) — currently only `since`/`limit`/`offset` are supported
+6. Add `GET /api/v1/functions/{name}` to fetch one function's metadata (still no code)
+7. Add an OpenAPI/Swagger spec auto-generated from the v1 routes for client SDK codegen
+8. Consider auth on the existing `GET /api/v1/data/{table}` and `HEAD /api/v1/version/{table}` for consistency
+
+---
+
+Task ID: 2-b
+Agent: general-purpose
+Task: Test AI Bridge - generate configs via LLM and import them
+
+Work Log:
+- Read worklog.md to understand prior context (sessions R25–R29 covering API auth, playground expansion, dialog fixes, realtime DB, README).
+- Located the AI Bridge feature source. Note: `src/components/admin/ai-bridge.tsx` does not exist — the actual implementation lives in `src/components/admin/data-transfer.tsx` (Data Transfer / AI Prompts component). AI prompt templates for tables/functions/pipelines/scrapers are defined inline there.
+- Read all four import routes to learn the exact config schemas:
+  - `/api/import/tables` — body `{ items: [{ name, displayName?, description?, columns: [{ name, type, nullable?, defaultValue?, isPrimaryKey?, isUnique?, isIndexed? }], rows: [{...}] }], mode: 'append'|'replace' }`
+  - `/api/import/functions` — body `{ items: [{ name, description?, code?, runtime?, triggerType?, triggerConfig?, envVars?, timeoutMs?, memoryMb?, isActive? }], mode }`
+  - `/api/import/pipelines` — body `{ items: [{ name, description?, sourceType?, url?, method?, headers?, authType?, authConfig?, jsonPath?, fetchInterval?, isActive?, onConflict?, targetTableName?, columnMappings?, primaryKeyCols?, preRunAction?, paginationMode?, paginationConfig?, maxPages?, maxRetries?, retryBackoff?, timeoutMs?, ssrfProtection? }], mode }`
+  - `/api/import/scrapers` — similar shape with startUrl/selectorTree/paginationConfig
+- Invoked the `LLM` skill to learn the z-ai-web-dev-sdk chat completions API (backend-only, `await ZAI.create()` → `zai.chat.completions.create({ messages, thinking: {type:'disabled'} })`).
+- Wrote `/home/z/my-project/test-ai-bridge.mjs` — Node ESM script that imports `z-ai-web-dev-sdk`, issues three chat completions (one per resource type) using the prompt templates from data-transfer.tsx, strips any markdown fences, parses the JSON, and writes:
+  - `ai-bridge-test/tables-config.json` (7136 bytes; tasks table w/ 9 cols + 5 sample rows, users table w/ 6 cols + 5 sample rows)
+  - `ai-bridge-test/functions-config.json` (2454 bytes; `assign_task` http trigger + `notify_overdue_tasks` schedule trigger cron `0 9 * * *`)
+  - `ai-bridge-test/pipelines-config.json` (1057 bytes; `fetchSampleTasks` pipeline → JSONPlaceholder /todos → tasks table, onConflict=update, 4 columnMappings)
+- Ran the script with `node test-ai-bridge.mjs` — all three LLM calls succeeded, JSON parsed cleanly, files written. The z-ai-web-dev-sdk worked on the first try with no auth or config issues.
+- Logged in as admin via `POST /api/auth/login` → got session token `399b99c3-cb89-4332-ad60-5f802b7f2ed7`.
+- Imported all three configs via the import APIs:
+  - Tables → `{imported:1, skipped:1, errors:[]}` (tasks imported; users skipped because a `users` table already existed in the DB from session R25 and mode defaulted to `append`)
+  - Functions → `{imported:2, skipped:0, errors:[]}` (assign_task + notify_overdue_tasks)
+  - Pipelines → `{imported:1, skipped:0, errors:[]}` (fetchSampleTasks)
+- Verified the imported resources via GET endpoints:
+  - `/api/tables` — `tasks` table appeared with 9 columns and 200 rows (see Stage Summary for why 200)
+  - `/api/functions` — both imported functions appeared (assign_task http, notify_overdue_tasks schedule)
+  - `/api/pipelines` — fetchSampleTasks appeared, target table resolved correctly by name
+- Functional tests:
+  1. Inserted a row into tasks table via `POST /api/tables/{id}/rows` with `{data:{id:99999,title:"Test AI Bridge task",...}}` → returned 201 with row id, version=1
+  2. Ran `assign_task` via `POST /api/functions/{id}/run` with `{taskId:99999,userId:1}` → `{success:true, output:{success:true, message:"Task 99999 assigned to user 1"}, durationMs:11}`
+  3. Ran `notify_overdue_tasks` (bonus) → returned 2 hardcoded overdue tasks (LLM-generated code doesn't actually query the DB), durationMs:11
+  4. Previewed `fetchSampleTasks` via `POST /api/pipelines/{id}/preview` with `{}` → fetched 200 todos from jsonplaceholder.typicode.com in 46ms, columns mapped (id→id, userId→assignee, title→title, completed→status), previewRows returned correctly
+- Cleanup:
+  - Deleted the imported DB resources via DELETE routes (pipeline, both functions, tasks table) — all returned `{success:true}`
+  - Deleted `test-ai-bridge.mjs` and the entire `ai-bridge-test/` directory
+  - Verified no `tasks`/`assign_task`/`notify_overdue_tasks`/`fetchSampleTasks` resources remain in the DB
+
+Stage Summary:
+- ✅ AI Bridge end-to-end flow tested successfully: LLM (z-ai-web-dev-sdk) generated valid SelfBase JSON configs → import APIs accepted them → resources appeared in GET endpoints → resources functioned correctly (row insert, function run, pipeline preview all returned success)
+- ✅ z-ai-web-dev-sdk works out-of-the-box in Node ESM context with `import ZAI from 'z-ai-web-dev-sdk'` + `await ZAI.create()` — no API key or env config needed
+- ✅ All four import routes (/api/import/{tables,functions,pipelines,scrapers}) accept the JSON shape documented in the prompt templates in data-transfer.tsx
+- ✅ `targetTableName` in pipeline config is correctly resolved to `targetTableId` by the import route (verified by GET /api/pipelines showing the resolved table id)
+- ✅ Pipeline preview endpoint correctly applies column mappings and returns previewRows without writing to DB
+- ✅ Function execution sandbox works correctly — `module.exports.handler = async (input) => {...}` pattern is recognized and executed
+- ⚠️ IMPORTANT FINDING #1 — Pipeline scheduler auto-runs imported active pipelines: The `mini-services/pipeline-scheduler` (port 3010) polls the DB every 5s for active pipelines. Because the imported `fetchSampleTasks` pipeline had `isActive: true`, the scheduler ran it ~1 minute after import — fetching 200 todos from JSONPlaceholder and writing them to the tasks table. This overwrote the 5 LLM-generated sample rows (via `onConflict:"update"` + `primaryKeyCols:["id"]`). AI Bridge users should be warned that importing an active pipeline triggers an immediate run; consider defaulting `isActive: false` on import or providing a "dry-run only" flag.
+- ⚠️ IMPORTANT FINDING #2 — Column mappings don't support value transformations: The pipeline prompt template (in data-transfer.tsx) encourages the LLM to request value transformations like `completed=true → "done", completed=false → "todo"`, but the actual `columnMappings` schema only supports field renaming (`{src, target, type}`), not value mapping. The imported pipeline correctly mapped `completed` (boolean) → `status` (TEXT) but kept the raw boolean value, contradicting the prompt's intent. Either remove the transformation hint from the prompt template or add a `valueMap` field to the schema.
+- ⚠️ IMPORTANT FINDING #3 — LLM naming convention mismatch: Task spec asked for `assignTask` and `notifyOverdueTasks` (camelCase) but the LLM followed the prompt template's "lowercase_underscores" rule and produced `assign_task` / `notify_overdue_tasks`. Not a bug — the template is explicit — but worth noting that the LLM strictly follows the template over user-supplied naming hints.
+- ⚠️ IMPORTANT FINDING #4 — Silent skip on append mode: The `users` table import was silently skipped (returned `skipped:1`) because a `users` table already existed from session R25 and the default mode is `append`. No error is surfaced to the user; only the `skipped` count changes. Consider adding a warning or surfacing skipped names in the response.
+- ℹ️ NOTE — The task description referenced `src/components/admin/ai-bridge.tsx` but that file doesn't exist. The AI Bridge feature is implemented in `src/components/admin/data-transfer.tsx`. The task description's file path should be updated.
+- ℹ️ NOTE — The LLM-generated function code for `notify_overdue_tasks` is a stub that returns hardcoded sample data instead of actually querying the tasks table. This is because the function execution sandbox doesn't expose a DB client to function code. If real DB access is desired from serverless functions, the function runtime needs to expose a DB/API helper in the sandbox context.

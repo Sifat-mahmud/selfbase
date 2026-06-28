@@ -1,10 +1,21 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
-import { successResponse, errorResponse, notFoundResponse, getParams } from '@/lib/api-utils';
+import { successResponse, errorResponse, notFoundResponse, parseBody, getParams } from '@/lib/api-utils';
+import { validateAppToken } from '@/lib/app-auth';
+import { emitRealtimeEvent } from '@/lib/realtime-emit';
 import { createHash } from 'crypto';
 
 interface RouteContext {
   params: Promise<{ table: string }>;
+}
+
+/**
+ * Check if the request has permission to perform an action.
+ * Requires 'write' or 'admin' permission.
+ */
+function hasWritePermission(permissions: string[] | undefined): boolean {
+  if (!permissions) return false;
+  return permissions.includes('write') || permissions.includes('admin');
 }
 
 /**
@@ -108,6 +119,87 @@ export async function GET(request: NextRequest, context: RouteContext) {
         hasMore: offset + rows.length < totalCount,
       },
     });
+  } catch (e: any) {
+    return errorResponse(e.message, 500);
+  }
+}
+
+/**
+ * POST /api/v1/data/[table] - Insert a new row
+ *
+ * External apps authenticate with an app token and provide the row data as the
+ * request body. The row data is stored as JSON in the `data` column.
+ *
+ * Requires "write" or "admin" permission.
+ */
+export async function POST(request: NextRequest, context: RouteContext) {
+  try {
+    // Validate app token
+    const auth = await validateAppToken(request);
+    if (!auth.valid) {
+      return errorResponse(auth.error || 'Unauthorized', 401);
+    }
+
+    // Check write permission
+    if (!hasWritePermission(auth.permissions)) {
+      return errorResponse(
+        'Insufficient permissions. "write" or "admin" permission required.',
+        403
+      );
+    }
+
+    const { table: tableName } = await context.params;
+
+    // Find the table by name
+    const table = await db.sbTable.findUnique({ where: { name: tableName } });
+    if (!table) return notFoundResponse('Table');
+
+    // Parse the request body — the body itself is the row data
+    const body = await parseBody(request);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return errorResponse('Request body must be a JSON object', 400);
+    }
+
+    // Create the row
+    const row = await db.sbRow.create({
+      data: {
+        tableId: table.id,
+        data: JSON.stringify(body),
+      },
+    });
+
+    // Increment the table row count and refresh the version hash
+    const newCount = table.rowCount + 1;
+    const newHash = createHash('sha256')
+      .update(`${newCount}:${new Date().toISOString()}`)
+      .digest('hex')
+      .substring(0, 16);
+    await db.sbTable.update({
+      where: { id: table.id },
+      data: { rowCount: newCount, versionHash: newHash },
+    });
+
+    // Emit realtime event (fire-and-forget, only if table has realtime enabled)
+    const rowPayload = {
+      id: row.id,
+      data: JSON.parse(row.data),
+      version: row.version,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+    emitRealtimeEvent(table.id, 'insert', { row: rowPayload, rowId: row.id });
+
+    return successResponse(
+      {
+        id: row.id,
+        tableId: row.tableId,
+        data: JSON.parse(row.data),
+        version: row.version,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      },
+      201
+    );
   } catch (e: any) {
     return errorResponse(e.message, 500);
   }
