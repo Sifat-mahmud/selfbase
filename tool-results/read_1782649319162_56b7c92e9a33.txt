@@ -1,0 +1,619 @@
+     1→# SelfBase Worklog
+     2→
+     3→## Session R32 — v1.1: Full v1 API + TaskFlow Demo App
+     4→
+     5→---
+     6→Task ID: 1
+     7→Agent: Main
+     8→Task: Test all features, generate configs via AI, build demo GUI using SelfBase as backend, enhance features for app backend requirements
+     9→
+    10→Work Log:
+    11→- **v1 API Enhancements** (delegated to subagent Task 2-a):
+    12→  - POST /api/v1/data/{table} — insert rows from external apps
+    13→  - PUT /api/v1/data/{table}/{rowId} — update rows (merge semantics)
+    14→  - DELETE /api/v1/data/{table}/{rowId} — delete rows
+    15→  - GET /api/v1/data/{table}/{rowId} — fetch single row
+    16→  - POST /api/v1/functions/{name}/invoke — invoke functions by name
+    17→  - GET /api/v1/functions — list available functions (no code exposed)
+    18→  - GET /api/v1/tables — list available tables (for app discovery)
+    19→  - All endpoints enforce app token auth + permission checks
+    20→  - Realtime events fired on insert/update/delete
+    21→
+    22→- **AI Bridge Test** (delegated to subagent Task 2-b):
+    23→  - Used z-ai-web-dev-sdk LLM to generate table/function/pipeline configs
+    24→  - Successfully imported all configs via /api/import/* endpoints
+    25→  - Tested imported resources: row insert, function run, pipeline preview
+    26→  - Found issues: pipeline auto-runs on import (should default to inactive), function sandbox lacks DB access
+    27→
+    28→- **TaskFlow Demo App** (public/demo/index.html):
+    29→  - Complete task manager app using SelfBase as backend
+    30→  - Dark theme with emerald accents, responsive design
+    31→  - Kanban board (To Do / In Progress / Done) with drag-free cards
+    32→  - Stats dashboard (total, completion rate, in progress, overdue)
+    33→  - Team member sidebar with filtering
+    34→  - Task create/edit/delete modal with priority, assignee, due date, tags
+    35→  - API Key → App Token authentication flow
+    36→  - CRUD via /api/v1/data/demo_tasks
+    37→  - Function invocation via /api/v1/functions/demo_stats/invoke
+    38→  - Realtime via Socket.IO (with 30s polling fallback)
+    39→  - LocalStorage persistence for API key and token
+    40→
+    41→- **Demo Setup API** (/api/demo/setup):
+    42→  - POST: One-click bootstrap — creates demo_tasks + demo_users tables, demo_stats function, API key
+    43→  - Seeds 5 sample tasks and 3 team members
+    44→  - GET: Returns readiness status
+    45→  - Idempotent — can be called multiple times safely
+    46→
+    47→- **Dashboard Integration**:
+    48→  - Added "TaskFlow — Live Demo App" card to admin dashboard
+    49→  - Shows backend connection details (tables, function, auth, realtime)
+    50→  - "Open Demo" button opens /demo/index.html in new tab
+    51→  - Emerald gradient styling with hover effects
+    52→
+    53→- **Testing**:
+    54→  - Verified v1 API full CRUD cycle (create → read → update → delete)
+    55→  - Verified function invocation returns correct stats
+    56→  - Verified demo app loads, displays data, creates/edits tasks
+    57→  - Completion rate correctly updates (17% → 29% after marking task done)
+    58→  - Lint passes clean
+    59→
+    60→Stage Summary:
+    61→- ✅ v1 API now supports full CRUD — external apps can use SelfBase as a complete backend
+    62→- ✅ AI Bridge verified end-to-end (LLM → JSON → import → working resources)
+    63→- ✅ TaskFlow demo app proves SelfBase works as an app backend
+    64→- ✅ Demo accessible from admin dashboard
+    65→- ✅ Pushed to GitHub (develop + main branches)
+    66→
+    67→### v1 API Endpoint Summary:
+    68→```
+    69→Authentication:
+    70→  POST /api/v1/auth/login        — API key → app token
+    71→  POST /api/v1/auth/validate     — check token
+    72→  POST /api/v1/auth/logout       — revoke token
+    73→
+    74→Data (CRUD):
+    75→  GET    /api/v1/data/{table}          — list rows (ETag/version)
+    76→  POST   /api/v1/data/{table}          — insert row
+    77→  GET    /api/v1/data/{table}/{rowId}  — get single row
+    78→  PUT    /api/v1/data/{table}/{rowId}  — update row (merge)
+    79→  DELETE /api/v1/data/{table}/{rowId}  — delete row
+    80→
+    81→Version Check:
+    82→  HEAD   /api/v1/version/{table}       — get ETag only
+    83→
+    84→Discovery:
+    85→  GET    /api/v1/tables                — list tables
+    86→  GET    /api/v1/functions             — list functions
+    87→
+    88→Functions:
+    89→  POST   /api/v1/functions/{name}/invoke — run function by name
+    90→```
+    91→
+    92→### Demo App Architecture:
+    93→```
+    94→User opens /demo → Setup (admin login → POST /api/demo/setup → API key)
+    95→                         ↓
+    96→              POST /api/v1/auth/login (API key → app token)
+    97→                         ↓
+    98→              GET /api/v1/data/demo_tasks → render board
+    99→              GET /api/v1/data/demo_users → render team
+   100→              POST /api/v1/functions/demo_stats/invoke → render stats
+   101→                         ↓
+   102→              CRUD operations → PUT/POST/DELETE /api/v1/data/demo_tasks
+   103→              Realtime → Socket.IO subscribe to table changes
+   104→```
+   105→
+   106→### Priority Recommendations for Next Phase:
+   107→1. Fix pipeline import to default isActive: false (prevent auto-run before review)
+   108→2. Add DB/API access to function sandbox (so functions can query data)
+   109→3. Add valueMap/transform support to pipeline column mappings
+   110→4. Add rate limiting per API key
+   111→5. Add API usage analytics per key
+   112→6. Make realtime work in production (Socket.IO CDN loading issue in headless)
+   113→
+   114→---
+   115→
+   116→## Session R25 - API Authentication System for External Apps
+   117→
+   118→---
+   119→Task ID: 1
+   120→Agent: Main
+   121→Task: Implement full API authentication system for external apps (iOS/Android) + redesign API Playground
+   122→
+   123→Work Log:
+   124→- Updated Prisma schema: Added `AppToken` model for short-lived tokens, updated `ApiKey` model with `name` (app name), `keyPlain` fields, and `appTokens` relation
+   125→- Ran `bun run db:push` to sync DB schema
+   126→- Created `/api/api-keys` route: GET (list keys), POST (create new key with `sb_live_` prefix)
+   127→- Created `/api/api-keys/[id]` route: DELETE (revoke key + cleanup app tokens)
+   128→- Created `/api/v1/auth/login` - External app auth: accepts API key as Bearer token, returns short-lived app token with configurable expiry (default 1 hour)
+   129→- Created `/api/v1/auth/validate` - Check if app token is still valid
+   130→- Created `/api/v1/auth/logout` - Revoke an app token
+   131→- Created `/lib/app-auth.ts` - `validateAppToken()` and `checkAuth()` utilities for route handlers
+   132→- Created `/lib/system-config.ts` - Helper for getting/ensuring system config defaults
+   133→- Updated middleware.ts to detect auth method (api-key vs bearer-token vs none)
+   134→- Added `security.apiTokenExpiryMinutes` config to Settings security form (default 60 min)
+   135→- Completely redesigned `/components/admin/playground.tsx` with:
+   136→  - Two-tab layout: "Authentication" and "API Tester"
+   137→  - Auth Flow Visualization: 3-step visual diagram (Generate Key → Login → Use Token)
+   138→  - API Key Management: Create with name + permissions, list, revoke
+   139→  - Quick Auth Test: Login with API key, validate token, copy code snippets
+   140→  - Code snippets for Swift (iOS) and Kotlin (Android)
+   141→  - Token status banner showing auth state
+   142→  - Auto-inject auth token into API request headers
+   143→  - Updated endpoint templates with /api/v1/* routes and auth requirement indicators
+   144→
+   145→Stage Summary:
+   146→- Full API auth system implemented and verified via API testing:
+   147→  - ✅ POST /api/v1/auth/login → Returns app token from API key
+   148→  - ✅ POST /api/v1/auth/validate → Returns valid/invalid with permissions
+   149→  - ✅ POST /api/v1/auth/logout → Revokes token
+   150→  - ✅ Wrong API key → Returns proper error
+   151→  - ✅ API Key CRUD (create, list, revoke)
+   152→  - ✅ Token expiry configurable from Settings (default 1 hour)
+   153→- API Playground completely redesigned with auth flow visualization
+   154→- External apps can now use SelfBase as their backend service
+   155→
+   156→### Architecture:
+   157→```
+   158→External App → API Key (sb_live_xxx) → /api/v1/auth/login → App Token (valid 1hr)
+   159→External App → App Token → /api/tables, /api/functions, etc. → Data
+   160→Admin → Session Token → All admin APIs
+   161→```
+   162→
+   163→### Priority Recommendations for Next Phase:
+   164→1. Add API key permissions enforcement (read/write/admin) on individual routes
+   165→2. Add rate limiting per API key
+   166→3. Add API usage analytics per key
+   167→4. Test playground UI via agent-browser (limited by server stability)
+   168→5. Add refresh token support for seamless re-auth
+   169→
+   170→---
+   171→
+   172→## Session R26 - Token Persistence & Comprehensive API Endpoints
+   173→
+   174→---
+   175→Task ID: 1
+   176→Agent: Main
+   177→Task: Persist auth token to localStorage + expand API playground with comprehensive endpoint coverage
+   178→
+   179→Work Log:
+   180→- Added localStorage persistence for auth token, token info, and API key in `playground.tsx`
+   181→- Created `readFromLocalStorage` and `writeToLocalStorage` helper functions with SSR safety
+   182→- Defined storage keys: `selfbase_playground_token`, `selfbase_playground_token_info`, `selfbase_playground_api_key`
+   183→- Updated `AuthFlowSection` to accept `initialToken` and `initialTokenInfo` props for hydration from localStorage
+   184→- On login: token, token info, and API key are written to localStorage
+   185→- On validate (invalid) / logout: localStorage entries are cleared
+   186→- Updated `PlaygroundView` to hydrate from localStorage on mount via `useEffect`
+   187→- Auto-switches to API Tester tab when token is already present from localStorage
+   188→- Added `clearAuthToken` callback that clears both state and localStorage
+   189→- Expanded ENDPOINT_TEMPLATES from 15 to 80 endpoints across 17 categories:
+   190→  - 🔐 Auth API (3) — login, validate, logout
+   191→  - 🔄 Sync API / Local-First (2) — data fetch with ETag, version check
+   192→  - 📊 Data — Tables (7) — list, get, create, update, delete, columns, version
+   193→  - 📋 Data — Rows (5) — list, create, get, update, delete
+   194→  - ⚡ Functions (7) — list, get, run, runs, create, update, delete
+   195→  - 🔄 Pipelines (9) — list, get, run, preview, runs, smart-preview, auto-create, create, delete
+   196→  - 🤖 AI (6) — chat, embed, rag, search, llm-config, calls
+   197→  - 💾 Storage (4) — list, get, upload-url, delete
+   198→  - 🌐 Scrapers (7) — list, get, run, preview, runs, create, delete
+   199→  - 📈 Monitoring (6) — load, metrics, uptime, alerts, alert-events, heartbeat
+   200→  - 📨 Queue (3) — list, get, drain
+   201→  - 📝 Logs (3) — list, source-errors, function-errors
+   202→  - 📦 Import/Export (8) — import tables/functions/pipelines/scrapers, export tables/functions/pipelines/scrapers
+   203→  - ⚙️ Config (2) — get all, get by key
+   204→  - 🔑 API Keys (3) — list, create, revoke
+   205→  - 👤 Auth/Users (5) — users, user detail, sessions, change password, admin api-keys
+   206→- Improved endpoint sidebar: added category count badges, path display per endpoint, ring highlight on selected
+   207→- Enhanced header: shows "80 endpoints" badge, token expiry info when authenticated
+   208→- Enhanced auth banner: shows app name and token expiry time
+   209→- Widened endpoint sidebar from 280px to 300px for better readability
+   210→- Verified with agent-browser — all 80 endpoints visible, tabs working, auth flow correct
+   211→
+   212→Stage Summary:
+   213→- ✅ Token persistence to localStorage works — survives navigation and page refresh
+   214→- ✅ Auto-switches to API Tester tab when returning with stored token
+   215→- ✅ 80 comprehensive API endpoints across 17 categories for external app developers
+   216→- ✅ UI improvements: count badges, path display, expiry info in banner
+   217→- ✅ Verified via agent-browser with zero errors
+   218→- ✅ Cron job created for periodic review (job ID: 227170)
+   219→
+   220→### Current State:
+   221→- The API Playground is now a fully functional API testing and documentation tool
+   222→- Token persists across sessions, auto-hydrates on page load
+   223→- External app developers have full reference for all SelfBase APIs
+   224→- Lint clean, dev server running without errors
+   225→
+   226→### Priority Recommendations for Next Phase:
+   227→1. Add API key permissions enforcement (read/write/admin) on individual routes
+   228→2. Add rate limiting per API key
+   229→3. Add API usage analytics per key with per-key request counts and charts
+   230→4. Add request history persistence (save last N requests to localStorage)
+   231→5. Add "Quick Start" guide for mobile developers in the auth tab
+   232→6. Add environment variable support in playground (base URL toggle for staging vs production)
+   233→7. Improve response viewer with syntax highlighting and JSON tree view
+   234→
+   235→---
+   236→
+   237→## Session R27 - Dialog & Table View Responsive Fix
+   238→
+   239→---
+   240→Task ID: 1
+   241→Agent: Main
+   242→Task: Review all popup windows, fix table column widths and alignments, make visual easy to understand
+   243→
+   244→Work Log:
+   245→- **ROOT CAUSE IDENTIFIED**: `sm:max-w-lg` in `DialogContent` base class (`src/components/ui/dialog.tsx`) overrode all non-responsive `max-w-*` classes on consuming components — every dialog was capped at 512px regardless of intended width
+   246→- Added `overflow-hidden` to DialogContent base class to prevent content overflow
+   247→- Changed all 12 `DialogContent` instances across 5 files from `max-w-*` to `sm:max-w-*` so they properly override the base class
+   248→- Fixed Pipeline Wizard crash: `dp.sampleColumns` was undefined (API returns `sampleKeys`), added null coalescing + fallback
+   249→- Fixed Pipeline Wizard `rowCount` fallback: API returns `count` instead of `rowCount` in some cases
+   250→- Fixed Pipeline Preview dialog: added `max-h-[90vh] flex flex-col`, improved table cells with `whitespace-nowrap max-w-[200px] truncate`
+   251→- **View Data dialog (tables.tsx)** — Major improvements:
+   252→  - Upgraded from `sm:max-w-5xl` to `sm:max-w-6xl` for wider display
+   253→  - Added `max-h-[90vh] flex flex-col` for proper dialog sizing
+   254→  - Removed type annotations `(INTEGER)`, `(TEXT)`, etc. from column headers — moved to `title` attribute (hover to see)
+   255→  - Added `whitespace-nowrap max-w-[180px] truncate` to data cells with title tooltip
+   256→  - Boolean values now render as colored badges: `✓ true` (emerald) / `✗ false` (secondary)
+   257→  - Version column simplified: plain text `v1` instead of Badge component, width `w-16`
+   258→  - Actions column compacted: `w-20` instead of `w-32`
+   259→  - Table scroll container changed from `max-h-[60vh]` to `flex-1` for better viewport usage
+   260→- **Create Table dialog (tables.tsx)** — Enhanced:
+   261→  - Widened from `sm:max-w-2xl` to `sm:max-w-3xl`
+   262→  - Added 2 new columns: `Nullable` (checkbox) and `Unique` (checkbox) for better schema control
+   263→  - Added placeholder text "column_name" in name input
+   264→- **Scraper Preview dialog** — Widened to `sm:max-w-4xl`, added `whitespace-nowrap max-w-[200px] truncate`, null dashes styled
+   265→- **Pipeline Wizard preview table** — Extended visible columns from 6 to 8, added type annotations, sticky header, null-safe preview rows
+   266→- All fixes verified via agent-browser — dialogs now render at intended widths, tables fit properly
+   267→
+   268→Stage Summary:
+   269→- ✅ **CRITICAL FIX**: Dialog width override bug resolved — all dialogs now render at their intended widths
+   270→- ✅ **CRITICAL FIX**: Pipeline Wizard crash from undefined `sampleColumns` resolved
+   271→- ✅ View Data dialog: 1152px wide (was 512px), clean headers, compact columns, proper scroll
+   272→- ✅ Create Table dialog: 768px wide (was 512px), 4-column schema table with checkboxes
+   273→- ✅ Pipeline Preview: 1024px wide, no overflow, type info on hover
+   274→- ✅ Scraper Preview: wider dialog, proper cell constraints
+   275→- ✅ Lint clean, dev server running without errors
+   276→- ✅ Agent-browser verified all fixes working correctly
+   277→
+   278→### Key Architecture Change:
+   279→```
+   280→BEFORE: DialogContent base class has sm:max-w-lg → overrides max-w-5xl on consumer (512px cap)
+   281→AFTER:  Consumer uses sm:max-w-5xl → properly overrides sm:max-w-lg (1024px+ width)
+   282→```
+   283→
+   284→### Priority Recommendations for Next Phase:
+   285→1. Add column resize capability to View Data table
+   286→2. Add JSON tree view for complex cell values (nested objects)
+   287→3. Add "Copy row as JSON" action in data table
+   288→4. Improve inline editing UX with tab-to-next-cell
+   289→5. Add column visibility toggle (hide/show columns)
+   290→6. Add row detail expansion (click to expand full row data)
+   291→7. Add keyboard navigation in data table (arrow keys between cells)
+   292→
+   293→---
+   294→
+   295→## Session R28 - Realtime Database Feature
+   296→
+   297→---
+   298→Task ID: 1
+   299→Agent: Main
+   300→Task: Implement realtime database toggle with version tracking, WebSocket push, and API/playground updates
+   301→
+   302→Work Log:
+   303→- Created `/src/lib/realtime-emit.ts` — server-side utility to emit events to Socket.IO service
+   304→  - `emitRealtimeEvent(tableId, eventType, data)` — checks table's `enableRealtime` before emitting
+   305→  - Fire-and-forget HTTP POST to `localhost:3003/emit` — no blocking on API routes
+   306→  - Emits both `data-changed` and `update-available` events per mutation
+   307→- Updated POST `/api/tables/[id]/rows` (Create row):
+   308→  - Now updates `rowCount` and `versionHash` on the table (was missing before)
+   309→  - Calls `emitRealtimeEvent(id, 'insert', ...)` after successful creation
+   310→- Updated PUT `/api/tables/[id]/rows/[rowId]` (Update row):
+   311→  - Added `emitRealtimeEvent(id, 'update', ...)` after successful update
+   312→- Updated DELETE `/api/tables/[id]/rows/[rowId]` (Delete row):
+   313→  - Added `emitRealtimeEvent(id, 'delete', ...)` after successful deletion
+   314→- Fixed PUT `/api/tables/[id]` — added `include: { columns }` to Prisma update (was causing crash)
+   315→- Wired realtime toggle switch in Tables UI (`tables.tsx`):
+   316→  - `onCheckedChange` handler calls PUT API with `{ enableRealtime: checked }`
+   317→  - Shows success toast: "Realtime enabled" / "Realtime disabled"
+   318→- Added `RealtimeBanner` component in View Data dialog:
+   319→  - Shows green pulsing dot + "Live — listening for changes" when connected
+   320→  - Shows amber dot + "Connecting..." when disconnected
+   321→  - Auto-refreshes row data when `data-changed` or `update-available` events received
+   322→- Added "RT" badge in View Data dialog header (when realtime is enabled)
+   323→- Added 5 new Realtime API endpoints to API Playground:
+   324→  - `GET /api/v1/realtime/{table}` — Subscribe to real-time changes
+   325→  - `GET /api/realtime/health` — Check service health
+   326→  - `POST /api/realtime/emit` — Broadcast event to subscribers
+   327→  - `PUT /api/tables/{id}` — Enable/disable realtime
+   328→  - `GET /api/v1/data/{table}` — Fetch with ETag for change detection
+   329→- Added "Realtime Connection" card in API Playground Auth tab:
+   330→  - WebSocket connection URL with XTransformPort
+   331→  - JavaScript code snippets (Socket.IO client)
+   332→  - Swift (iOS) code snippets (Socket.IO-Client-Swift)
+   333→  - Note about realtime-enabled tables only
+   334→- Created `/api/realtime/health` proxy route — forwards to Socket.IO service
+   335→- Verified all features with agent-browser:
+   336→  - ✅ Realtime toggle works and persists
+   337→  - ✅ RT badge appears in dialog header
+   338→  - ✅ Live banner with auto-refresh
+   339→  - ✅ 5 Realtime endpoints visible in playground
+   340→  - ✅ WebSocket code snippets in Auth tab
+   341→  - ✅ Health endpoint returns proper status
+   342→
+   343→Stage Summary:
+   344→- ✅ Complete realtime database feature implemented end-to-end
+   345→- ✅ Tables can be toggled to realtime mode via switch
+   346→- ✅ Row CRUD operations emit Socket.IO events to subscribers
+   347→- ✅ View Data dialog auto-refreshes when data changes
+   348→- ✅ API Playground has full realtime API documentation
+   349→- ✅ External apps can subscribe to table changes via WebSocket
+   350→- ✅ Version tracking ensures local-first sync compatibility
+   351→- ✅ Lint clean, dev server running without errors
+   352→
+   353→### Architecture:
+   354→```
+   355→Table Toggle → PUT /api/tables/{id} { enableRealtime: true }
+   356→  ↓
+   357→Row CRUD → emitRealtimeEvent() → HTTP POST localhost:3003/emit
+   358→  ↓
+   359→Socket.IO Service → broadcasts to room `table:{tableId}`
+   360→  ↓
+   361→All connected clients receive data-changed + update-available events
+   362→  ↓
+   363→View Data dialog auto-refreshes / external app updates
+   364→```
+   365→
+   366→### Event Flow:
+   367→```
+   368→POST /api/tables/{id}/rows → create row → update rowCount/versionHash → emit "insert"
+   369→PUT  /api/tables/{id}/rows/{rowId} → update row → increment version → emit "update"
+   370→DELETE /api/tables/{id}/rows/{rowId} → delete row → update rowCount/versionHash → emit "delete"
+   371→```
+   372→
+   373→### Priority Recommendations for Next Phase:
+   374→1. Add auth token validation on Socket.IO connect (verify AppToken/session)
+   375→2. Add subscription filtering (subscribe to specific eventTypes, row filters)
+   376→3. Add reconnect with missed-change catchup (since parameter on subscribe)
+   377→4. Add presence indicators (who else is viewing this table)
+   378→5. Add realtime metrics per table (events/sec, subscriber count)
+   379→6. Add bulk row operations with single version hash update
+   380→7. Add conflict resolution UI for concurrent edits
+   381→
+   382→---
+   383→
+   384→## Session R29 - Comprehensive README
+   385→
+   386→---
+   387→Task ID: 1
+   388→Agent: Main
+   389→Task: Create well-explained README with live visuals for better understanding
+   390→
+   391→Work Log:
+   392→- Generated 3 AI images for README visual appeal:
+   393→  - `public/readme-hero.png` — Modern server infrastructure dashboard visualization
+   394→  - `public/readme-database.png` — Abstract database schema visualization
+   395→  - `public/readme-realtime.png` — Realtime data synchronization illustration
+   396→- Created comprehensive `README.md` with:
+   397→  - Hero image banner with badges (Next.js, TypeScript, SQLite, Socket.IO)
+   398→  - "What is SelfBase?" section with role-based table (Mobile Dev, Web Dev, Startup, Enterprise, Tinkerer)
+   399→  - ASCII art feature overview grid covering all 9 core modules
+   400→  - Architecture diagram showing app → API → database → microservices flow
+   401→  - Tech stack table
+   402→  - Realtime Database section with toggle visualization, event flow, and version tracking explanation
+   403→  - Authentication section with 3 methods (Admin Session, API Key → App Token, Permissions)
+   404→  - API Playground overview with 18 categories and 85+ endpoints
+   405→  - Database Management section with schema builder UI mockup and column types
+   406→  - Serverless Functions section with code example and trigger types
+   407→  - AI Integration section with Chat/Embeddings/RAG diagram
+   408→  - Data Pipelines section with source → transform → table flow
+   409→  - Monitoring section with ASCII dashboard and alert system
+   410→  - Quick Start guide with prerequisites, installation, and mini-services
+   411→  - Project structure tree
+   412→  - API Quick Reference with curl examples for auth, data, realtime, and sync
+   413→  - Roadmap table with ✅ completed and 🔜 upcoming features
+   414→
+   415→Stage Summary:
+   416→- ✅ Comprehensive README created with visual diagrams and code examples
+   417→- ✅ 3 AI-generated images for visual appeal
+   418→- ✅ Covers all features: Database, Realtime, Auth, Functions, AI, Pipelines, Scrapers, Storage, Monitoring
+   419→- ✅ Includes quick-start guide and API reference
+   420→- ✅ ASCII art diagrams for architecture, data flow, and UI mockups
+   421→
+   422→---
+   423→
+   424→## Session R30 - v1 API Write Endpoints & Function Invocation
+   425→
+   426→---
+   427→Task ID: 2-a
+   428→Agent: full-stack-developer
+   429→Task: Add write-side endpoints (insert/update/delete rows), function invocation, and table/function discovery to the v1 API namespace so external apps can use SelfBase as a real backend.
+   430→
+   431→Work Log:
+   432→- Read existing v1 patterns: `/api/v1/data/[table]/route.ts` (GET), `/api/v1/auth/login/route.ts`, `/lib/app-auth.ts`, `/lib/api-utils.ts`, `/lib/realtime-emit.ts`, `/api/functions/[id]/run/route.ts`, `/api/tables/[id]/rows/[rowId]/route.ts` for consistency
+   433→- Added `POST /api/v1/data/[table]` (insert row) to the existing `src/app/api/v1/data/[table]/route.ts`:
+   434→  - Validates app token via `validateAppToken`, requires `write` or `admin` permission
+   435→  - Finds table by `[table]` name param
+   436→  - Body itself is the row data — stored as `data: JSON.stringify(body)`
+   437→  - Increments `table.rowCount`, refreshes `table.versionHash` (sha256 hex truncated to 16 chars)
+   438→  - Emits `insert` realtime event via `emitRealtimeEvent`
+   439→  - Returns 201 with the created row on success; 400 if body is not a JSON object
+   440→- Created NEW file `src/app/api/v1/data/[table]/[rowId]/route.ts` with three handlers:
+   441→  - `GET` — fetch a single row by ID (any permission)
+   442→  - `PUT` — update a row; merges body into existing data (supports partial updates), increments `row.version`, refreshes table version hash, emits `update` realtime event (requires `write`/`admin`)
+   443→  - `DELETE` — delete the row, decrement `table.rowCount` (clamped to 0), refresh version hash, emit `delete` realtime event (requires `write`/`admin`)
+   444→- Created NEW file `src/app/api/v1/functions/[name]/invoke/route.ts` (POST):
+   445→  - Validates app token (any permission)
+   446→  - Finds function by `[name]` param (unique field on `SbFunction`)
+   447→  - Refuses inactive functions with 400
+   448→  - Creates a `FunctionRun` with `triggeredBy: 'app'`, `status: 'running'`
+   449→  - Executes the function code in the same sandboxed `new Function(...)` pattern as the admin route (handler / module.exports / .handler / .default fallback, env vars injection, configurable timeout)
+   450→  - Updates the run record with status (success/timeout/failed), output, error, durationMs, completedAt
+   451→  - Returns runId, functionName, status, output, durationMs
+   452→- Created NEW file `src/app/api/v1/functions/route.ts` (GET):
+   453→  - Validates app token (any permission)
+   454→  - Returns metadata-only list of active functions (id, name, description, triggerType, updatedAt) — never the code/env vars
+   455→  - Supports app discovery use case
+   456→- Created NEW file `src/app/api/v1/tables/route.ts` (GET):
+   457→  - Validates app token (any permission)
+   458→  - Returns tables with `id, name, displayName, description, rowCount, enableRealtime, updatedAt, columns[]`
+   459→  - System tables hidden by default; `?includeSystem=true` to include them
+   460→  - `?search=` filter matches `name` or `displayName` (contains, case-insensitive via Prisma)
+   461→  - Sensitive fields (RLS rules, schema JSON, priority, embedding config) are NOT exposed
+   462→- All endpoints verified via curl:
+   463→  1. Login as admin → create API key (`read,write,admin`) → login at `/api/v1/auth/login` → get app token
+   464→  2. Also created a read-only API key (`read`) to verify permission enforcement
+   465→- Test results (all passed):
+   466→  - `GET /api/v1/tables` → 200, lists 5 tables with columns (products, tasks, analytics, metrics, cse_stocks)
+   467→  - `GET /api/v1/functions` → 200, lists 3 active functions (assign_task, hello, notify_overdue_tasks) — no code exposed
+   468→  - `POST /api/v1/data/products` with `{"title":"Widget 2a","price":19.99,"inStock":true}` → 201, returns created row with version=1
+   469→  - `GET /api/v1/data/products/{id}` → 200, returns single row
+   470→  - `PUT /api/v1/data/products/{id}` with `{"price":24.99,"tags":["new","featured"]}` → 200, data merged (title kept), version=2
+   471→  - `DELETE /api/v1/data/products/{id}` → 200, `{deleted:true, id}`; subsequent GET → 404
+   472→  - `POST /api/v1/functions/hello/invoke` with `{"name":"World"}` → 200, output `{message:"Hello World"}`, durationMs=19
+   473→  - `POST /api/v1/functions/assign_task/invoke` with `{"taskId":"t123","userId":"u456"}` → 200, output confirms assignment, durationMs=15
+   474→  - Verified in `/api/functions/runs` that both invocations recorded `triggeredBy: "app"` (distinct from older `triggeredBy: "http"` runs from the admin route)
+   475→  - Negative tests: missing auth → 401; bad token → 401; non-existent table → 404; non-existent function → 404; non-existent row → 404; non-object body on POST/PUT → 400
+   476→  - Permission tests with read-only key: list tables/functions allowed; POST/PUT/DELETE all return 403 with "Insufficient permissions" message
+   477→  - `GET /api/v1/data/products` (existing GET) still works — POST was added without breaking it
+   478→- `bun run lint` clean
+   479→- Dev server log shows no errors; all v1 routes returning proper HTTP status codes (200/201/400/401/403/404)
+   480→
+   481→Stage Summary:
+   482→- ✅ SelfBase is now a usable app backend — external apps can read AND write data, plus invoke serverless functions, all through the v1 API namespace
+   483→- ✅ Endpoints added:
+   484→  - `POST   /api/v1/data/{table}`              — insert a row (write/admin)
+   485→  - `GET    /api/v1/data/{table}/{rowId}`      — fetch one row (any perm)
+   486→  - `PUT    /api/v1/data/{table}/{rowId}`      — update a row (write/admin)
+   487→  - `DELETE /api/v1/data/{table}/{rowId}`      — delete a row (write/admin)
+   488→  - `POST   /api/v1/functions/{name}/invoke`   — run a function by name (any perm)
+   489→  - `GET    /api/v1/functions`                 — list active functions, metadata only (any perm)
+   490→  - `GET    /api/v1/tables`                    — list tables with columns (any perm)
+   491→- ✅ Auth: all new routes validate app token via `validateAppToken`; write routes require `write` or `admin` permission
+   492→- ✅ Realtime events emitted on insert/update/delete (only fires if table has `enableRealtime: true`)
+   493→- ✅ Version hash + row count kept in sync on every mutation
+   494→- ✅ FunctionRun records properly tagged `triggeredBy: "app"` to distinguish from admin/scheduler invocations
+   495→- ✅ Discovery endpoints hide sensitive data (function code/env vars, table RLS rules/schema JSON)
+   496→- ✅ Lint clean, dev server stable, no errors in log
+   497→
+   498→### Example curl commands (for the next agent / docs):
+   499→```bash
+   500→# 1. Admin login (session token)
+   501→curl -X POST http://localhost:3000/api/auth/login \
+   502→  -H "Content-Type: application/json" \
+   503→  -d '{"email":"admin@selfbase.dev","password":"admin123"}'
+   504→# → {"success":true,"token":"<SESSION>","user":{...}}
+   505→
+   506→# 2. Create API key (admin session token)
+   507→curl -X POST http://localhost:3000/api/api-keys \
+   508→  -H "Authorization: Bearer <SESSION>" \
+   509→  -H "Content-Type: application/json" \
+   510→  -d '{"name":"My App","permissions":"read,write,admin"}'
+   511→# → {"success":true,"apiKey":{"key":"sb_live_xxx",...}}
+   512→
+   513→# 3. Exchange API key for app token
+   514→curl -X POST http://localhost:3000/api/v1/auth/login \
+   515→  -H "Authorization: Bearer sb_live_xxx"
+   516→# → {"success":true,"token":"<APP_TOKEN>","expiresIn":3600,...}
+   517→
+   518→# 4. List tables
+   519→curl http://localhost:3000/api/v1/tables -H "Authorization: Bearer <APP_TOKEN>"
+   520→
+   521→# 5. Insert a row
+   522→curl -X POST http://localhost:3000/api/v1/data/products \
+   523→  -H "Authorization: Bearer <APP_TOKEN>" \
+   524→  -H "Content-Type: application/json" \
+   525→  -d '{"title":"Widget","price":19.99,"inStock":true}'
+   526→# → 201 {"success":true,"data":{"id":"...","data":{...},"version":1,...}}
+   527→
+   528→# 6. Update the row (partial merge)
+   529→curl -X PUT http://localhost:3000/api/v1/data/products/<rowId> \
+   530→  -H "Authorization: Bearer <APP_TOKEN>" \
+   531→  -H "Content-Type: application/json" \
+   532→  -d '{"price":24.99}'
+   533→# → 200, version=2
+   534→
+   535→# 7. Delete the row
+   536→curl -X DELETE http://localhost:3000/api/v1/data/products/<rowId> \
+   537→  -H "Authorization: Bearer <APP_TOKEN>"
+   538→# → 200 {"success":true,"data":{"deleted":true,"id":"..."}}
+   539→
+   540→# 8. List functions (metadata only)
+   541→curl http://localhost:3000/api/v1/functions -H "Authorization: Bearer <APP_TOKEN>"
+   542→
+   543→# 9. Invoke a function by name
+   544→curl -X POST http://localhost:3000/api/v1/functions/hello/invoke \
+   545→  -H "Authorization: Bearer <APP_TOKEN>" \
+   546→  -H "Content-Type: application/json" \
+   547→  -d '{"name":"World"}'
+   548→# → 200 {"success":true,"data":{"runId":"...","status":"success","output":{...}}}
+   549→```
+   550→
+   551→### Notes / minor decisions:
+   552→- For POST/PUT the request body IS the row data directly (not wrapped in `{data: ...}`) — simpler SDK ergonomics for external mobile apps.
+   553→- PUT does a merge (PATCH-like) instead of a full replacement, matching the existing admin route at `/api/tables/[id]/rows/[rowId]`. This makes partial updates work cleanly from mobile clients on flaky networks.
+   554→- `triggeredBy: 'app'` is used for v1 function invocations (vs `'http'` for the admin route) so admins can attribute runs to external apps vs internal triggers in the Functions → Runs dashboard.
+   555→- The existing GET handler at `/api/v1/data/[table]` was left untouched (it has no app-token check — that's a pre-existing decision; the task explicitly said not to modify existing routes, only add to them).
+   556→
+   557→### Priority Recommendations for Next Phase:
+   558→1. Add rate limiting per API key (per-route and global)
+   559→2. Add per-key usage analytics (request count, latency, error rate) — FunctionRun/SbRow mutations could feed a TableCall-style aggregation
+   560→3. Add `PATCH /api/v1/data/{table}/{rowId}` as an alias for PUT (semantic clarity for mobile SDKs)
+   561→4. Add bulk endpoints: `POST /api/v1/data/{table}/batch` (insert array), `DELETE /api/v1/data/{table}/batch?ids=...`
+   562→5. Add query filtering on `GET /api/v1/data/{table}` (e.g. `?filter={"price":{"$gt":10}}`) — currently only `since`/`limit`/`offset` are supported
+   563→6. Add `GET /api/v1/functions/{name}` to fetch one function's metadata (still no code)
+   564→7. Add an OpenAPI/Swagger spec auto-generated from the v1 routes for client SDK codegen
+   565→8. Consider auth on the existing `GET /api/v1/data/{table}` and `HEAD /api/v1/version/{table}` for consistency
+   566→
+   567→---
+   568→
+   569→Task ID: 2-b
+   570→Agent: general-purpose
+   571→Task: Test AI Bridge - generate configs via LLM and import them
+   572→
+   573→Work Log:
+   574→- Read worklog.md to understand prior context (sessions R25–R29 covering API auth, playground expansion, dialog fixes, realtime DB, README).
+   575→- Located the AI Bridge feature source. Note: `src/components/admin/ai-bridge.tsx` does not exist — the actual implementation lives in `src/components/admin/data-transfer.tsx` (Data Transfer / AI Prompts component). AI prompt templates for tables/functions/pipelines/scrapers are defined inline there.
+   576→- Read all four import routes to learn the exact config schemas:
+   577→  - `/api/import/tables` — body `{ items: [{ name, displayName?, description?, columns: [{ name, type, nullable?, defaultValue?, isPrimaryKey?, isUnique?, isIndexed? }], rows: [{...}] }], mode: 'append'|'replace' }`
+   578→  - `/api/import/functions` — body `{ items: [{ name, description?, code?, runtime?, triggerType?, triggerConfig?, envVars?, timeoutMs?, memoryMb?, isActive? }], mode }`
+   579→  - `/api/import/pipelines` — body `{ items: [{ name, description?, sourceType?, url?, method?, headers?, authType?, authConfig?, jsonPath?, fetchInterval?, isActive?, onConflict?, targetTableName?, columnMappings?, primaryKeyCols?, preRunAction?, paginationMode?, paginationConfig?, maxPages?, maxRetries?, retryBackoff?, timeoutMs?, ssrfProtection? }], mode }`
+   580→  - `/api/import/scrapers` — similar shape with startUrl/selectorTree/paginationConfig
+   581→- Invoked the `LLM` skill to learn the z-ai-web-dev-sdk chat completions API (backend-only, `await ZAI.create()` → `zai.chat.completions.create({ messages, thinking: {type:'disabled'} })`).
+   582→- Wrote `/home/z/my-project/test-ai-bridge.mjs` — Node ESM script that imports `z-ai-web-dev-sdk`, issues three chat completions (one per resource type) using the prompt templates from data-transfer.tsx, strips any markdown fences, parses the JSON, and writes:
+   583→  - `ai-bridge-test/tables-config.json` (7136 bytes; tasks table w/ 9 cols + 5 sample rows, users table w/ 6 cols + 5 sample rows)
+   584→  - `ai-bridge-test/functions-config.json` (2454 bytes; `assign_task` http trigger + `notify_overdue_tasks` schedule trigger cron `0 9 * * *`)
+   585→  - `ai-bridge-test/pipelines-config.json` (1057 bytes; `fetchSampleTasks` pipeline → JSONPlaceholder /todos → tasks table, onConflict=update, 4 columnMappings)
+   586→- Ran the script with `node test-ai-bridge.mjs` — all three LLM calls succeeded, JSON parsed cleanly, files written. The z-ai-web-dev-sdk worked on the first try with no auth or config issues.
+   587→- Logged in as admin via `POST /api/auth/login` → got session token `399b99c3-cb89-4332-ad60-5f802b7f2ed7`.
+   588→- Imported all three configs via the import APIs:
+   589→  - Tables → `{imported:1, skipped:1, errors:[]}` (tasks imported; users skipped because a `users` table already existed in the DB from session R25 and mode defaulted to `append`)
+   590→  - Functions → `{imported:2, skipped:0, errors:[]}` (assign_task + notify_overdue_tasks)
+   591→  - Pipelines → `{imported:1, skipped:0, errors:[]}` (fetchSampleTasks)
+   592→- Verified the imported resources via GET endpoints:
+   593→  - `/api/tables` — `tasks` table appeared with 9 columns and 200 rows (see Stage Summary for why 200)
+   594→  - `/api/functions` — both imported functions appeared (assign_task http, notify_overdue_tasks schedule)
+   595→  - `/api/pipelines` — fetchSampleTasks appeared, target table resolved correctly by name
+   596→- Functional tests:
+   597→  1. Inserted a row into tasks table via `POST /api/tables/{id}/rows` with `{data:{id:99999,title:"Test AI Bridge task",...}}` → returned 201 with row id, version=1
+   598→  2. Ran `assign_task` via `POST /api/functions/{id}/run` with `{taskId:99999,userId:1}` → `{success:true, output:{success:true, message:"Task 99999 assigned to user 1"}, durationMs:11}`
+   599→  3. Ran `notify_overdue_tasks` (bonus) → returned 2 hardcoded overdue tasks (LLM-generated code doesn't actually query the DB), durationMs:11
+   600→  4. Previewed `fetchSampleTasks` via `POST /api/pipelines/{id}/preview` with `{}` → fetched 200 todos from jsonplaceholder.typicode.com in 46ms, columns mapped (id→id, userId→assignee, title→title, completed→status), previewRows returned correctly
+   601→- Cleanup:
+   602→  - Deleted the imported DB resources via DELETE routes (pipeline, both functions, tasks table) — all returned `{success:true}`
+   603→  - Deleted `test-ai-bridge.mjs` and the entire `ai-bridge-test/` directory
+   604→  - Verified no `tasks`/`assign_task`/`notify_overdue_tasks`/`fetchSampleTasks` resources remain in the DB
+   605→
+   606→Stage Summary:
+   607→- ✅ AI Bridge end-to-end flow tested successfully: LLM (z-ai-web-dev-sdk) generated valid SelfBase JSON configs → import APIs accepted them → resources appeared in GET endpoints → resources functioned correctly (row insert, function run, pipeline preview all returned success)
+   608→- ✅ z-ai-web-dev-sdk works out-of-the-box in Node ESM context with `import ZAI from 'z-ai-web-dev-sdk'` + `await ZAI.create()` — no API key or env config needed
+   609→- ✅ All four import routes (/api/import/{tables,functions,pipelines,scrapers}) accept the JSON shape documented in the prompt templates in data-transfer.tsx
+   610→- ✅ `targetTableName` in pipeline config is correctly resolved to `targetTableId` by the import route (verified by GET /api/pipelines showing the resolved table id)
+   611→- ✅ Pipeline preview endpoint correctly applies column mappings and returns previewRows without writing to DB
+   612→- ✅ Function execution sandbox works correctly — `module.exports.handler = async (input) => {...}` pattern is recognized and executed
+   613→- ⚠️ IMPORTANT FINDING #1 — Pipeline scheduler auto-runs imported active pipelines: The `mini-services/pipeline-scheduler` (port 3010) polls the DB every 5s for active pipelines. Because the imported `fetchSampleTasks` pipeline had `isActive: true`, the scheduler ran it ~1 minute after import — fetching 200 todos from JSONPlaceholder and writing them to the tasks table. This overwrote the 5 LLM-generated sample rows (via `onConflict:"update"` + `primaryKeyCols:["id"]`). AI Bridge users should be warned that importing an active pipeline triggers an immediate run; consider defaulting `isActive: false` on import or providing a "dry-run only" flag.
+   614→- ⚠️ IMPORTANT FINDING #2 — Column mappings don't support value transformations: The pipeline prompt template (in data-transfer.tsx) encourages the LLM to request value transformations like `completed=true → "done", completed=false → "todo"`, but the actual `columnMappings` schema only supports field renaming (`{src, target, type}`), not value mapping. The imported pipeline correctly mapped `completed` (boolean) → `status` (TEXT) but kept the raw boolean value, contradicting the prompt's intent. Either remove the transformation hint from the prompt template or add a `valueMap` field to the schema.
+   615→- ⚠️ IMPORTANT FINDING #3 — LLM naming convention mismatch: Task spec asked for `assignTask` and `notifyOverdueTasks` (camelCase) but the LLM followed the prompt template's "lowercase_underscores" rule and produced `assign_task` / `notify_overdue_tasks`. Not a bug — the template is explicit — but worth noting that the LLM strictly follows the template over user-supplied naming hints.
+   616→- ⚠️ IMPORTANT FINDING #4 — Silent skip on append mode: The `users` table import was silently skipped (returned `skipped:1`) because a `users` table already existed from session R25 and the default mode is `append`. No error is surfaced to the user; only the `skipped` count changes. Consider adding a warning or surfacing skipped names in the response.
+   617→- ℹ️ NOTE — The task description referenced `src/components/admin/ai-bridge.tsx` but that file doesn't exist. The AI Bridge feature is implemented in `src/components/admin/data-transfer.tsx`. The task description's file path should be updated.
+   618→- ℹ️ NOTE — The LLM-generated function code for `notify_overdue_tasks` is a stub that returns hardcoded sample data instead of actually querying the tasks table. This is because the function execution sandbox doesn't expose a DB client to function code. If real DB access is desired from serverless functions, the function runtime needs to expose a DB/API helper in the sandbox context.
+   619→

@@ -5,6 +5,10 @@ const PUBLIC_ROUTES = [
   '/api/auth/login',
   '/api/auth/setup',
   '/api/v1/auth/login',
+  // Google OAuth flow — all GET, all public
+  '/api/auth/google',           // initiate OAuth
+  '/api/auth/google/callback',  // handle OAuth callback
+  '/api/auth/google/status',    // check if Google auth is enabled
 ]
 
 // Routes only for admin sessions (not app tokens)

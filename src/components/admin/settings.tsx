@@ -38,6 +38,11 @@ import {
   Eye,
   EyeOff,
   LogOut,
+  KeyRound,
+  ExternalLink,
+  Sparkles,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import {
   Card,
@@ -143,6 +148,10 @@ const CONFIG_DEFAULTS: Record<string, string | number | boolean> = {
   'security.mfaRequiredForAdmin': false,
   'security.ipWhitelist': '',
   'security.corsOrigins': '*',
+  // Auth (Google OAuth)
+  'auth.google.enabled': false,
+  'auth.google.clientId': '',
+  'auth.google.clientSecret': '',
 }
 
 /* -------------------------------------------------------------------------- */
@@ -188,10 +197,17 @@ const securitySchema = z.object({
   'security.corsOrigins': z.string(),
 })
 
+const authSchema = z.object({
+  'auth.google.enabled': z.boolean(),
+  'auth.google.clientId': z.string(),
+  'auth.google.clientSecret': z.string(),
+})
+
 type GeneralValues = z.infer<typeof generalSchema>
 type AiValues = z.infer<typeof aiSchema>
 type StorageValues = z.infer<typeof storageSchema>
 type SecurityValues = z.infer<typeof securitySchema>
+type AuthValues = z.infer<typeof authSchema>
 
 /* -------------------------------------------------------------------------- */
 /*                            Helper: Config Fetch                            */
@@ -1511,6 +1527,362 @@ function AccountManagementCard() {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                                 Auth Tab                                    */
+/* -------------------------------------------------------------------------- */
+
+const AUTH_GOOGLE_KEYS = [
+  'auth.google.enabled',
+  'auth.google.clientId',
+  'auth.google.clientSecret',
+] as const
+
+function SetupStep({
+  n,
+  title,
+  children,
+}: {
+  n: number
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <li className="flex gap-3">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-400">
+        {n}
+      </span>
+      <div className="space-y-1 pt-0.5">
+        <p className="text-sm font-medium leading-tight">{title}</p>
+        <div className="text-xs leading-relaxed text-muted-foreground">{children}</div>
+      </div>
+    </li>
+  )
+}
+
+function AuthTab({
+  configMap,
+  loaded,
+  onSaved,
+}: {
+  configMap: Record<string, unknown>
+  loaded: boolean
+  onSaved: () => void
+}) {
+  const { toast } = useToast()
+  const form = useForm<AuthValues>({
+    resolver: zodResolver(authSchema),
+    values: deriveInitial<AuthValues>([...AUTH_GOOGLE_KEYS], configMap),
+    mode: 'onChange',
+  })
+
+  const [saving, setSaving] = useState(false)
+  const [showSecret, setShowSecret] = useState(false)
+  const [showGuide, setShowGuide] = useState(true)
+  const [copiedRedirect, setCopiedRedirect] = useState(false)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
+  // Local mirror of the credential fields so the AI Prompt card can
+  // show/hide reactively as the admin types. (We can't rely on
+  // form.watch / useWatch because the `values` prop on useForm —
+  // required so saved config reloads after onSaved() — interacts
+  // poorly with field-level watch subscriptions in this version of
+  // react-hook-form. Tracking locally via onChange is bulletproof.)
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const redirectUri = `${origin}/api/auth/google/callback`
+
+  const oauthConfigured = Boolean(clientId.trim() && clientSecret.trim())
+
+  // Sync local state when the saved config is loaded / reloaded.
+  useEffect(() => {
+    const id = (form.getValues('auth.google.clientId') as string | undefined) ?? ''
+    const secret = (form.getValues('auth.google.clientSecret') as string | undefined) ?? ''
+    setClientId(id)
+    setClientSecret(secret)
+  }, [configMap, form])
+
+  const onSubmit = async (values: AuthValues) => {
+    setSaving(true)
+    try {
+      const res = await saveConfig(values as unknown as Record<string, unknown>)
+      if (res.ok) {
+        toast({
+          title: 'Authentication settings saved',
+          description: `${res.saved} config keys updated`,
+        })
+        onSaved()
+      } else {
+        toast({ title: 'Some settings failed to save', variant: 'destructive' })
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const copyToClipboard = async (text: string, setter: (v: boolean) => void) => {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      setter(true)
+      setTimeout(() => setter(false), 2000)
+    } catch {
+      toast({ title: 'Failed to copy to clipboard', variant: 'destructive' })
+    }
+  }
+
+  if (!loaded) return <SettingsSkeleton />
+
+  const aiPrompt = `I'm building a [mobile app / web app] that uses SelfBase as the backend.
+SelfBase has Google OAuth enabled with redirect URI: ${redirectUri}
+The SelfBase backend is at: ${origin}
+
+Please generate the code for:
+1. A "Sign in with Google" button that redirects to: ${origin}/api/auth/google
+2. Handling the callback (the user will be redirected back to my app after successful login)
+3. Storing the session token from the cookie
+
+My app's platform is: [iOS / Android / Web / React Native]`
+
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        {/* Google OAuth Configuration Card */}
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              icon={KeyRound}
+              title="Google OAuth"
+              description="Configure Google OAuth 2.0 so client apps can offer 'Sign in with Google'."
+            />
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <ToggleField
+              control={form.control}
+              name="auth.google.enabled"
+              label="Enable Google OAuth"
+              description="Shows a 'Sign in with Google' button on the login page and accepts callbacks at /api/auth/google/callback."
+            />
+
+            <FormField
+              control={form.control}
+              name="auth.google.clientId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Client ID</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="xxxxxxxxxxxx.apps.googleusercontent.com"
+                      className="font-mono text-xs"
+                      autoComplete="off"
+                      {...field}
+                      onChange={(e) => {
+                        field.onChange(e)
+                        setClientId(e.target.value)
+                      }}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    OAuth client ID from Google Cloud Console &rarr; Credentials.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="auth.google.clientSecret"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Client Secret</FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <Input
+                        type={showSecret ? 'text' : 'password'}
+                        placeholder="GOCSPX-xxxxxxxxxxxxxxxxxxxx"
+                        className="pr-10 font-mono text-xs"
+                        autoComplete="off"
+                        {...field}
+                        onChange={(e) => {
+                          field.onChange(e)
+                          setClientSecret(e.target.value)
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSecret(s => !s)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label={showSecret ? 'Hide client secret' : 'Show client secret'}
+                        tabIndex={-1}
+                      >
+                        {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  </FormControl>
+                  <FormDescription>
+                    OAuth client secret. Keep this private &mdash; never expose it in client apps.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormItem>
+              <FormLabel>Redirect URI</FormLabel>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={redirectUri}
+                  className="flex-1 bg-muted/40 font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => copyToClipboard(redirectUri, setCopiedRedirect)}
+                  className="shrink-0 gap-1.5"
+                >
+                  {copiedRedirect ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  {copiedRedirect ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <FormDescription>
+                Add this exact URL to your Google OAuth client&apos;s &quot;Authorized redirect URIs&quot; list.
+              </FormDescription>
+            </FormItem>
+          </CardContent>
+        </Card>
+
+        {/* Setup Guide Card (collapsible) */}
+        <Card>
+          <CardHeader>
+            <button
+              type="button"
+              onClick={() => setShowGuide(s => !s)}
+              className="flex w-full items-start justify-between gap-3 text-left"
+              aria-expanded={showGuide}
+            >
+              <SectionHeader
+                icon={Sparkles}
+                title="Setup Guide"
+                description="Step-by-step instructions to obtain and install Google OAuth credentials."
+              />
+              <Badge
+                variant="outline"
+                className="mt-1 shrink-0 gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400"
+              >
+                {showGuide ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {showGuide ? 'Hide' : 'Show'}
+              </Badge>
+            </button>
+          </CardHeader>
+          {showGuide && (
+            <CardContent>
+              <ol className="space-y-4">
+                <SetupStep n={1} title="Open Google Cloud Console">
+                  Navigate to{' '}
+                  <a
+                    href="https://console.cloud.google.com/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-0.5 font-medium text-emerald-700 hover:underline dark:text-emerald-400"
+                  >
+                    Google Cloud Console
+                    <ExternalLink className="h-3 w-3" />
+                  </a>{' '}
+                  &rarr; <span className="font-medium">APIs &amp; Services</span> &rarr;{' '}
+                  <span className="font-medium">Credentials</span>.
+                </SetupStep>
+                <SetupStep n={2} title="Create credentials">
+                  Click <span className="font-medium">Create Credentials</span> &rarr;{' '}
+                  <span className="font-medium">OAuth client ID</span>. (You may first need to configure the
+                  OAuth consent screen under the same menu.)
+                </SetupStep>
+                <SetupStep n={3} title="Choose application type">
+                  Select <span className="font-medium">Web application</span> and give it a recognizable name
+                  (e.g.{' '}
+                  <span className="font-mono text-emerald-700 dark:text-emerald-400">SelfBase</span>).
+                </SetupStep>
+                <SetupStep n={4} title="Add authorized redirect URI">
+                  Under <span className="font-medium">Authorized redirect URIs</span>, click &quot;Add URI&quot;
+                  and paste the Redirect URI shown above:
+                  <pre className="mt-2 overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs text-emerald-700 dark:text-emerald-400">{redirectUri || 'https://your-selfbase-host/api/auth/google/callback'}</pre>
+                </SetupStep>
+                <SetupStep n={5} title="Copy your credentials">
+                  Click <span className="font-medium">Create</span>, then copy the{' '}
+                  <span className="font-medium">Client ID</span> and{' '}
+                  <span className="font-medium">Client Secret</span> shown on the resulting page.
+                </SetupStep>
+                <SetupStep n={6} title="Paste into SelfBase">
+                  Paste the values into the <span className="font-medium">Client ID</span> and{' '}
+                  <span className="font-medium">Client Secret</span> fields at the top of this tab.
+                </SetupStep>
+                <SetupStep n={7} title="Enable &amp; save">
+                  Turn on <span className="font-medium">Enable Google OAuth</span>, then click{' '}
+                  <span className="font-medium">Save Changes</span> in the bar at the bottom of this page.
+                </SetupStep>
+                <SetupStep n={8} title="You&apos;re done!">
+                  The <span className="font-medium">Sign in with Google</span> button will appear on the login
+                  page. Client apps can start Google login by redirecting users to{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-emerald-700 dark:text-emerald-400">{origin || 'https://your-selfbase-host'}/api/auth/google</code>.
+                </SetupStep>
+              </ol>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* AI Prompt Generator Card (only after OAuth is configured) */}
+        {oauthConfigured && (
+          <Card className="border-emerald-200/60 dark:border-emerald-800/40">
+            <CardHeader>
+              <SectionHeader
+                icon={Sparkles}
+                title="AI Prompt — Generate Client App Code"
+                description="Paste this prompt into ChatGPT, Gemini, or Claude to scaffold Google OAuth client code for your app."
+              />
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-4 text-xs leading-relaxed text-foreground">{aiPrompt}</pre>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-muted-foreground">
+                  Tip: replace the bracketed placeholders with your app&apos;s details before sending.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => copyToClipboard(aiPrompt, setCopiedPrompt)}
+                  className="shrink-0 gap-1.5 border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-800 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                >
+                  {copiedPrompt ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  {copiedPrompt ? 'Copied!' : 'Copy Prompt'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <StickySaveBar
+          onSave={form.handleSubmit(onSubmit)}
+          onReset={() => form.reset()}
+          saving={saving}
+          dirty={form.formState.isDirty}
+          dirtyCount={Object.keys(form.formState.dirtyFields).length}
+        />
+      </form>
+    </Form>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
 /*                              Webhooks Tab                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -2528,6 +2900,13 @@ export function SettingsView() {
               Security
             </TabsTrigger>
             <TabsTrigger
+              value="auth"
+              className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              Authentication
+            </TabsTrigger>
+            <TabsTrigger
               value="webhooks"
               className="data-[state=active]:bg-gradient-to-br data-[state=active]:from-emerald-500 data-[state=active]:to-teal-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
@@ -2555,6 +2934,7 @@ export function SettingsView() {
             {activeTab === 'ai' && <AiTab configMap={configMap} loaded={loaded} onSaved={load} />}
             {activeTab === 'storage' && <StorageTab configMap={configMap} loaded={loaded} onSaved={load} />}
             {activeTab === 'security' && <SecurityTab configMap={configMap} loaded={loaded} onSaved={load} />}
+            {activeTab === 'auth' && <AuthTab configMap={configMap} loaded={loaded} onSaved={load} />}
             {activeTab === 'webhooks' && <WebhooksTab />}
             {activeTab === 'deployment' && <DeploymentTab configMap={configMap} />}
           </motion.div>
